@@ -1,9 +1,9 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useState } from "react";
 
-import type { ClientListItem } from "@/app/(dashboard)/clients/page";
+import type { ClientListItem } from "@/types/clients";
 
 type FilterValue = "all" | "active" | "inactive";
 
@@ -139,3 +139,4 @@ export default function ClientList({ clients }: ClientListProps) {
     </div>
   );
 }
+
