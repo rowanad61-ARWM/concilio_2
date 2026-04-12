@@ -2,7 +2,7 @@ import { notFound } from "next/navigation"
 
 import ClientRecord from "@/components/clients/ClientRecord"
 import { db } from "@/lib/db"
-import type { ClientDetail } from "@/types/client-record"
+import type { ClientDetail, TimelineNote } from "@/types/client-record"
 
 export default async function ClientRecordPage({
   params,
@@ -11,13 +11,24 @@ export default async function ClientRecordPage({
 }) {
   const { id } = await params
 
-  const party = await db.party.findUnique({
-    where: { id },
-    include: {
-      person: true,
-      contact_method: true,
-    },
-  })
+  const [party, fileNotes] = await Promise.all([
+    db.party.findUnique({
+      where: { id },
+      include: {
+        person: true,
+        contact_method: true,
+      },
+    }),
+    db.file_note.findMany({
+      where: {
+        party_id: id,
+      },
+      orderBy: {
+        created_at: "desc",
+      },
+      take: 50,
+    }),
+  ])
 
   if (!party) {
     notFound()
@@ -50,5 +61,12 @@ export default async function ClientRecordPage({
     })),
   }
 
-  return <ClientRecord client={client} />
+  const notes: TimelineNote[] = fileNotes.map((note) => ({
+    id: note.id,
+    noteType: note.note_type ?? "internal",
+    text: note.text,
+    createdAt: note.created_at.toISOString(),
+  }))
+
+  return <ClientRecord client={client} notes={notes} />
 }

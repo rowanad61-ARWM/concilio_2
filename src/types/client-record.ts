@@ -1,3 +1,10 @@
+export type TimelineNote = {
+  id: string
+  noteType: string
+  text: string
+  createdAt: string
+}
+
 export type ClientDetail = {
   id: string
   displayName: string

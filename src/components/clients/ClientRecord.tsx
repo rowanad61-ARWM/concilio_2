@@ -3,22 +3,15 @@
 import Link from "next/link"
 import { useState } from "react"
 
-import type { ClientDetail } from "@/types/client-record"
+import type { ClientDetail, TimelineNote } from "@/types/client-record"
 
 type ClientRecordProps = {
   client: ClientDetail
+  notes: TimelineNote[]
 }
 
 type TimelineFilter = "all" | "emails" | "notes" | "docs"
 type NoteCategory = "phone_call" | "meeting" | "internal" | "action_required" | "fyi"
-
-type TimelineNote = {
-  id: string
-  category: NoteCategory
-  body: string
-  author: string
-  timestamp: string
-}
 
 const timelineFilters: { label: string; value: TimelineFilter }[] = [
   { label: "All", value: "all" },
@@ -47,6 +40,20 @@ function formatDate(value: string | null) {
   }).format(new Date(value))
 }
 
+function formatTimelineTimestamp(value: string) {
+  if (value === "just-now") {
+    return "Just now"
+  }
+
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value))
+}
+
 function getStatusClasses(status: string) {
   switch (status.toLowerCase()) {
     case "active":
@@ -56,19 +63,11 @@ function getStatusClasses(status: string) {
   }
 }
 
-function formatCategory(category: NoteCategory) {
-  switch (category) {
-    case "phone_call":
-      return "Phone Call"
-    case "meeting":
-      return "Meeting"
-    case "action_required":
-      return "Action Required"
-    case "fyi":
-      return "FYI"
-    default:
-      return "Internal"
-  }
+function formatCategory(category: string) {
+  return category
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
 }
 
 function DetailField({
@@ -88,8 +87,8 @@ function DetailField({
 
 function NoteIcon() {
   return (
-    <div className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-[#FEF0E7] text-[#C45F1A]">
-      <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4">
+    <div className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-[#FEF0E7] text-[#C45F1A]">
+      <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5">
         <path
           d="M5 2.5h4l2 2v7A1.5 1.5 0 0 1 9.5 13h-4A1.5 1.5 0 0 1 4 11.5v-7A1.5 1.5 0 0 1 5.5 3H9m0-.5V5h2.5M6 8h4M6 10.5h3"
           stroke="currentColor"
@@ -102,19 +101,19 @@ function NoteIcon() {
   )
 }
 
-export default function ClientRecord({ client }: ClientRecordProps) {
+export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [activeFilter, setActiveFilter] = useState<TimelineFilter>("all")
   const [isNotePanelOpen, setIsNotePanelOpen] = useState(false)
   const [noteCategory, setNoteCategory] = useState<NoteCategory>("internal")
   const [noteBody, setNoteBody] = useState("")
   const [isSaving, setIsSaving] = useState(false)
-  const [notes, setNotes] = useState<TimelineNote[]>([])
+  const [localNotes, setLocalNotes] = useState(notes)
 
   const fullLegalName = client.person
     ? `${client.person.legalGivenName} ${client.person.legalFamilyName}`.trim()
     : null
 
-  const timelineNotes = activeFilter === "emails" || activeFilter === "docs" ? [] : notes
+  const visibleNotes = activeFilter === "all" || activeFilter === "notes" ? localNotes : []
 
   async function handleSaveNote() {
     if (!noteBody.trim()) {
@@ -142,13 +141,12 @@ export default function ClientRecord({ client }: ClientRecordProps) {
 
       const createdNote = await response.json()
 
-      setNotes((currentNotes) => [
+      setLocalNotes((currentNotes) => [
         {
           id: createdNote.id,
-          category: createdNote.note_type as NoteCategory,
-          body: createdNote.text,
-          author: "Andrew Rowan",
-          timestamp: "Just now",
+          noteType: createdNote.note_type,
+          text: createdNote.text,
+          createdAt: "just-now",
         },
         ...currentNotes,
       ])
@@ -338,28 +336,26 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </div>
           ) : null}
 
-          {timelineNotes.length > 0 ? (
-            <div className="mt-[14px] space-y-3">
-              {timelineNotes.map((note) => (
+          {visibleNotes.length > 0 ? (
+            <div className="mt-[14px]">
+              {visibleNotes.map((note) => (
                 <div
                   key={note.id}
-                  className="rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white p-[14px]"
+                  className="mb-2 rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-[10px]"
                 >
-                  <div className="flex gap-3">
-                    <NoteIcon />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-[12px] font-medium text-[#113238]">
-                          {formatCategory(note.category)}
-                        </p>
-                        <p className="text-[11px] text-[#9ca3af]">{note.author}</p>
-                        <p className="text-[11px] text-[#9ca3af]">{note.timestamp}</p>
-                      </div>
-                      <p className="mt-2 whitespace-pre-wrap text-[12px] text-[#113238]">
-                        {note.body}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <NoteIcon />
+                      <p className="text-[12px] font-medium text-[#113238]">
+                        {formatCategory(note.noteType)}
                       </p>
+                      <p className="text-[11px] text-[#9ca3af]">Andrew Rowan</p>
                     </div>
+                    <p className="shrink-0 text-right text-[11px] text-[#9ca3af]">
+                      {formatTimelineTimestamp(note.createdAt)}
+                    </p>
                   </div>
+                  <p className="mt-[6px] text-[12px] leading-[1.6] text-[#374151]">{note.text}</p>
                 </div>
               ))}
             </div>
