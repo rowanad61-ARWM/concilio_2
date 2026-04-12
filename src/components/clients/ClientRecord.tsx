@@ -231,9 +231,11 @@ function DetailField({
   value: string | null
 }) {
   return (
-    <div className="space-y-1">
-      <p className="text-[11px] text-[#9ca3af]">{label}</p>
-      <p className="text-[13px] text-[#113238]">{value && value.trim() ? value : "Not provided"}</p>
+    <div>
+      <p className="mb-[2px] text-[10px] text-[#9ca3af]">{label}</p>
+      <p className="text-[13px] leading-[1.5] text-[#113238]">
+        {value && value.trim() ? value : "Not provided"}
+      </p>
     </div>
   )
 }
@@ -247,7 +249,7 @@ function EditField({
 }) {
   return (
     <label className="block space-y-1">
-      <span className="text-[11px] text-[#9ca3af]">{label}</span>
+      <span className="mb-[2px] block text-[10px] text-[#9ca3af]">{label}</span>
       {children}
     </label>
   )
@@ -615,10 +617,10 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-[230px] overflow-y-auto border-r-[0.5px] border-[#e5e7eb] bg-white p-[14px]">
-          <section className="space-y-4">
-            <h2 className="text-[12px] font-medium text-[#113238]">Contact</h2>
-            <div className="space-y-3">
+        <aside className="min-h-full w-[250px] overflow-y-auto border-r-[0.5px] border-[#e5e7eb] bg-white p-4">
+          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
+            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Contact</h2>
+            <div className="space-y-[10px]">
               {isEditing ? (
                 <>
                   <EditField label="Email">
@@ -658,10 +660,10 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             </div>
           </section>
 
-          <section className="mt-6 space-y-4">
-            <h2 className="text-[12px] font-medium text-[#113238]">Address</h2>
+          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
+            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Address</h2>
             {isEditing ? (
-              <div className="space-y-3">
+              <div className="space-y-[10px]">
                 <EditField label="Line 1">
                   <input
                     value={editForm.addressLine1}
@@ -708,10 +710,10 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 </EditField>
               </div>
             ) : residentialAddressLines.length > 0 ? (
-              <div className="space-y-3">
+              <div className="space-y-[10px]">
                 <div className="space-y-1">
                   {residentialAddressLines.map((line, index) => (
-                    <p key={`${line}-${index}`} className="text-[13px] text-[#113238]">
+                    <p key={`${line}-${index}`} className="text-[13px] leading-[1.6] text-[#113238]">
                       {line}
                     </p>
                   ))}
@@ -719,9 +721,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
                 {showPostalAddress ? (
                   <div className="space-y-1">
-                    <p className="text-[11px] text-[#9ca3af]">Postal</p>
+                    <p className="text-[10px] text-[#9ca3af]">Postal</p>
                     {postalAddressLines.map((line, index) => (
-                      <p key={`${line}-${index}`} className="text-[13px] text-[#113238]">
+                      <p key={`${line}-${index}`} className="text-[13px] leading-[1.6] text-[#113238]">
                         {line}
                       </p>
                     ))}
@@ -733,10 +735,10 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             )}
           </section>
 
-          <section className="mt-6 space-y-4">
-            <h2 className="text-[12px] font-medium text-[#113238]">Household</h2>
+          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
+            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Household</h2>
             {clientData.household ? (
-              <div className="space-y-3">
+              <div className="space-y-[10px]">
                 <p className="text-[12px] font-medium text-[#113238]">{clientData.household.name}</p>
                 <p className="text-[11px] text-[#9ca3af]">{formatHouseholdRole(clientData.household.role)}</p>
                 {otherHouseholdMembers.length > 0 ? (
@@ -754,7 +756,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 ) : null}
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-[10px]">
                 <p className="text-[11px] text-[#9ca3af]">No household</p>
                 <button
                   type="button"
@@ -784,9 +786,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             )}
           </section>
 
-          <section className="mt-6 space-y-4">
-            <h2 className="text-[12px] font-medium text-[#113238]">Personal</h2>
-            <div className="space-y-3">
+          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
+            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Personal</h2>
+            <div className="space-y-[10px]">
               {isEditing ? (
                 <>
                   <EditField label="First name">
@@ -842,14 +844,15 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             </div>
           </section>
 
-          <section className="mt-6 space-y-4">
-            <h2 className="text-[12px] font-medium text-[#113238]">Identity</h2>
+          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
+            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Identity</h2>
             <p className="text-[11px] text-[#9ca3af]">No ID documents on file</p>
           </section>
 
-          <section className="mt-6 space-y-4">
-            <h2 className="text-[12px] font-medium text-[#113238]">Service</h2>
-            <div className="relative space-y-1">
+          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
+            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Service</h2>
+            <div className="space-y-[10px]">
+              <div className="relative space-y-[6px]">
               <p className="text-[11px] text-[#9ca3af]">Lifecycle stage</p>
               <button
                 type="button"
@@ -885,61 +888,62 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                   })}
                 </div>
               ) : null}
-            </div>
-            <div className="relative space-y-1">
-              <p className="text-[11px] text-[#9ca3af]">Service tier</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsServiceTierMenuOpen((current) => !current)
-                  setIsLifecycleMenuOpen(false)
-                }}
-                className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[6px] text-left"
-              >
-                {serviceTier ? (
-                  <span
-                    className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${getClassificationClasses(serviceTier)}`}
-                  >
-                    {formatClassificationValue(serviceTier)}
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-[#9ca3af]">Not set</span>
-                )}
-              </button>
+              </div>
+              <div className="relative space-y-[6px]">
+                <p className="text-[11px] text-[#9ca3af]">Service tier</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsServiceTierMenuOpen((current) => !current)
+                    setIsLifecycleMenuOpen(false)
+                  }}
+                  className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[6px] text-left"
+                >
+                  {serviceTier ? (
+                    <span
+                      className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${getClassificationClasses(serviceTier)}`}
+                    >
+                      {formatClassificationValue(serviceTier)}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-[#9ca3af]">Not set</span>
+                  )}
+                </button>
 
-              {isServiceTierMenuOpen ? (
-                <div className="absolute left-0 top-full z-10 mt-1 min-w-[160px] rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
-                  {serviceTierOptions.map((option) => {
-                    const isSelected = option.value === serviceTier
+                {isServiceTierMenuOpen ? (
+                  <div className="absolute left-0 top-full z-10 mt-1 min-w-[160px] rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+                    {serviceTierOptions.map((option) => {
+                      const isSelected = option.value === serviceTier
 
-                    return (
-                      <button
-                        key={option.value ?? "none"}
-                        type="button"
-                        onClick={() => void handleServiceTierChange(option.value)}
-                        disabled={isUpdatingServiceTier}
-                        className={`block w-full cursor-pointer px-3 py-2 text-left text-[12px] ${
-                          isSelected
-                            ? "bg-[#113238] text-white"
-                            : "text-[#113238] hover:bg-[#F5F7FA]"
-                        }`}
-                      >
-                        {option.value ? (
-                          <span
-                            className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${
-                              isSelected ? "bg-[#113238] text-white" : getClassificationClasses(option.value)
-                            }`}
-                          >
-                            {option.label}
-                          </span>
-                        ) : (
-                          option.label
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : null}
+                      return (
+                        <button
+                          key={option.value ?? "none"}
+                          type="button"
+                          onClick={() => void handleServiceTierChange(option.value)}
+                          disabled={isUpdatingServiceTier}
+                          className={`block w-full cursor-pointer px-3 py-2 text-left text-[12px] ${
+                            isSelected
+                              ? "bg-[#113238] text-white"
+                              : "text-[#113238] hover:bg-[#F5F7FA]"
+                          }`}
+                        >
+                          {option.value ? (
+                            <span
+                              className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${
+                                isSelected ? "bg-[#113238] text-white" : getClassificationClasses(option.value)
+                              }`}
+                            >
+                              {option.label}
+                            </span>
+                          ) : (
+                            option.label
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </div>
             </div>
           </section>
 
