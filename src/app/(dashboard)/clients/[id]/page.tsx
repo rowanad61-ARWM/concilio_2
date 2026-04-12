@@ -2,8 +2,13 @@ import { notFound } from "next/navigation"
 
 import ClientRecord from "@/components/clients/ClientRecord"
 import { db } from "@/lib/db"
+import type { Prisma } from "@prisma/client"
 import type { ClientAddress } from "@/types/client-record"
 import type { ClientDetail, TimelineNote } from "@/types/client-record"
+
+type HouseholdMemberWithParty = Prisma.household_memberGetPayload<{
+  include: { party: true }
+}>
 
 function mapAddress(value: unknown): ClientAddress | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -87,7 +92,7 @@ export default async function ClientRecordPage({
           id: householdMembership.household_group.id,
           name: householdMembership.household_group.household_name,
           role: householdMembership.role_in_household,
-          members: householdMembers.map((member) => ({
+          members: householdMembers.map((member: HouseholdMemberWithParty) => ({
             id: member.party.id,
             displayName: member.party.display_name,
             role: member.role_in_household,
