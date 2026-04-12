@@ -41,15 +41,51 @@ export default async function ClientsPage() {
     }
   })
 
-  const prospectCount = parties.filter((party) => {
-    const lifecycleStage = party.client_classification?.lifecycle_stage
-    return (
-      lifecycleStage === "prospect" ||
-      lifecycleStage === "engagement" ||
-      lifecycleStage === "advising" ||
-      lifecycleStage === "implementation"
-    )
-  }).length
+  const householdAwareTotalHouseholds = new Set<string>()
+  const activeHouseholds = new Set<string>()
+  const prospectHouseholds = new Set<string>()
+  const prospectStages = new Set(["prospect", "engagement", "advising", "implementation"])
 
-  return <ClientList clients={clients} prospectCount={prospectCount} />
+  let householdAwareTotalUngrouped = 0
+  let activeUngrouped = 0
+  let prospectUngrouped = 0
+
+  for (const party of parties) {
+    const householdId = party.household_member[0]?.household_id ?? null
+
+    if (householdId) {
+      householdAwareTotalHouseholds.add(householdId)
+    } else {
+      householdAwareTotalUngrouped += 1
+    }
+
+    if (party.status === "active") {
+      if (householdId) {
+        activeHouseholds.add(householdId)
+      } else {
+        activeUngrouped += 1
+      }
+    }
+
+    if (prospectStages.has(party.client_classification?.lifecycle_stage ?? "")) {
+      if (householdId) {
+        prospectHouseholds.add(householdId)
+      } else {
+        prospectUngrouped += 1
+      }
+    }
+  }
+
+  const householdAwareTotal = householdAwareTotalHouseholds.size + householdAwareTotalUngrouped
+  const householdAwareActive = activeHouseholds.size + activeUngrouped
+  const prospectCount = prospectHouseholds.size + prospectUngrouped
+
+  return (
+    <ClientList
+      clients={clients}
+      prospectCount={prospectCount}
+      householdAwareTotal={householdAwareTotal}
+      householdAwareActive={householdAwareActive}
+    />
+  )
 }

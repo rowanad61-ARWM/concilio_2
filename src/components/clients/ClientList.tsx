@@ -11,6 +11,8 @@ type FilterValue = "all" | "active" | "inactive" | "lapsed";
 type ClientListProps = {
   clients: ClientListItem[];
   prospectCount: number;
+  householdAwareTotal: number;
+  householdAwareActive: number;
 };
 
 const filters: { label: string; value: FilterValue }[] = [
@@ -83,7 +85,12 @@ function getClassificationClasses(value: string) {
   }
 }
 
-export default function ClientList({ clients, prospectCount }: ClientListProps) {
+export default function ClientList({
+  clients,
+  prospectCount,
+  householdAwareTotal,
+  householdAwareActive,
+}: ClientListProps) {
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState<FilterValue>("all");
 
@@ -93,8 +100,6 @@ export default function ClientList({ clients, prospectCount }: ClientListProps) 
       : activeFilter === "lapsed"
         ? clients.filter((client) => client.classification?.lifecycleStage?.toLowerCase() === "lapsed")
         : clients.filter((client) => client.status.toLowerCase() === activeFilter);
-
-  const activeCount = clients.filter((client) => client.status.toLowerCase() === "active").length;
 
   return (
     <div className="p-6">
@@ -106,11 +111,11 @@ export default function ClientList({ clients, prospectCount }: ClientListProps) 
       <div className="mb-[18px] grid grid-cols-4 gap-[10px]">
         <div className="rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-3">
           <p className="text-[10px] uppercase tracking-[0.08em] text-[#6b7280]">Total Clients</p>
-          <p className="mt-2 text-[21px] font-semibold text-[#113238]">{clients.length}</p>
+          <p className="mt-2 text-[21px] font-semibold text-[#113238]">{householdAwareTotal}</p>
         </div>
         <div className="rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-3">
           <p className="text-[10px] uppercase tracking-[0.08em] text-[#6b7280]">Active</p>
-          <p className="mt-2 text-[21px] font-semibold text-[#113238]">{activeCount}</p>
+          <p className="mt-2 text-[21px] font-semibold text-[#113238]">{householdAwareActive}</p>
         </div>
         <div className="rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-3">
           <p className="text-[10px] uppercase tracking-[0.08em] text-[#6b7280]">Prospects</p>

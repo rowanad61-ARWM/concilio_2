@@ -3,6 +3,7 @@
 type DashboardProps = {
   totalCount: number
   activeCount: number
+  prospectCount: number
   workflowCount: number
 }
 
@@ -70,6 +71,7 @@ function EmptyCardBody({
 export default function Dashboard({
   totalCount,
   activeCount,
+  prospectCount,
   workflowCount,
 }: DashboardProps) {
   const today = formatToday()
@@ -90,9 +92,10 @@ export default function Dashboard({
         </div>
       </div>
 
-      <div className="mb-[18px] grid grid-cols-5 gap-[10px]">
+      <div className="mb-[18px] grid grid-cols-6 gap-[10px]">
         <StatCard label="Active Clients" value={activeCount} accentClassName="border-l-[2.5px] border-l-[#BFE3D3]" />
         <StatCard label="Total Contacts" value={totalCount} />
+        <StatCard label="Prospects" value={prospectCount} />
         <StatCard
           label="Active Alerts"
           value={0}

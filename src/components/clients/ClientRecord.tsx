@@ -13,6 +13,7 @@ type ClientRecordProps = {
 type TimelineFilter = "all" | "emails" | "notes" | "docs"
 type NoteCategory = "general" | "meeting" | "phone_call" | "email" | "compliance" | "other"
 type LifecycleStage = "prospect" | "engagement" | "advising" | "implementation" | "lapsed"
+type ServiceTier = "transaction" | "cashflow_manager" | "wealth_manager" | "wealth_manager_plus"
 
 type EditFormState = {
   firstName: string
@@ -48,6 +49,13 @@ const lifecycleStageOptions: { label: string; value: LifecycleStage }[] = [
   { label: "Advising", value: "advising" },
   { label: "Implementation", value: "implementation" },
   { label: "Lapsed", value: "lapsed" },
+]
+const serviceTierOptions: { label: string; value: ServiceTier | null }[] = [
+  { label: "None", value: null },
+  { label: "Transaction", value: "transaction" },
+  { label: "Cashflow Manager", value: "cashflow_manager" },
+  { label: "Wealth Manager", value: "wealth_manager" },
+  { label: "Wealth Manager+", value: "wealth_manager_plus" },
 ]
 
 const inputClassName =
@@ -123,6 +131,21 @@ function formatHouseholdRole(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
+function getClassificationClasses(value: string) {
+  switch (value) {
+    case "wealth_manager_plus":
+      return "bg-[#FEF0E7] text-[#C45F1A]"
+    case "wealth_manager":
+      return "bg-[#EAF0F1] text-[#113238]"
+    case "cashflow_manager":
+      return "bg-[#E6F0EC] text-[#0F5C3A]"
+    case "transaction":
+      return "bg-[#E6F1FB] text-[#185FA5]"
+    default:
+      return "bg-[#F3F4F6] text-[#6B7280]"
+  }
+}
+
 function DetailField({
   label,
   value,
@@ -185,6 +208,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [isCreatingHousehold, setIsCreatingHousehold] = useState(false)
   const [isLifecycleMenuOpen, setIsLifecycleMenuOpen] = useState(false)
   const [isUpdatingLifecycle, setIsUpdatingLifecycle] = useState(false)
+  const [isServiceTierMenuOpen, setIsServiceTierMenuOpen] = useState(false)
+  const [isUpdatingServiceTier, setIsUpdatingServiceTier] = useState(false)
 
   const fullLegalName = clientData.person
     ? `${clientData.person.legalGivenName} ${clientData.person.legalFamilyName}`.trim()
@@ -193,6 +218,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const visibleNotes = activeFilter === "all" || activeFilter === "notes" ? localNotes : []
   const otherHouseholdMembers = clientData.household?.members.filter((member) => member.id !== clientData.id) ?? []
   const lifecycleStage = clientData.classification?.lifecycleStage ?? null
+  const serviceTier = clientData.classification?.serviceTier ?? null
 
   function updateEditField<Key extends keyof EditFormState>(key: Key, value: EditFormState[Key]) {
     setEditForm((current) => ({ ...current, [key]: value }))
@@ -380,6 +406,39 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       console.error(error)
     } finally {
       setIsUpdatingLifecycle(false)
+    }
+  }
+
+  async function handleServiceTierChange(nextTier: ServiceTier | null) {
+    setIsUpdatingServiceTier(true)
+
+    try {
+      const response = await fetch(`/api/clients/${clientData.id}/classification`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ serviceTier: nextTier }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to update service tier")
+      }
+
+      const updated = await response.json()
+
+      setClientData((current) => ({
+        ...current,
+        classification: {
+          serviceTier: updated.service_tier ?? null,
+          lifecycleStage: updated.lifecycle_stage ?? current.classification?.lifecycleStage ?? null,
+        },
+      }))
+      setIsServiceTierMenuOpen(false)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsUpdatingServiceTier(false)
     }
   }
 
@@ -612,17 +671,14 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
           <section className="mt-6 space-y-4">
             <h2 className="text-[11px] font-medium text-[#113238]">Service</h2>
-            {clientData.classification?.serviceTier ? (
-              <DetailField
-                label="Service tier"
-                value={formatClassificationValue(clientData.classification.serviceTier)}
-              />
-            ) : null}
             <div className="relative space-y-1">
               <p className="text-[10px] text-[#9ca3af]">Lifecycle stage</p>
               <button
                 type="button"
-                onClick={() => setIsLifecycleMenuOpen((current) => !current)}
+                onClick={() => {
+                  setIsLifecycleMenuOpen((current) => !current)
+                  setIsServiceTierMenuOpen(false)
+                }}
                 className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[6px] text-[12px] text-[#113238]"
               >
                 {lifecycleStage ? formatClassificationValue(lifecycleStage) : "Not set"}
@@ -646,6 +702,61 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                         }`}
                       >
                         {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </div>
+            <div className="relative space-y-1">
+              <p className="text-[10px] text-[#9ca3af]">Service tier</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsServiceTierMenuOpen((current) => !current)
+                  setIsLifecycleMenuOpen(false)
+                }}
+                className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[6px] text-left"
+              >
+                {serviceTier ? (
+                  <span
+                    className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${getClassificationClasses(serviceTier)}`}
+                  >
+                    {formatClassificationValue(serviceTier)}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-[#9ca3af]">Not set</span>
+                )}
+              </button>
+
+              {isServiceTierMenuOpen ? (
+                <div className="absolute left-0 top-full z-10 mt-1 min-w-[160px] rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+                  {serviceTierOptions.map((option) => {
+                    const isSelected = option.value === serviceTier
+
+                    return (
+                      <button
+                        key={option.value ?? "none"}
+                        type="button"
+                        onClick={() => void handleServiceTierChange(option.value)}
+                        disabled={isUpdatingServiceTier}
+                        className={`block w-full cursor-pointer px-3 py-2 text-left text-[12px] ${
+                          isSelected
+                            ? "bg-[#113238] text-white"
+                            : "text-[#113238] hover:bg-[#F5F7FA]"
+                        }`}
+                      >
+                        {option.value ? (
+                          <span
+                            className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${
+                              isSelected ? "bg-[#113238] text-white" : getClassificationClasses(option.value)
+                            }`}
+                          >
+                            {option.label}
+                          </span>
+                        ) : (
+                          option.label
+                        )}
                       </button>
                     )
                   })}
