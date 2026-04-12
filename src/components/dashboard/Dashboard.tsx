@@ -33,8 +33,8 @@ function StatCard({
         accentClassName ?? ""
       }`}
     >
-      <p className="text-[10px] uppercase tracking-[0.4px] text-[#6b7280]">{label}</p>
-      <p className="mt-2 text-[20px] font-semibold" style={{ color: valueColor }}>
+      <p className="text-[11px] uppercase tracking-[0.4px] text-[#6b7280]">{label}</p>
+      <p className="mt-2 text-[22px] font-semibold" style={{ color: valueColor }}>
         {value}
       </p>
     </div>
@@ -50,7 +50,7 @@ function CardHeader({
 }) {
   return (
     <div className="flex items-center justify-between border-b-[0.5px] border-[#e5e7eb] px-[14px] py-[11px]">
-      <h2 className="text-[12px] font-semibold text-[#113238]">{title}</h2>
+      <h2 className="text-[13px] font-semibold text-[#113238]">{title}</h2>
       <button type="button" className="text-[11px] text-[#FF8C42]">
         {action}
       </button>
@@ -80,10 +80,10 @@ export default function Dashboard({
     <div className="p-6">
       <div className="mb-[18px] flex items-center justify-between">
         <div>
-          <h1 className="text-[17px] font-semibold tracking-[-0.3px] text-[#113238]">
+          <h1 className="text-[18px] font-semibold tracking-[-0.3px] text-[#113238]">
             Good morning, Andrew
           </h1>
-          <p className="mt-[2px] text-[12px] text-[#6b7280]">
+          <p className="mt-[2px] text-[13px] text-[#6b7280]">
             Here is what is happening at ARWM today
           </p>
         </div>
@@ -116,7 +116,7 @@ export default function Dashboard({
           <CardHeader title="Today's agenda" action="Open Outlook →" />
           <EmptyCardBody
             text="Connect Outlook to see today's meetings"
-            className="px-[14px] py-3 text-center text-[12px] text-[#9ca3af]"
+            className="px-[14px] py-3 text-center text-[13px] text-[#9ca3af]"
           />
         </div>
 
@@ -124,7 +124,7 @@ export default function Dashboard({
           <CardHeader title="Active alerts" action="View all →" />
           <EmptyCardBody
             text="No active alerts"
-            className="px-[14px] py-6 text-center text-[12px] text-[#9ca3af]"
+            className="px-[14px] py-6 text-center text-[13px] text-[#9ca3af]"
           />
         </div>
       </div>
@@ -134,7 +134,7 @@ export default function Dashboard({
           <CardHeader title="Reviews due — next 30 days" action="View all →" />
           <EmptyCardBody
             text="No reviews due"
-            className="px-[14px] py-6 text-center text-[12px] text-[#9ca3af]"
+            className="px-[14px] py-6 text-center text-[13px] text-[#9ca3af]"
           />
         </div>
 
@@ -142,7 +142,7 @@ export default function Dashboard({
           <CardHeader title="Recent activity" action="All activity →" />
           <EmptyCardBody
             text="No recent activity"
-            className="px-[14px] py-6 text-center text-[12px] text-[#9ca3af]"
+            className="px-[14px] py-6 text-center text-[13px] text-[#9ca3af]"
           />
         </div>
       </div>

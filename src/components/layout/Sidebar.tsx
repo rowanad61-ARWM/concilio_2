@@ -165,7 +165,7 @@ export default function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-[9px] rounded-[7px] px-[9px] py-[7px] text-[12px] ${
+              className={`flex items-center gap-[9px] rounded-[7px] px-[9px] py-[7px] text-[13px] ${
                 isActive
                   ? "bg-[rgba(191,227,211,0.11)] font-medium text-[#BFE3D3]"
                   : "text-[rgba(191,227,211,0.55)]"
@@ -174,7 +174,7 @@ export default function Sidebar() {
               <span className="shrink-0">{item.icon}</span>
               <span className="flex-1">{item.label}</span>
               {item.badge ? (
-                <span className="rounded-[10px] bg-[#FF8C42] px-[6px] py-[1px] text-[10px] text-white">
+                <span className="rounded-[10px] bg-[#FF8C42] px-[6px] py-[1px] text-[11px] text-white">
                   {item.badge}
                 </span>
               ) : null}
@@ -188,8 +188,8 @@ export default function Sidebar() {
           AR
         </div>
         <div className="min-w-0">
-          <p className="text-[12px] font-medium text-[#BFE3D3]">Andrew Rowan</p>
-          <p className="text-[10px] text-[rgba(191,227,211,0.4)]">Owner · Adviser</p>
+          <p className="text-[13px] font-medium text-[#BFE3D3]">Andrew Rowan</p>
+          <p className="text-[11px] text-[rgba(191,227,211,0.4)]">Owner · Adviser</p>
         </div>
       </div>
     </aside>

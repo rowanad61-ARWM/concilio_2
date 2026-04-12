@@ -27,7 +27,7 @@ const initialState: FormState = {
 }
 
 const inputClassName =
-  "w-full rounded-[7px] border-[0.5px] border-[#e5e7eb] px-[11px] py-2 text-[13px] text-[#113238] outline-none"
+  "w-full rounded-[7px] border-[0.5px] border-[#e5e7eb] px-[11px] py-2 text-[14px] text-[#113238] outline-none"
 
 function Field({
   label,
@@ -38,7 +38,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[11px] text-[#6b7280]">{label}</span>
+      <span className="mb-1.5 block text-[12px] text-[#6b7280]">{label}</span>
       {children}
     </label>
   )
@@ -85,7 +85,7 @@ export default function NewClientForm() {
         <Link href="/clients" className="text-[11px] text-[#9ca3af]">
           {"\u2190"} Clients
         </Link>
-        <h1 className="mt-2 text-[17px] font-semibold text-[#113238]">New Client</h1>
+        <h1 className="mt-2 text-[18px] font-semibold text-[#113238]">New Client</h1>
         <p className="mt-1 text-[12px] text-[#6b7280]">Add a new person to Concilio</p>
 
         <form onSubmit={handleSubmit} className="mx-auto mt-6 max-w-[600px] px-6 pb-6">

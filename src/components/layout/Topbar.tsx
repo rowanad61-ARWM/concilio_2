@@ -9,19 +9,19 @@ export default function Topbar() {
         <input
           type="search"
           placeholder="Search clients, notes, documents..."
-          className="h-9 w-full max-w-[280px] rounded-[7px] bg-[#F2F4F6] px-3 text-[12px] text-[#113238] outline-none placeholder:text-[#9ca3af]"
+          className="h-9 w-full max-w-[280px] rounded-[7px] bg-[#F2F4F6] px-3 text-[13px] text-[#113238] outline-none placeholder:text-[#9ca3af]"
         />
       </div>
       <button
         type="button"
-        className="h-8 rounded-[7px] border border-[#e5e7eb] px-3 text-[12px] text-[#6b7280]"
+        className="h-8 rounded-[7px] border border-[#e5e7eb] px-3 text-[13px] text-[#6b7280]"
       >
         Filter
       </button>
       <button
         type="button"
         onClick={() => router.push("/clients/new")}
-        className="h-8 rounded-[7px] bg-[#FF8C42] px-3 text-[12px] font-medium text-white"
+        className="h-8 rounded-[7px] bg-[#FF8C42] px-3 text-[13px] font-medium text-white"
       >
         New Client
       </button>

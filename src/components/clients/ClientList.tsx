@@ -142,20 +142,20 @@ export default function ClientList({
 
       <div className="mb-[18px] grid grid-cols-4 gap-[10px]">
         <div className="rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-3">
-          <p className="text-[10px] uppercase tracking-[0.08em] text-[#6b7280]">Total Clients</p>
-          <p className="mt-2 text-[21px] font-semibold text-[#113238]">{householdAwareTotal}</p>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-[#6b7280]">Total Clients</p>
+          <p className="mt-2 text-[22px] font-semibold text-[#113238]">{householdAwareTotal}</p>
         </div>
         <div className="rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-3">
-          <p className="text-[10px] uppercase tracking-[0.08em] text-[#6b7280]">Active</p>
-          <p className="mt-2 text-[21px] font-semibold text-[#113238]">{householdAwareActive}</p>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-[#6b7280]">Active</p>
+          <p className="mt-2 text-[22px] font-semibold text-[#113238]">{householdAwareActive}</p>
         </div>
         <div className="rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-3">
-          <p className="text-[10px] uppercase tracking-[0.08em] text-[#6b7280]">Prospects</p>
-          <p className="mt-2 text-[21px] font-semibold text-[#113238]">{prospectCount}</p>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-[#6b7280]">Prospects</p>
+          <p className="mt-2 text-[22px] font-semibold text-[#113238]">{prospectCount}</p>
         </div>
         <div className="rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-3">
-          <p className="text-[10px] uppercase tracking-[0.08em] text-[#6b7280]">Alerts</p>
-          <p className="mt-2 text-[21px] font-semibold text-[#FF8C42]">0</p>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-[#6b7280]">Alerts</p>
+          <p className="mt-2 text-[22px] font-semibold text-[#FF8C42]">0</p>
         </div>
       </div>
 
@@ -168,7 +168,7 @@ export default function ClientList({
               key={filter.value}
               type="button"
               onClick={() => setActiveFilter(filter.value)}
-              className={`cursor-pointer rounded-[20px] border-[0.5px] border-[#e5e7eb] px-[11px] py-1 text-[11px] ${
+              className={`cursor-pointer rounded-[20px] border-[0.5px] border-[#e5e7eb] px-[11px] py-1 text-[12px] ${
                 isActive ? "bg-[#113238] text-white" : "bg-white text-[#113238]"
               }`}
             >
@@ -179,7 +179,7 @@ export default function ClientList({
       </div>
 
       <div className="overflow-hidden rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white">
-        <div className="grid grid-cols-[minmax(0,1.8fr)_140px_140px_110px] bg-[#F8FAFB] px-[14px] py-[9px] text-[10px] uppercase text-[#6b7280]">
+        <div className="grid grid-cols-[minmax(0,1.8fr)_140px_140px_110px] bg-[#F8FAFB] px-[14px] py-[9px] text-[11px] uppercase text-[#6b7280]">
           <span>Client</span>
           <span>Status</span>
           <span>Last updated</span>
@@ -193,14 +193,14 @@ export default function ClientList({
             <div
               key={item.id}
               onClick={() => router.push(`/clients/${primaryMemberId}`)}
-            className="grid cursor-pointer grid-cols-[minmax(0,1.8fr)_140px_140px_110px] items-center border-b-[0.5px] border-[#e5e7eb] px-[14px] py-[11px] hover:bg-[#F5F7FA]"
+              className="grid cursor-pointer grid-cols-[minmax(0,1.8fr)_140px_140px_110px] items-center border-b-[0.5px] border-[#e5e7eb] px-[14px] py-[11px] hover:bg-[#F5F7FA]"
             >
               <div className="flex min-w-0 items-center gap-3">
                 <GroupAvatar item={item} />
                 <div className="min-w-0">
-                  <p className="truncate text-[13px] font-medium text-[#113238]">{item.displayName}</p>
+                  <p className="truncate text-[14px] font-medium text-[#113238]">{item.displayName}</p>
                   {item.isHousehold ? (
-                    <div className="mt-1 truncate text-[10px] text-[#9ca3af]">
+                    <div className="mt-1 truncate text-[11px] text-[#9ca3af]">
                       {item.members.map((member, index) => (
                         <span key={member.id}>
                           {index > 0 ? <span className="px-1 text-[#9ca3af]">{"\u00B7"}</span> : null}
@@ -217,7 +217,7 @@ export default function ClientList({
                   ) : null}
                   <div className="mt-1">
                     <span
-                      className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${
+                      className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[12px] ${
                         getClassificationClasses(
                           item.classification?.serviceTier ||
                             item.classification?.lifecycleStage ||
@@ -233,18 +233,18 @@ export default function ClientList({
                     </span>
                   </div>
                   {item.householdName && item.householdName !== item.displayName ? (
-                    <p className="mt-1 text-[10px] text-[#9ca3af]">{item.householdName}</p>
+                    <p className="mt-1 text-[11px] text-[#9ca3af]">{item.householdName}</p>
                   ) : null}
                 </div>
               </div>
               <div>
                 <span
-                  className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${getStatusClasses(item.status)}`}
+                  className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[12px] ${getStatusClasses(item.status)}`}
                 >
                   {item.status}
                 </span>
               </div>
-              <div className="text-[11px] text-[#9ca3af]">{formatUpdatedAt(item.updatedAt)}</div>
+              <div className="text-[12px] text-[#9ca3af]">{formatUpdatedAt(item.updatedAt)}</div>
               <div>
                 <Link
                   href={`/clients/${primaryMemberId}`}

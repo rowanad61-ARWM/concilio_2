@@ -59,7 +59,7 @@ const serviceTierOptions: { label: string; value: ServiceTier | null }[] = [
 ]
 
 const inputClassName =
-  "w-full rounded-[6px] border-[0.5px] border-[#e5e7eb] px-[8px] py-[6px] text-[12px] text-[#113238] outline-none"
+  "w-full rounded-[6px] border-[0.5px] border-[#e5e7eb] px-[8px] py-[6px] text-[13px] text-[#113238] outline-none"
 
 function buildEditForm(client: ClientDetail): EditFormState {
   return {
@@ -155,8 +155,8 @@ function DetailField({
 }) {
   return (
     <div className="space-y-1">
-      <p className="text-[10px] text-[#9ca3af]">{label}</p>
-      <p className="text-[12px] text-[#113238]">{value && value.trim() ? value : "Not provided"}</p>
+      <p className="text-[11px] text-[#9ca3af]">{label}</p>
+      <p className="text-[13px] text-[#113238]">{value && value.trim() ? value : "Not provided"}</p>
     </div>
   )
 }
@@ -170,7 +170,7 @@ function EditField({
 }) {
   return (
     <label className="block space-y-1">
-      <span className="text-[10px] text-[#9ca3af]">{label}</span>
+      <span className="text-[11px] text-[#9ca3af]">{label}</span>
       {children}
     </label>
   )
@@ -467,7 +467,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     <div className="flex h-full flex-col overflow-hidden">
       <header className="flex items-start justify-between border-b-[0.5px] border-[#e5e7eb] bg-white px-5 py-[14px]">
         <div className="space-y-2">
-          <Link href="/clients" className="inline-flex text-[11px] text-[#9ca3af]">
+          <Link href="/clients" className="inline-flex text-[12px] text-[#9ca3af]">
             {"\u2190"} Clients
           </Link>
           <div className="flex items-center gap-2">
@@ -478,33 +478,33 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               {clientData.status}
             </span>
           </div>
-          <p className="text-[11px] text-[#6b7280]">Adviser: Andrew Rowan</p>
+          <p className="text-[12px] text-[#6b7280]">Adviser: Andrew Rowan</p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={handleStartEditing}
-            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[11px] text-[#113238]"
+            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
           >
             Edit
           </button>
           <button
             type="button"
-            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[11px] text-[#113238]"
+            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
           >
             Email
           </button>
           <button
             type="button"
-            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[11px] text-[#113238]"
+            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
           >
             SMS
           </button>
           <button
             type="button"
             onClick={openNotePanel}
-            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-[#FF8C42] px-[10px] py-[5px] text-[11px] text-white"
+            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white"
           >
             + Note
           </button>
@@ -514,7 +514,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-[230px] overflow-y-auto border-r-[0.5px] border-[#e5e7eb] bg-white p-[14px]">
           <section className="space-y-4">
-            <h2 className="text-[11px] font-medium text-[#113238]">Contact</h2>
+            <h2 className="text-[12px] font-medium text-[#113238]">Contact</h2>
             <div className="space-y-3">
               {isEditing ? (
                 <>
@@ -556,7 +556,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           </section>
 
           <section className="mt-6 space-y-4">
-            <h2 className="text-[11px] font-medium text-[#113238]">Household</h2>
+            <h2 className="text-[12px] font-medium text-[#113238]">Household</h2>
             {clientData.household ? (
               <div className="space-y-3">
                 <p className="text-[12px] font-medium text-[#113238]">{clientData.household.name}</p>
@@ -607,7 +607,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           </section>
 
           <section className="mt-6 space-y-4">
-            <h2 className="text-[11px] font-medium text-[#113238]">Personal</h2>
+            <h2 className="text-[12px] font-medium text-[#113238]">Personal</h2>
             <div className="space-y-3">
               {isEditing ? (
                 <>
@@ -665,14 +665,14 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           </section>
 
           <section className="mt-6 space-y-4">
-            <h2 className="text-[11px] font-medium text-[#113238]">Identity</h2>
+            <h2 className="text-[12px] font-medium text-[#113238]">Identity</h2>
             <p className="text-[11px] text-[#9ca3af]">No ID documents on file</p>
           </section>
 
           <section className="mt-6 space-y-4">
-            <h2 className="text-[11px] font-medium text-[#113238]">Service</h2>
+            <h2 className="text-[12px] font-medium text-[#113238]">Service</h2>
             <div className="relative space-y-1">
-              <p className="text-[10px] text-[#9ca3af]">Lifecycle stage</p>
+              <p className="text-[11px] text-[#9ca3af]">Lifecycle stage</p>
               <button
                 type="button"
                 onClick={() => {
@@ -709,7 +709,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               ) : null}
             </div>
             <div className="relative space-y-1">
-              <p className="text-[10px] text-[#9ca3af]">Service tier</p>
+              <p className="text-[11px] text-[#9ca3af]">Service tier</p>
               <button
                 type="button"
                 onClick={() => {
@@ -797,7 +797,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                     key={filter.value}
                     type="button"
                     onClick={() => setActiveFilter(filter.value)}
-                    className={`rounded-[6px] border-[0.5px] border-[#e5e7eb] px-[9px] py-1 text-[11px] ${
+                    className={`rounded-[6px] border-[0.5px] border-[#e5e7eb] px-[9px] py-1 text-[12px] ${
                       isActive ? "bg-[#113238] text-white" : "bg-white text-[#113238]"
                     }`}
                   >
@@ -810,20 +810,20 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[11px] text-[#113238]"
+                className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
               >
                 Email
               </button>
               <button
                 type="button"
-                className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[11px] text-[#113238]"
+                className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
               >
                 SMS
               </button>
               <button
                 type="button"
                 onClick={openNotePanel}
-                className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-[#FF8C42] px-[10px] py-[5px] text-[11px] text-white"
+                className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white"
               >
                 + Note
               </button>
@@ -841,7 +841,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                       key={category.value}
                       type="button"
                       onClick={() => setNoteCategory(category.value)}
-                      className={`rounded-[999px] border-[0.5px] px-[10px] py-[4px] text-[11px] ${
+                      className={`rounded-[999px] border-[0.5px] px-[10px] py-[4px] text-[12px] ${
                         isActive
                           ? "border-[#113238] bg-[#113238] text-white"
                           : "border-[#e5e7eb] bg-white text-[#113238]"
@@ -856,7 +856,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               <textarea
                 value={noteBody}
                 onChange={(event) => setNoteBody(event.target.value)}
-                className="mt-3 min-h-[80px] w-full resize-y rounded-[7px] border-[0.5px] border-[#e5e7eb] p-2 text-[12px] text-[#113238] outline-none"
+                className="mt-3 min-h-[80px] w-full resize-y rounded-[7px] border-[0.5px] border-[#e5e7eb] p-2 text-[13px] text-[#113238] outline-none"
               />
 
               <div className="mt-3 flex items-center gap-2">
@@ -864,14 +864,14 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                   type="button"
                   onClick={handleSaveNote}
                   disabled={isSaving}
-                  className="rounded-[7px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-[10px] py-[5px] text-[11px] text-white disabled:opacity-60"
+                  className="rounded-[7px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white disabled:opacity-60"
                 >
                   Save
                 </button>
                 <button
                   type="button"
                   onClick={handleCancelNote}
-                  className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[11px] text-[#113238]"
+                  className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
                 >
                   Cancel
                 </button>
@@ -889,23 +889,23 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
                       <NoteIcon />
-                      <p className="text-[12px] font-medium text-[#113238]">
+                      <p className="text-[13px] font-medium text-[#113238]">
                         {formatCategory(note.noteType)}
                       </p>
                       <p className="text-[11px] text-[#9ca3af]">Andrew Rowan</p>
                     </div>
-                    <p className="shrink-0 text-right text-[11px] text-[#9ca3af]">
+                    <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
                       {formatTimelineTimestamp(note.createdAt)}
                     </p>
                   </div>
-                  <p className="mt-[6px] text-[12px] leading-[1.6] text-[#374151]">{note.text}</p>
+                  <p className="mt-[6px] text-[13px] leading-[1.6] text-[#374151]">{note.text}</p>
                 </div>
               ))}
             </div>
           ) : (
             <div className="flex flex-1 items-center justify-center">
               <div className="text-center">
-                <p className="text-[13px] text-[#9ca3af]">No activity yet</p>
+                <p className="text-[14px] text-[#9ca3af]">No activity yet</p>
                 <p className="mt-1 text-[11px] text-[#9ca3af]">
                   Notes, emails and documents will appear here
                 </p>
