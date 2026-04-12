@@ -256,25 +256,16 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
           <section className="mt-6 space-y-4">
             <h2 className="text-[11px] font-medium text-[#113238]">Service</h2>
-            {client.classification?.serviceTier || client.classification?.lifecycleStage ? (
-              <div className="space-y-3">
-                <DetailField
-                  label="Service tier"
-                  value={
-                    client.classification?.serviceTier
-                      ? formatClassificationValue(client.classification.serviceTier)
-                      : "Not classified"
-                  }
-                />
-                <DetailField
-                  label="Lifecycle stage"
-                  value={
-                    client.classification?.lifecycleStage
-                      ? formatClassificationValue(client.classification.lifecycleStage)
-                      : "Not classified"
-                  }
-                />
-              </div>
+            {client.classification?.serviceTier ? (
+              <DetailField
+                label="Service tier"
+                value={formatClassificationValue(client.classification.serviceTier)}
+              />
+            ) : client.classification?.lifecycleStage ? (
+              <DetailField
+                label="Lifecycle stage"
+                value={formatClassificationValue(client.classification.lifecycleStage)}
+              />
             ) : (
               <p className="text-[12px] text-[#113238]">Not classified</p>
             )}
