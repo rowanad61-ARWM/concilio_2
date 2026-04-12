@@ -41,5 +41,15 @@ export default async function ClientsPage() {
     }
   })
 
-  return <ClientList clients={clients} />
+  const prospectCount = parties.filter((party) => {
+    const lifecycleStage = party.client_classification?.lifecycle_stage
+    return (
+      lifecycleStage === "prospect" ||
+      lifecycleStage === "engagement" ||
+      lifecycleStage === "advising" ||
+      lifecycleStage === "implementation"
+    )
+  }).length
+
+  return <ClientList clients={clients} prospectCount={prospectCount} />
 }

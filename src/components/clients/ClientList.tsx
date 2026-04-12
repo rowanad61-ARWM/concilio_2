@@ -6,16 +6,18 @@ import { useState } from "react";
 
 import type { ClientListItem } from "@/types/clients";
 
-type FilterValue = "all" | "active" | "inactive";
+type FilterValue = "all" | "active" | "inactive" | "lapsed";
 
 type ClientListProps = {
   clients: ClientListItem[];
+  prospectCount: number;
 };
 
 const filters: { label: string; value: FilterValue }[] = [
   { label: "All", value: "all" },
   { label: "Active", value: "active" },
   { label: "Inactive", value: "inactive" },
+  { label: "Lapsed", value: "lapsed" },
 ];
 
 function getInitials(name: string) {
@@ -81,14 +83,16 @@ function getClassificationClasses(value: string) {
   }
 }
 
-export default function ClientList({ clients }: ClientListProps) {
+export default function ClientList({ clients, prospectCount }: ClientListProps) {
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState<FilterValue>("all");
 
   const filteredClients =
     activeFilter === "all"
       ? clients
-      : clients.filter((client) => client.status.toLowerCase() === activeFilter);
+      : activeFilter === "lapsed"
+        ? clients.filter((client) => client.classification?.lifecycleStage?.toLowerCase() === "lapsed")
+        : clients.filter((client) => client.status.toLowerCase() === activeFilter);
 
   const activeCount = clients.filter((client) => client.status.toLowerCase() === "active").length;
 
@@ -110,7 +114,7 @@ export default function ClientList({ clients }: ClientListProps) {
         </div>
         <div className="rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-3">
           <p className="text-[10px] uppercase tracking-[0.08em] text-[#6b7280]">Prospects</p>
-          <p className="mt-2 text-[21px] font-semibold text-[#113238]">0</p>
+          <p className="mt-2 text-[21px] font-semibold text-[#113238]">{prospectCount}</p>
         </div>
         <div className="rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-3">
           <p className="text-[10px] uppercase tracking-[0.08em] text-[#6b7280]">Alerts</p>

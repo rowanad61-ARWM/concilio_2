@@ -12,6 +12,7 @@ type ClientRecordProps = {
 
 type TimelineFilter = "all" | "emails" | "notes" | "docs"
 type NoteCategory = "general" | "meeting" | "phone_call" | "email" | "compliance" | "other"
+type LifecycleStage = "prospect" | "engagement" | "advising" | "implementation" | "lapsed"
 
 type EditFormState = {
   firstName: string
@@ -41,6 +42,13 @@ const noteCategories: { label: string; value: NoteCategory }[] = [
 ]
 
 const relationshipOptions = ["single", "married", "de_facto", "separated", "divorced", "widowed"]
+const lifecycleStageOptions: { label: string; value: LifecycleStage }[] = [
+  { label: "Prospect", value: "prospect" },
+  { label: "Engagement", value: "engagement" },
+  { label: "Advising", value: "advising" },
+  { label: "Implementation", value: "implementation" },
+  { label: "Lapsed", value: "lapsed" },
+]
 
 const inputClassName =
   "w-full rounded-[6px] border-[0.5px] border-[#e5e7eb] px-[8px] py-[6px] text-[12px] text-[#113238] outline-none"
@@ -175,6 +183,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [isLinkingHousehold, setIsLinkingHousehold] = useState(false)
   const [householdNameInput, setHouseholdNameInput] = useState("")
   const [isCreatingHousehold, setIsCreatingHousehold] = useState(false)
+  const [isLifecycleMenuOpen, setIsLifecycleMenuOpen] = useState(false)
+  const [isUpdatingLifecycle, setIsUpdatingLifecycle] = useState(false)
 
   const fullLegalName = clientData.person
     ? `${clientData.person.legalGivenName} ${clientData.person.legalFamilyName}`.trim()
@@ -182,6 +192,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
   const visibleNotes = activeFilter === "all" || activeFilter === "notes" ? localNotes : []
   const otherHouseholdMembers = clientData.household?.members.filter((member) => member.id !== clientData.id) ?? []
+  const lifecycleStage = clientData.classification?.lifecycleStage ?? null
 
   function updateEditField<Key extends keyof EditFormState>(key: Key, value: EditFormState[Key]) {
     setEditForm((current) => ({ ...current, [key]: value }))
@@ -336,6 +347,39 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       console.error(error)
     } finally {
       setIsCreatingHousehold(false)
+    }
+  }
+
+  async function handleLifecycleStageChange(nextStage: LifecycleStage) {
+    setIsUpdatingLifecycle(true)
+
+    try {
+      const response = await fetch(`/api/clients/${clientData.id}/classification`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ lifecycleStage: nextStage }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to update lifecycle stage")
+      }
+
+      const updated = await response.json()
+
+      setClientData((current) => ({
+        ...current,
+        classification: {
+          serviceTier: updated.service_tier ?? current.classification?.serviceTier ?? null,
+          lifecycleStage: updated.lifecycle_stage ?? null,
+        },
+      }))
+      setIsLifecycleMenuOpen(false)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsUpdatingLifecycle(false)
     }
   }
 
@@ -573,14 +617,41 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 label="Service tier"
                 value={formatClassificationValue(clientData.classification.serviceTier)}
               />
-            ) : clientData.classification?.lifecycleStage ? (
-              <DetailField
-                label="Lifecycle stage"
-                value={formatClassificationValue(clientData.classification.lifecycleStage)}
-              />
-            ) : (
-              <p className="text-[12px] text-[#113238]">Not classified</p>
-            )}
+            ) : null}
+            <div className="relative space-y-1">
+              <p className="text-[10px] text-[#9ca3af]">Lifecycle stage</p>
+              <button
+                type="button"
+                onClick={() => setIsLifecycleMenuOpen((current) => !current)}
+                className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[6px] text-[12px] text-[#113238]"
+              >
+                {lifecycleStage ? formatClassificationValue(lifecycleStage) : "Not set"}
+              </button>
+
+              {isLifecycleMenuOpen ? (
+                <div className="absolute left-0 top-full z-10 mt-1 min-w-[160px] rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
+                  {lifecycleStageOptions.map((option) => {
+                    const isSelected = option.value === lifecycleStage
+
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => void handleLifecycleStageChange(option.value)}
+                        disabled={isUpdatingLifecycle}
+                        className={`block w-full cursor-pointer px-3 py-2 text-left text-[12px] ${
+                          isSelected
+                            ? "bg-[#113238] text-white"
+                            : "text-[#113238] hover:bg-[#F5F7FA]"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </div>
           </section>
 
           {isEditing ? (
