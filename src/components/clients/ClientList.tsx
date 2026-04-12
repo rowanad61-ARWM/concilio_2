@@ -46,6 +46,41 @@ function getStatusClasses(status: string) {
   }
 }
 
+function formatClassification(value: string) {
+  if (value === "person") {
+    return "person";
+  }
+
+  if (value === "wealth_manager_plus") {
+    return "Wealth Manager+";
+  }
+
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getClassificationClasses(value: string) {
+  switch (value) {
+    case "wealth_manager_plus":
+      return "bg-[#FEF0E7] text-[#C45F1A]";
+    case "wealth_manager":
+      return "bg-[#EAF0F1] text-[#113238]";
+    case "cashflow_manager":
+      return "bg-[#E6F0EC] text-[#0F5C3A]";
+    case "transaction":
+      return "bg-[#E6F1FB] text-[#185FA5]";
+    case "prospect":
+    case "engagement":
+    case "advising":
+    case "implementation":
+      return "bg-[#F1EDF8] text-[#7B4FA8]";
+    default:
+      return "bg-[#F3F4F6] text-[#6B7280]";
+  }
+}
+
 export default function ClientList({ clients }: ClientListProps) {
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState<FilterValue>("all");
@@ -122,7 +157,23 @@ export default function ClientList({ clients }: ClientListProps) {
               </div>
               <div className="min-w-0">
                 <p className="truncate text-[13px] font-medium text-[#113238]">{client.fullName}</p>
-                <p className="mt-0.5 text-[11px] text-[#9ca3af]">{client.partyType}</p>
+                <div className="mt-1">
+                  <span
+                    className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${
+                      getClassificationClasses(
+                        client.classification?.serviceTier ||
+                          client.classification?.lifecycleStage ||
+                          "person",
+                      )
+                    }`}
+                  >
+                    {formatClassification(
+                      client.classification?.serviceTier ||
+                        client.classification?.lifecycleStage ||
+                        "person",
+                    )}
+                  </span>
+                </div>
               </div>
             </div>
             <div>

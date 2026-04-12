@@ -5,7 +5,7 @@ import type { ClientListItem } from "@/types/clients"
 export default async function ClientsPage() {
   const parties = await db.party.findMany({
     where: { party_type: "person" },
-    include: { person: true },
+    include: { person: true, client_classification: true },
     orderBy: { display_name: "asc" },
   })
 
@@ -19,6 +19,12 @@ export default async function ClientsPage() {
       partyType: party.party_type,
       status: party.status,
       updatedAt: party.updated_at.toISOString(),
+      classification: party.client_classification
+        ? {
+            serviceTier: party.client_classification.service_tier,
+            lifecycleStage: null,
+          }
+        : null,
     }
   })
 

@@ -71,6 +71,17 @@ function formatCategory(category: string) {
     .join(" ")
 }
 
+function formatClassificationValue(value: string) {
+  if (value === "wealth_manager_plus") {
+    return "Wealth Manager+"
+  }
+
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+}
+
 function DetailField({
   label,
   value,
@@ -241,6 +252,32 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           <section className="mt-6 space-y-4">
             <h2 className="text-[11px] font-medium text-[#113238]">Identity</h2>
             <p className="text-[11px] text-[#9ca3af]">No ID documents on file</p>
+          </section>
+
+          <section className="mt-6 space-y-4">
+            <h2 className="text-[11px] font-medium text-[#113238]">Service</h2>
+            {client.classification?.serviceTier || client.classification?.lifecycleStage ? (
+              <div className="space-y-3">
+                <DetailField
+                  label="Service tier"
+                  value={
+                    client.classification?.serviceTier
+                      ? formatClassificationValue(client.classification.serviceTier)
+                      : "Not classified"
+                  }
+                />
+                <DetailField
+                  label="Lifecycle stage"
+                  value={
+                    client.classification?.lifecycleStage
+                      ? formatClassificationValue(client.classification.lifecycleStage)
+                      : "Not classified"
+                  }
+                />
+              </div>
+            ) : (
+              <p className="text-[12px] text-[#113238]">Not classified</p>
+            )}
           </section>
         </aside>
 

@@ -17,6 +17,7 @@ export default async function ClientRecordPage({
       include: {
         person: true,
         contact_method: true,
+        client_classification: true,
       },
     }),
     db.file_note.findMany({
@@ -40,6 +41,12 @@ export default async function ClientRecordPage({
     partyType: party.party_type,
     status: party.status,
     updatedAt: party.updated_at.toISOString(),
+    classification: party.client_classification
+      ? {
+          serviceTier: party.client_classification.service_tier,
+          lifecycleStage: null,
+        }
+      : null,
     person: party.person
       ? {
           legalGivenName: party.person.legal_given_name,

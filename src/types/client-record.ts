@@ -11,6 +11,10 @@ export type ClientDetail = {
   partyType: string
   status: string
   updatedAt: string
+  classification: {
+    serviceTier: string | null
+    lifecycleStage: string | null
+  } | null
   person: {
     legalGivenName: string
     legalFamilyName: string

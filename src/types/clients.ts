@@ -4,4 +4,8 @@ export type ClientListItem = {
   partyType: string
   status: string
   updatedAt: string
+  classification: {
+    serviceTier: string | null
+    lifecycleStage: string | null
+  } | null
 }
