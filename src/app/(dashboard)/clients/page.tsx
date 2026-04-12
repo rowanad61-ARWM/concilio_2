@@ -1,6 +1,42 @@
 import ClientList from "@/components/clients/ClientList"
 import { db } from "@/lib/db"
-import type { ClientListItem } from "@/types/clients"
+import type { HouseholdListItem } from "@/types/clients"
+
+type GroupMember = {
+  id: string
+  displayName: string
+  role: string
+  status: string
+  updatedAt: string
+  classification: {
+    serviceTier: string | null
+    lifecycleStage: string | null
+  } | null
+}
+
+function getDisplayName(party: {
+  display_name: string
+  person: {
+    preferred_name: string | null
+    legal_given_name: string
+    legal_family_name: string
+  } | null
+}) {
+  const givenName = party.person?.preferred_name || party.person?.legal_given_name || ""
+  const familyName = party.person?.legal_family_name || ""
+  return `${givenName} ${familyName}`.trim() || party.display_name
+}
+
+function sortMembersByRole(a: GroupMember, b: GroupMember) {
+  const roleRankA = a.role === "primary" ? 0 : 1
+  const roleRankB = b.role === "primary" ? 0 : 1
+
+  if (roleRankA !== roleRankB) {
+    return roleRankA - roleRankB
+  }
+
+  return a.displayName.localeCompare(b.displayName)
+}
 
 export default async function ClientsPage() {
   const parties = await db.party.findMany({
@@ -20,72 +56,113 @@ export default async function ClientsPage() {
     orderBy: { display_name: "asc" },
   })
 
-  const clients: ClientListItem[] = parties.map((party) => {
-    const givenName = party.person?.preferred_name || party.person?.legal_given_name || ""
-    const familyName = party.person?.legal_family_name || ""
-    const fullName = `${givenName} ${familyName}`.trim() || party.display_name
-
-    return {
-      id: party.id,
-      fullName,
-      partyType: party.party_type,
-      status: party.status,
-      updatedAt: party.updated_at.toISOString(),
-      householdName: party.household_member[0]?.household_group.household_name ?? null,
-      classification: party.client_classification
-        ? {
-            serviceTier: party.client_classification.service_tier,
-            lifecycleStage: party.client_classification.lifecycle_stage,
-          }
-        : null,
+  const groupedHouseholds = new Map<
+    string,
+    {
+      id: string
+      displayName: string
+      members: GroupMember[]
     }
-  })
-
-  const householdAwareTotalHouseholds = new Set<string>()
-  const activeHouseholds = new Set<string>()
-  const prospectHouseholds = new Set<string>()
-  const prospectStages = new Set(["prospect", "engagement", "advising", "implementation"])
-
-  let householdAwareTotalUngrouped = 0
-  let activeUngrouped = 0
-  let prospectUngrouped = 0
+  >()
+  const ungroupedItems: HouseholdListItem[] = []
 
   for (const party of parties) {
-    const householdId = party.household_member[0]?.household_id ?? null
+    const displayName = getDisplayName(party)
+    const classification = party.client_classification
+      ? {
+          serviceTier: party.client_classification.service_tier,
+          lifecycleStage: party.client_classification.lifecycle_stage,
+        }
+      : null
+    const membership = party.household_member[0]
 
-    if (householdId) {
-      householdAwareTotalHouseholds.add(householdId)
+    if (membership?.household_id) {
+      const householdId = membership.household_id
+      const existing = groupedHouseholds.get(householdId)
+
+      if (existing) {
+        existing.members.push({
+          id: party.id,
+          displayName,
+          role: membership.role_in_household,
+          status: party.status,
+          updatedAt: party.updated_at.toISOString(),
+          classification,
+        })
+      } else {
+        groupedHouseholds.set(householdId, {
+          id: householdId,
+          displayName: membership.household_group.household_name || `${displayName} Household`,
+          members: [
+            {
+              id: party.id,
+              displayName,
+              role: membership.role_in_household,
+              status: party.status,
+              updatedAt: party.updated_at.toISOString(),
+              classification,
+            },
+          ],
+        })
+      }
     } else {
-      householdAwareTotalUngrouped += 1
-    }
-
-    if (party.status === "active") {
-      if (householdId) {
-        activeHouseholds.add(householdId)
-      } else {
-        activeUngrouped += 1
-      }
-    }
-
-    if (prospectStages.has(party.client_classification?.lifecycle_stage ?? "")) {
-      if (householdId) {
-        prospectHouseholds.add(householdId)
-      } else {
-        prospectUngrouped += 1
-      }
+      ungroupedItems.push({
+        id: party.id,
+        displayName,
+        isHousehold: false,
+        members: [
+          {
+            id: party.id,
+            displayName,
+            role: "primary",
+          },
+        ],
+        status: party.status,
+        updatedAt: party.updated_at.toISOString(),
+        classification,
+        householdName: null,
+      })
     }
   }
 
-  const householdAwareTotal = householdAwareTotalHouseholds.size + householdAwareTotalUngrouped
-  const householdAwareActive = activeHouseholds.size + activeUngrouped
-  const prospectCount = prospectHouseholds.size + prospectUngrouped
+  const groupedItems: HouseholdListItem[] = Array.from(groupedHouseholds.values()).map((household) => {
+    const sortedMembers = [...household.members].sort(sortMembersByRole)
+    const primaryMember = sortedMembers[0]
+
+    return {
+      id: household.id,
+      displayName: household.displayName,
+      isHousehold: true,
+      members: sortedMembers.map((member) => ({
+        id: member.id,
+        displayName: member.displayName,
+        role: member.role,
+      })),
+      status: primaryMember.status,
+      updatedAt: primaryMember.updatedAt,
+      classification: primaryMember.classification,
+      householdName: household.displayName,
+    }
+  })
+
+  const householdItems = [...groupedItems, ...ungroupedItems].sort((a, b) =>
+    a.displayName.localeCompare(b.displayName),
+  )
+
+  const prospectStages = new Set(["prospect", "engagement", "advising", "implementation"])
+  const householdAwareTotal = householdItems.length
+  const householdAwareActive = householdItems.filter((item) => item.status === "active").length
+  const prospectCount = householdItems.filter((item) =>
+    prospectStages.has(item.classification?.lifecycleStage ?? ""),
+  ).length
 
   return (
     <ClientList
-      clients={clients}
+      householdItems={householdItems}
       prospectCount={prospectCount}
       householdAwareTotal={householdAwareTotal}
       householdAwareActive={householdAwareActive}
+      contactCount={parties.length}
     />
   )
 }
