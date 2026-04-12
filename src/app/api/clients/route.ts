@@ -42,6 +42,13 @@ export async function POST(request: Request) {
       },
     })
 
+    await db.client_classification.create({
+      data: {
+        party_id: party.id,
+        lifecycle_stage: "prospect",
+      },
+    })
+
     return NextResponse.json({ id: party.id })
   } catch {
     return NextResponse.json({ error: "failed to create client" }, { status: 500 })

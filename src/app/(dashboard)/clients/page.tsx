@@ -22,7 +22,7 @@ export default async function ClientsPage() {
       classification: party.client_classification
         ? {
             serviceTier: party.client_classification.service_tier,
-            lifecycleStage: null,
+            lifecycleStage: party.client_classification.lifecycle_stage,
           }
         : null,
     }
