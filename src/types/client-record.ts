@@ -5,6 +5,15 @@ export type TimelineNote = {
   createdAt: string
 }
 
+export type ClientAddress = {
+  line1: string | null
+  line2: string | null
+  suburb: string | null
+  state: string | null
+  postcode: string | null
+  country: string | null
+}
+
 export type ClientDetail = {
   id: string
   displayName: string
@@ -35,6 +44,8 @@ export type ClientDetail = {
     relationshipStatus: string | null
     countryOfResidence: string | null
     preferredContactMethod: string | null
+    addressResidential: ClientAddress | null
+    addressPostal: ClientAddress | null
   } | null
   contactMethods: {
     id: string

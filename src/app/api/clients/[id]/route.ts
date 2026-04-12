@@ -17,6 +17,8 @@ export async function PATCH(
       return NextResponse.json({ error: "person not found" }, { status: 404 })
     }
 
+    const payload = await request.json()
+
     const {
       firstName,
       lastName,
@@ -26,7 +28,12 @@ export async function PATCH(
       mobile,
       relationshipStatus,
       countryOfResidence,
-    } = await request.json()
+      addressResidential,
+      addressPostal,
+    } = payload
+
+    const hasAddressResidential = Object.prototype.hasOwnProperty.call(payload, "addressResidential")
+    const hasAddressPostal = Object.prototype.hasOwnProperty.call(payload, "addressPostal")
 
     const updatedPerson = await db.person.update({
       where: { id },
@@ -39,6 +46,8 @@ export async function PATCH(
         mobile_phone: mobile ?? null,
         relationship_status: relationshipStatus ?? null,
         country_of_residence: countryOfResidence ?? null,
+        ...(hasAddressResidential ? { address_residential: addressResidential } : {}),
+        ...(hasAddressPostal ? { address_postal: addressPostal } : {}),
       },
     })
 

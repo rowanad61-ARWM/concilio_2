@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useState } from "react"
 
-import type { ClientDetail, TimelineNote } from "@/types/client-record"
+import type { ClientAddress, ClientDetail, TimelineNote } from "@/types/client-record"
 
 type ClientRecordProps = {
   client: ClientDetail
@@ -24,6 +24,12 @@ type EditFormState = {
   mobile: string
   relationshipStatus: string
   countryOfResidence: string
+  addressLine1: string
+  addressLine2: string
+  addressSuburb: string
+  addressState: string
+  addressPostcode: string
+  addressCountry: string
 }
 
 const timelineFilters: { label: string; value: TimelineFilter }[] = [
@@ -62,6 +68,8 @@ const inputClassName =
   "w-full rounded-[6px] border-[0.5px] border-[#e5e7eb] px-[8px] py-[6px] text-[13px] text-[#113238] outline-none"
 
 function buildEditForm(client: ClientDetail): EditFormState {
+  const residentialAddress = client.person?.addressResidential
+
   return {
     firstName: client.person?.legalGivenName ?? "",
     lastName: client.person?.legalFamilyName ?? "",
@@ -71,7 +79,76 @@ function buildEditForm(client: ClientDetail): EditFormState {
     mobile: client.person?.mobilePhone ?? "",
     relationshipStatus: client.person?.relationshipStatus ?? "",
     countryOfResidence: client.person?.countryOfResidence ?? "",
+    addressLine1: residentialAddress?.line1 ?? "",
+    addressLine2: residentialAddress?.line2 ?? "",
+    addressSuburb: residentialAddress?.suburb ?? "",
+    addressState: residentialAddress?.state ?? "",
+    addressPostcode: residentialAddress?.postcode ?? "",
+    addressCountry: residentialAddress?.country ?? "AU",
   }
+}
+
+function mapAddress(value: unknown): ClientAddress | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  const address = value as Record<string, unknown>
+  return {
+    line1: typeof address.line1 === "string" ? address.line1 : null,
+    line2: typeof address.line2 === "string" ? address.line2 : null,
+    suburb: typeof address.suburb === "string" ? address.suburb : null,
+    state: typeof address.state === "string" ? address.state : null,
+    postcode: typeof address.postcode === "string" ? address.postcode : null,
+    country: typeof address.country === "string" ? address.country : null,
+  }
+}
+
+function formatAddressLines(address: ClientAddress | null): string[] {
+  if (!address) {
+    return []
+  }
+
+  const line1 = address.line1?.trim() ?? ""
+  const line2 = address.line2?.trim() ?? ""
+  const suburb = address.suburb?.trim() ?? ""
+  const state = address.state?.trim() ?? ""
+  const postcode = address.postcode?.trim() ?? ""
+  const country = address.country?.trim().toUpperCase() ?? ""
+
+  const lines: string[] = []
+  if (line1) {
+    lines.push(line1)
+  }
+  if (line2) {
+    lines.push(line2)
+  }
+
+  const suburbStatePostcode = [suburb, state, postcode].filter(Boolean).join(" ")
+  if (suburbStatePostcode) {
+    lines.push(suburbStatePostcode)
+  }
+
+  if (country && country !== "AU") {
+    lines.push(country)
+  }
+
+  return lines
+}
+
+function addressesEqual(first: ClientAddress | null, second: ClientAddress | null) {
+  if (!first || !second) {
+    return false
+  }
+
+  return (
+    (first.line1 ?? "") === (second.line1 ?? "") &&
+    (first.line2 ?? "") === (second.line2 ?? "") &&
+    (first.suburb ?? "") === (second.suburb ?? "") &&
+    (first.state ?? "") === (second.state ?? "") &&
+    (first.postcode ?? "") === (second.postcode ?? "") &&
+    ((first.country ?? "AU").toUpperCase() === (second.country ?? "AU").toUpperCase())
+  )
 }
 
 function formatDate(value: string | null) {
@@ -219,6 +296,11 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const otherHouseholdMembers = clientData.household?.members.filter((member) => member.id !== clientData.id) ?? []
   const lifecycleStage = clientData.classification?.lifecycleStage ?? null
   const serviceTier = clientData.classification?.serviceTier ?? null
+  const residentialAddress = clientData.person?.addressResidential ?? null
+  const postalAddress = clientData.person?.addressPostal ?? null
+  const residentialAddressLines = formatAddressLines(residentialAddress)
+  const postalAddressLines = formatAddressLines(postalAddress)
+  const showPostalAddress = postalAddressLines.length > 0 && !addressesEqual(residentialAddress, postalAddress)
 
   function updateEditField<Key extends keyof EditFormState>(key: Key, value: EditFormState[Key]) {
     setEditForm((current) => ({ ...current, [key]: value }))
@@ -279,7 +361,24 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(editForm),
+        body: JSON.stringify({
+          firstName: editForm.firstName,
+          lastName: editForm.lastName,
+          preferredName: editForm.preferredName,
+          dateOfBirth: editForm.dateOfBirth,
+          email: editForm.email,
+          mobile: editForm.mobile,
+          relationshipStatus: editForm.relationshipStatus,
+          countryOfResidence: editForm.countryOfResidence,
+          addressResidential: {
+            line1: editForm.addressLine1 || null,
+            line2: editForm.addressLine2 || null,
+            suburb: editForm.addressSuburb || null,
+            state: editForm.addressState || null,
+            postcode: editForm.addressPostcode || null,
+            country: editForm.addressCountry || null,
+          },
+        }),
       })
 
       if (!response.ok) {
@@ -302,6 +401,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               mobilePhone: updated.person.mobile_phone,
               relationshipStatus: updated.person.relationship_status,
               countryOfResidence: updated.person.country_of_residence,
+              addressResidential: mapAddress(updated.person.address_residential),
+              addressPostal: mapAddress(updated.person.address_postal),
             }
           : {
               legalGivenName: updated.person.legal_given_name,
@@ -313,6 +414,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               relationshipStatus: updated.person.relationship_status,
               countryOfResidence: updated.person.country_of_residence,
               preferredContactMethod: null,
+              addressResidential: mapAddress(updated.person.address_residential),
+              addressPostal: mapAddress(updated.person.address_postal),
             },
       }
 
@@ -553,6 +656,81 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 value={clientData.person?.preferredContactMethod ?? null}
               />
             </div>
+          </section>
+
+          <section className="mt-6 space-y-4">
+            <h2 className="text-[12px] font-medium text-[#113238]">Address</h2>
+            {isEditing ? (
+              <div className="space-y-3">
+                <EditField label="Line 1">
+                  <input
+                    value={editForm.addressLine1}
+                    onChange={(event) => updateEditField("addressLine1", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+                <EditField label="Line 2 (optional)">
+                  <input
+                    value={editForm.addressLine2}
+                    onChange={(event) => updateEditField("addressLine2", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+                <div className="grid grid-cols-2 gap-2">
+                  <EditField label="Suburb">
+                    <input
+                      value={editForm.addressSuburb}
+                      onChange={(event) => updateEditField("addressSuburb", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+                  <EditField label="State">
+                    <input
+                      value={editForm.addressState}
+                      onChange={(event) => updateEditField("addressState", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+                </div>
+                <EditField label="Postcode">
+                  <input
+                    value={editForm.addressPostcode}
+                    onChange={(event) => updateEditField("addressPostcode", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+                <EditField label="Country">
+                  <input
+                    value={editForm.addressCountry}
+                    onChange={(event) => updateEditField("addressCountry", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+              </div>
+            ) : residentialAddressLines.length > 0 ? (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  {residentialAddressLines.map((line, index) => (
+                    <p key={`${line}-${index}`} className="text-[13px] text-[#113238]">
+                      {line}
+                    </p>
+                  ))}
+                </div>
+
+                {showPostalAddress ? (
+                  <div className="space-y-1">
+                    <p className="text-[11px] text-[#9ca3af]">Postal</p>
+                    {postalAddressLines.map((line, index) => (
+                      <p key={`${line}-${index}`} className="text-[13px] text-[#113238]">
+                        {line}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-[11px] text-[#9ca3af]">No address on file</p>
+            )}
           </section>
 
           <section className="mt-6 space-y-4">

@@ -2,7 +2,24 @@ import { notFound } from "next/navigation"
 
 import ClientRecord from "@/components/clients/ClientRecord"
 import { db } from "@/lib/db"
+import type { ClientAddress } from "@/types/client-record"
 import type { ClientDetail, TimelineNote } from "@/types/client-record"
+
+function mapAddress(value: unknown): ClientAddress | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  const address = value as Record<string, unknown>
+  return {
+    line1: typeof address.line1 === "string" ? address.line1 : null,
+    line2: typeof address.line2 === "string" ? address.line2 : null,
+    suburb: typeof address.suburb === "string" ? address.suburb : null,
+    state: typeof address.state === "string" ? address.state : null,
+    postcode: typeof address.postcode === "string" ? address.postcode : null,
+    country: typeof address.country === "string" ? address.country : null,
+  }
+}
 
 export default async function ClientRecordPage({
   params,
@@ -94,6 +111,8 @@ export default async function ClientRecordPage({
           relationshipStatus: party.person.relationship_status,
           countryOfResidence: party.person.country_of_residence,
           preferredContactMethod: party.person.preferred_contact_method,
+          addressResidential: mapAddress(party.person.address_residential),
+          addressPostal: mapAddress(party.person.address_postal),
         }
       : null,
     contactMethods: party.contact_method.map((contactMethod) => ({
