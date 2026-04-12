@@ -1,16 +1,14 @@
-"use client";
-
-import { useRouter } from "next/navigation";
+ï»¿"use client"
+import { useRouter } from "next/navigation"
 
 export default function Topbar() {
-  const router = useRouter();
-
+  const router = useRouter()
   return (
     <header className="flex h-[50px] w-full items-center gap-[10px] border-b border-[#e5e7eb] bg-white px-5">
       <div className="flex flex-1">
         <input
           type="search"
-          placeholder="Search clients, notes, documents…"
+          placeholder="Search clients, notes, documents..."
           className="h-9 w-full max-w-[280px] rounded-[7px] bg-[#F2F4F6] px-3 text-[12px] text-[#113238] outline-none placeholder:text-[#9ca3af]"
         />
       </div>
@@ -28,5 +26,5 @@ export default function Topbar() {
         New Client
       </button>
     </header>
-  );
+  )
 }
