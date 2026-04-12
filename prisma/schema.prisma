@@ -1,8 +1,880 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model address {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id     String    @db.Uuid
+  address_type String
+  line_1       String?
+  line_2       String?
+  suburb       String?
+  state        String?
+  postcode     String?
+  country      String?   @default("AU")
+  start_date   DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date     DateTime? @db.Date
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  party        party     @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([party_id], map: "idx_address_party")
+}
+
+model advice_scope_item {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  engagement_id  String     @db.Uuid
+  scope_code     String
+  inclusion_flag Boolean    @default(true)
+  notes          String?
+  created_at     DateTime   @default(now()) @db.Timestamptz(6)
+  engagement     engagement @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model audit_event {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_type   String
+  actor_type   String
+  actor_id     String?  @db.Uuid
+  subject_type String
+  subject_id   String   @db.Uuid
+  details      Json?    @default("{}")
+  occurred_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([actor_id], map: "idx_audit_actor")
+  @@index([occurred_at], map: "idx_audit_occurred")
+  @@index([subject_type, subject_id], map: "idx_audit_subject")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model authority_grant {
+  id                                            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  grantor_party_id                              String    @db.Uuid
+  grantee_party_id                              String    @db.Uuid
+  authority_type                                String
+  scope                                         String?
+  document_id                                   String?   @db.Uuid
+  start_date                                    DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date                                      DateTime? @db.Date
+  status                                        String    @default("active")
+  created_at                                    DateTime  @default(now()) @db.Timestamptz(6)
+  party_authority_grant_grantee_party_idToparty party     @relation("authority_grant_grantee_party_idToparty", fields: [grantee_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party_authority_grant_grantor_party_idToparty party     @relation("authority_grant_grantor_party_idToparty", fields: [grantor_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model beneficiary_nomination {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source_type          String
+  source_id            String    @db.Uuid
+  beneficiary_party_id String    @db.Uuid
+  nomination_type      String
+  percentage           Decimal   @db.Decimal(5, 2)
+  effective_date       DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  expiry_date          DateTime? @db.Date
+  witness_details      String?
+  created_at           DateTime  @default(now()) @db.Timestamptz(6)
+  party                party     @relation(fields: [beneficiary_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model client_classification {
+  id                  String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id            String           @unique(map: "idx_class_party", where: raw("(household_id IS NULL)")) @db.Uuid
+  household_id        String?          @db.Uuid
+  service_tier        String?
+  review_month        Int?
+  assigned_adviser_id String?          @db.Uuid
+  referral_source     String?
+  client_since        DateTime?        @db.Date
+  notes               String?
+  created_at          DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime         @default(now()) @db.Timestamptz(6)
+  user_account        user_account?    @relation(fields: [assigned_adviser_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  household_group     household_group? @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party               party            @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model client_instruction {
+  id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  engagement_id    String     @db.Uuid
+  instruction_type String
+  details          String
+  effective_date   DateTime?  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  expires_at       DateTime?  @db.Date
+  created_at       DateTime   @default(now()) @db.Timestamptz(6)
+  engagement       engagement @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model complaint {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id             String    @db.Uuid
+  category             String
+  description          String
+  lodged_at            DateTime  @default(now()) @db.Timestamptz(6)
+  acknowledgement_date DateTime? @db.Date
+  outcome_requested    String?
+  status               String    @default("open")
+  resolved_at          DateTime? @db.Timestamptz(6)
+  resolution_notes     String?
+  created_at           DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime  @default(now()) @db.Timestamptz(6)
+  party                party     @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model compliance_register {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  register_type String
+  party_id      String?       @db.Uuid
+  user_id       String?       @db.Uuid
+  description   String
+  date_recorded DateTime      @default(dbgenerated("CURRENT_DATE")) @db.Date
+  status        String?       @default("open")
+  resolution    String?
+  resolved_date DateTime?     @db.Date
+  created_at    DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime      @default(now()) @db.Timestamptz(6)
+  party         party?        @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user_account  user_account? @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model consent {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id        String            @db.Uuid
+  consent_type    String
+  status          String            @default("granted")
+  granted_at      DateTime          @default(now()) @db.Timestamptz(6)
+  expires_at      DateTime?         @db.Timestamptz(6)
+  evidence_doc_id String?           @db.Uuid
+  notes           String?
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime          @default(now()) @db.Timestamptz(6)
+  party           party             @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  fee_arrangement fee_arrangement[]
+
+  @@index([party_id], map: "idx_consent_party")
+  @@index([consent_type], map: "idx_consent_type")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model contact_method {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id        String    @db.Uuid
+  channel         String
+  value           String
+  preferred_flag  Boolean?  @default(false)
+  do_not_use_flag Boolean?  @default(false)
+  start_date      DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date        DateTime? @db.Date
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  party           party     @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([party_id], map: "idx_contact_party")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model document {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_party_id    String?            @db.Uuid
+  household_id      String?            @db.Uuid
+  engagement_id     String?            @db.Uuid
+  document_type     String
+  category          String?
+  title             String
+  status            String?            @default("draft")
+  sharepoint_url    String?
+  latest_version_id String?            @db.Uuid
+  created_at        DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime           @default(now()) @db.Timestamptz(6)
+  engagement        engagement?        @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  household_group   household_group?   @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party             party?             @relation(fields: [owner_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  document_version  document_version[]
+
+  @@index([engagement_id], map: "idx_doc_engagement")
+  @@index([household_id], map: "idx_doc_household")
+  @@index([owner_party_id], map: "idx_doc_owner")
+}
+
+model document_version {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  document_id  String        @db.Uuid
+  version_no   Int
+  storage_uri  String
+  filename     String?
+  mime_type    String?
+  checksum     String?
+  uploaded_by  String?       @db.Uuid
+  uploaded_at  DateTime      @default(now()) @db.Timestamptz(6)
+  document     document      @relation(fields: [document_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user_account user_account? @relation(fields: [uploaded_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model employment_profile {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id               String    @db.Uuid
+  employment_status      String
+  employer_business_name String?
+  occupation_title       String?
+  industry               String?
+  start_date             DateTime? @db.Date
+  target_retirement_date DateTime? @db.Date
+  target_retirement_age  Int?
+  annual_salary          Decimal?  @db.Decimal(12, 2)
+  salary_sacrifice       Decimal?  @db.Decimal(12, 2)
+  notes                  String?
+  effective_from         DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  effective_to           DateTime? @db.Date
+  created_at             DateTime  @default(now()) @db.Timestamptz(6)
+  party                  party     @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([party_id], map: "idx_emp_party")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model engagement {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  household_id       String?              @db.Uuid
+  party_id           String?              @db.Uuid
+  engagement_type    String
+  status             String               @default("open")
+  primary_adviser_id String?              @db.Uuid
+  opened_at          DateTime             @default(now()) @db.Timestamptz(6)
+  completed_at       DateTime?            @db.Timestamptz(6)
+  notes              String?
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime             @default(now()) @db.Timestamptz(6)
+  advice_scope_item  advice_scope_item[]
+  client_instruction client_instruction[]
+  document           document[]
+  household_group    household_group?     @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party              party?               @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user_account       user_account?        @relation(fields: [primary_adviser_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  file_note          file_note[]
+  goal               goal[]
+  review_cycle       review_cycle[]
+  workflow_instance  workflow_instance[]
+
+  @@index([household_id], map: "idx_engagement_household")
+  @@index([status], map: "idx_engagement_status")
+  @@index([engagement_type], map: "idx_engagement_type")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model estate {
+  id                                    String    @id @db.Uuid
+  estate_name                           String
+  deceased_party_id                     String?   @db.Uuid
+  date_of_death                         DateTime? @db.Date
+  administration_status                 String?
+  created_at                            DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                            DateTime  @default(now()) @db.Timestamptz(6)
+  party_estate_deceased_party_idToparty party?    @relation("estate_deceased_party_idToparty", fields: [deceased_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party_estate_idToparty                party     @relation("estate_idToparty", fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model expense_item {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_party_id String    @db.Uuid
+  category       String
+  description    String?
+  amount         Decimal   @db.Decimal(12, 2)
+  frequency      String
+  fixed_flag     Boolean?  @default(false)
+  start_date     DateTime? @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date       DateTime? @db.Date
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime  @default(now()) @db.Timestamptz(6)
+  party          party     @relation(fields: [owner_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model external_link {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entity_type    String
+  entity_id      String    @db.Uuid
+  system_code    String
+  external_id    String
+  sync_state     String?   @default("synced")
+  last_synced_at DateTime? @db.Timestamptz(6)
+  metadata       Json?     @default("{}")
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([entity_type, entity_id, system_code], map: "idx_ext_link")
+  @@index([system_code], map: "idx_ext_system")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model fee_arrangement {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id             String                 @db.Uuid
+  household_id         String?                @db.Uuid
+  fee_type             String
+  amount               Decimal?               @db.Decimal(12, 2)
+  basis_points         Decimal?               @db.Decimal(5, 2)
+  collection_method    String?                @default("cma_deduction")
+  start_date           DateTime               @default(dbgenerated("CURRENT_DATE")) @db.Date
+  anniversary_date     DateTime?              @db.Date
+  end_date             DateTime?              @db.Date
+  consent_id           String?                @db.Uuid
+  notes                String?
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  consent              consent?               @relation(fields: [consent_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  household_group      household_group?       @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party                party                  @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  fee_disclosure_event fee_disclosure_event[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model fee_disclosure_event {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fee_id          String          @db.Uuid
+  event_type      String
+  event_date      DateTime        @db.Date
+  document_id     String?         @db.Uuid
+  outcome         String?
+  created_at      DateTime        @default(now()) @db.Timestamptz(6)
+  fee_arrangement fee_arrangement @relation(fields: [fee_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model file_note {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id        String?          @db.Uuid
+  household_id    String?          @db.Uuid
+  engagement_id   String?          @db.Uuid
+  note_type       String?          @default("general")
+  text            String
+  audio_ref       String?
+  author_user_id  String           @db.Uuid
+  created_at      DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime         @default(now()) @db.Timestamptz(6)
+  user_account    user_account     @relation(fields: [author_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  engagement      engagement?      @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  household_group household_group? @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party           party?           @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([household_id], map: "idx_fn_household")
+  @@index([party_id], map: "idx_fn_party")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model financial_account {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_party_id   String             @db.Uuid
+  account_type     String
+  provider_name    String
+  account_name     String?
+  account_number   String?
+  member_number    String?
+  status           String             @default("active")
+  opened_date      DateTime?          @db.Date
+  closed_date      DateTime?          @db.Date
+  current_balance  Decimal?           @db.Decimal(15, 2)
+  balance_as_at    DateTime?          @db.Date
+  notes            String?
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime           @default(now()) @db.Timestamptz(6)
+  party            party              @relation(fields: [owner_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  insurance_policy insurance_policy[]
+
+  @@index([owner_party_id], map: "idx_fin_acc_owner")
+  @@index([account_type], map: "idx_fin_acc_type")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model goal {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  engagement_id String     @db.Uuid
+  party_id      String?    @db.Uuid
+  goal_type     String
+  statement     String
+  priority      Int?       @default(1)
+  target_amount Decimal?   @db.Decimal(15, 2)
+  target_date   DateTime?  @db.Date
+  status        String?    @default("active")
+  created_at    DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime   @default(now()) @db.Timestamptz(6)
+  engagement    engagement @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party         party?     @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model household_group {
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  household_name        String
+  servicing_status      String                  @default("active")
+  primary_adviser_id    String?                 @db.Uuid
+  finance_style         String?
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                @default(now()) @db.Timestamptz(6)
+  archived_at           DateTime?               @db.Timestamptz(6)
+  client_classification client_classification[]
+  document              document[]
+  engagement            engagement[]
+  fee_arrangement       fee_arrangement[]
+  file_note             file_note[]
+  user_account          user_account?           @relation(fields: [primary_adviser_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_hg_adviser")
+  household_member      household_member[]
+  workflow_instance     workflow_instance[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model household_member {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  household_id      String          @db.Uuid
+  party_id          String          @db.Uuid
+  role_in_household String          @default("member")
+  start_date        DateTime        @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date          DateTime?       @db.Date
+  visibility_flags  Json?           @default("{}")
+  created_at        DateTime        @default(now()) @db.Timestamptz(6)
+  household_group   household_group @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party             party           @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([household_id, party_id], map: "idx_hm_active", where: raw("(end_date IS NULL)"))
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model income_item {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_party_id String    @db.Uuid
+  income_type    String
+  description    String?
+  amount         Decimal   @db.Decimal(12, 2)
+  frequency      String
+  tax_treatment  String?
+  start_date     DateTime? @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date       DateTime? @db.Date
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime  @default(now()) @db.Timestamptz(6)
+  party          party     @relation(fields: [owner_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model insurance_policy {
+  id                                                  String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_party_id                                      String             @db.Uuid
+  life_insured_party_id                               String?            @db.Uuid
+  policy_type                                         String
+  insurer                                             String
+  policy_number                                       String?
+  cover_amount                                        Decimal?           @db.Decimal(15, 2)
+  premium_amount                                      Decimal?           @db.Decimal(10, 2)
+  premium_frequency                                   String?
+  ownership_structure                                 String?
+  super_account_id                                    String?            @db.Uuid
+  anniversary_date                                    DateTime?          @db.Date
+  commencement_date                                   DateTime?          @db.Date
+  expiry_date                                         DateTime?          @db.Date
+  status                                              String             @default("active")
+  waiting_period                                      String?
+  benefit_period                                      String?
+  notes                                               String?
+  created_at                                          DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                                          DateTime           @default(now()) @db.Timestamptz(6)
+  party_insurance_policy_life_insured_party_idToparty party?             @relation("insurance_policy_life_insured_party_idToparty", fields: [life_insured_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party_insurance_policy_owner_party_idToparty        party              @relation("insurance_policy_owner_party_idToparty", fields: [owner_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  financial_account                                   financial_account? @relation(fields: [super_account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([anniversary_date], map: "idx_ins_anniversary")
+  @@index([owner_party_id], map: "idx_ins_owner")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model liability {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_party_id      String    @db.Uuid
+  liability_type      String
+  lender              String
+  balance             Decimal   @db.Decimal(15, 2)
+  balance_as_at       DateTime? @db.Date
+  interest_rate       Decimal?  @db.Decimal(5, 2)
+  rate_type           String?
+  repayment_amount    Decimal?  @db.Decimal(10, 2)
+  repayment_frequency String?
+  purpose             String?
+  limit_amount        Decimal?  @db.Decimal(15, 2)
+  maturity_date       DateTime? @db.Date
+  offset_balance      Decimal?  @db.Decimal(15, 2)
+  notes               String?
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @db.Timestamptz(6)
+  party               party     @relation(fields: [owner_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([owner_party_id], map: "idx_liability_owner")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model organisation {
+  id                                                 String    @id @db.Uuid
+  entity_type                                        String
+  legal_entity_name                                  String
+  trading_name                                       String?
+  abn                                                String?
+  acn                                                String?
+  registration_numbers                               Json?
+  entity_formed_date                                 DateTime? @db.Date
+  formation_jurisdiction                             String?   @default("AU")
+  registered_office_address                          Json?
+  principal_business_address                         Json?
+  primary_contact_party_id                           String?   @db.Uuid
+  tax_identifier_enc                                 Bytes?
+  entity_status                                      String    @default("active")
+  created_at                                         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                                         DateTime  @default(now()) @db.Timestamptz(6)
+  party_organisation_idToparty                       party     @relation("organisation_idToparty", fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  party_organisation_primary_contact_party_idToparty party?    @relation("organisation_primary_contact_party_idToparty", fields: [primary_contact_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([abn], map: "idx_org_abn")
+  @@index([legal_entity_name], map: "idx_org_name")
+  @@index([entity_type], map: "idx_org_type")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model ownership_interest {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_party_id String    @db.Uuid
+  target_type    String
+  target_id      String    @db.Uuid
+  interest_type  String?   @default("legal")
+  percentage     Decimal   @default(100.00) @db.Decimal(5, 2)
+  start_date     DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date       DateTime? @db.Date
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  party          party     @relation(fields: [owner_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([owner_party_id], map: "idx_own_owner")
+  @@index([target_type, target_id], map: "idx_own_target")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model party {
+  id                                                             String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_type                                                     String
+  display_name                                                   String
+  status                                                         String                   @default("active")
+  created_at                                                     DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at                                                     DateTime                 @default(now()) @db.Timestamptz(6)
+  archived_at                                                    DateTime?                @db.Timestamptz(6)
+  address                                                        address[]
+  authority_grant_authority_grant_grantee_party_idToparty        authority_grant[]        @relation("authority_grant_grantee_party_idToparty")
+  authority_grant_authority_grant_grantor_party_idToparty        authority_grant[]        @relation("authority_grant_grantor_party_idToparty")
+  beneficiary_nomination                                         beneficiary_nomination[]
+  client_classification                                          client_classification?
+  complaint                                                      complaint[]
+  compliance_register                                            compliance_register[]
+  consent                                                        consent[]
+  contact_method                                                 contact_method[]
+  document                                                       document[]
+  employment_profile                                             employment_profile[]
+  engagement                                                     engagement[]
+  estate_estate_deceased_party_idToparty                         estate[]                 @relation("estate_deceased_party_idToparty")
+  estate_estate_idToparty                                        estate?                  @relation("estate_idToparty")
+  expense_item                                                   expense_item[]
+  fee_arrangement                                                fee_arrangement[]
+  file_note                                                      file_note[]
+  financial_account                                              financial_account[]
+  goal                                                           goal[]
+  household_member                                               household_member[]
+  income_item                                                    income_item[]
+  insurance_policy_insurance_policy_life_insured_party_idToparty insurance_policy[]       @relation("insurance_policy_life_insured_party_idToparty")
+  insurance_policy_insurance_policy_owner_party_idToparty        insurance_policy[]       @relation("insurance_policy_owner_party_idToparty")
+  liability                                                      liability[]
+  organisation_organisation_idToparty                            organisation?            @relation("organisation_idToparty")
+  organisation_organisation_primary_contact_party_idToparty      organisation[]           @relation("organisation_primary_contact_party_idToparty")
+  ownership_interest                                             ownership_interest[]
+  person                                                         person?
+  portal_account                                                 portal_account[]
+  relationship_relationship_from_party_idToparty                 relationship[]           @relation("relationship_from_party_idToparty")
+  relationship_relationship_to_party_idToparty                   relationship[]           @relation("relationship_to_party_idToparty")
+  risk_profile                                                   risk_profile[]
+  tax_residency                                                  tax_residency[]
+  verification_check                                             verification_check[]
+  workflow_instance                                              workflow_instance[]
+
+  @@index([display_name], map: "idx_party_display_name")
+  @@index([status], map: "idx_party_status")
+  @@index([party_type], map: "idx_party_type")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model permission_grant {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subject_type    String
+  subject_id      String    @db.Uuid
+  permission_code String
+  scope_type      String?
+  scope_id        String?   @db.Uuid
+  start_date      DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date        DateTime? @db.Date
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model person {
+  id                       String    @id @db.Uuid
+  legal_given_name         String
+  legal_middle_names       String?
+  legal_family_name        String
+  preferred_name           String?
+  previous_names           String?
+  date_of_birth            DateTime  @db.Date
+  gender_pronouns          String?
+  mobile_phone             String?
+  email_primary            String?
+  email_alternate          String?
+  address_residential      Json?
+  address_postal           Json?
+  preferred_contact_method String?
+  preferred_contact_time   String?
+  communication_exclusions String?
+  citizenships             String[]
+  country_of_residence     String?   @default("AU")
+  relationship_status      String?
+  relationship_status_date DateTime? @db.Date
+  portal_access_preference String?
+  accessibility_needs      String?
+  tax_file_number_enc      Bytes?
+  person_status_notes      String?
+  created_at               DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime  @default(now()) @db.Timestamptz(6)
+  party                    party     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([date_of_birth], map: "idx_person_dob")
+  @@index([legal_family_name, legal_given_name], map: "idx_person_name")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model portal_account {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id          String    @db.Uuid
+  email             String
+  invitation_status String?   @default("pending")
+  last_login_at     DateTime? @db.Timestamptz(6)
+  created_at        DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime  @default(now()) @db.Timestamptz(6)
+  party             party     @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model practice {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String
+  code         String         @unique
+  licensee_id  String?
+  timezone     String?        @default("Australia/Sydney")
+  country      String?        @default("AU")
+  status       String         @default("active")
+  created_at   DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime       @default(now()) @db.Timestamptz(6)
+  user_account user_account[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model property_asset {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  address        Json
+  usage_type     String?
+  purchase_price Decimal?  @db.Decimal(15, 2)
+  purchase_date  DateTime? @db.Date
+  cost_base      Decimal?  @db.Decimal(15, 2)
+  current_value  Decimal?  @db.Decimal(15, 2)
+  value_as_at    DateTime? @db.Date
+  rental_income  Decimal?  @db.Decimal(12, 2)
+  notes          String?
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+model relationship {
+  id                                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  from_party_id                           String    @db.Uuid
+  to_party_id                             String    @db.Uuid
+  relationship_role                       String
+  percentage                              Decimal?  @db.Decimal(5, 2)
+  start_date                              DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date                                DateTime? @db.Date
+  notes                                   String?
+  source                                  String?
+  created_at                              DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                              DateTime  @default(now()) @db.Timestamptz(6)
+  party_relationship_from_party_idToparty party     @relation("relationship_from_party_idToparty", fields: [from_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party_relationship_to_party_idToparty   party     @relation("relationship_to_party_idToparty", fields: [to_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([from_party_id], map: "idx_rel_from")
+  @@index([relationship_role], map: "idx_rel_role")
+  @@index([to_party_id], map: "idx_rel_to")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model review_cycle {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  engagement_id  String     @db.Uuid
+  review_type    String     @default("annual")
+  due_date       DateTime   @db.Date
+  completed_date DateTime?  @db.Date
+  status         String     @default("scheduled")
+  created_at     DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime   @default(now()) @db.Timestamptz(6)
+  engagement     engagement @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([due_date], map: "idx_review_due", where: raw("(status = ANY (ARRAY['scheduled'::text, 'overdue'::text]))"))
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model risk_profile {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id          String    @db.Uuid
+  provider          String?   @default("finametrica")
+  risk_result       String
+  score             Int?
+  capacity_for_loss String?
+  alignment_status  String?
+  override_flag     Boolean?  @default(false)
+  override_reason   String?
+  completed_at      DateTime  @db.Date
+  valid_until       DateTime? @db.Date
+  raw_answers_json  Json?
+  created_at        DateTime  @default(now()) @db.Timestamptz(6)
+  party             party     @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([party_id], map: "idx_risk_party")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model service_package {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  package_name          String
+  cadence               String
+  annual_fee            Decimal? @db.Decimal(10, 2)
+  included_deliverables Json?    @default("[]")
+  created_at            DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model tax_residency {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id   String    @db.Uuid
+  country    String
+  tin        String?
+  fatca_flag Boolean?  @default(false)
+  crs_status String?
+  start_date DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date   DateTime? @db.Date
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  party      party     @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model user_account {
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  practice_id           String                  @db.Uuid
+  name                  String
+  email                 String                  @unique
+  auth_subject          String?
+  role                  String                  @default("adviser")
+  status                String                  @default("active")
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                @default(now()) @db.Timestamptz(6)
+  client_classification client_classification[]
+  compliance_register   compliance_register[]
+  document_version      document_version[]
+  engagement            engagement[]
+  file_note             file_note[]
+  household_group       household_group[]
+  practice              practice                @relation(fields: [practice_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  verification_check    verification_check[]
+  workflow_template     workflow_template[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model verification_check {
+  id                     String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id               String        @db.Uuid
+  check_type             String
+  identity_document_type String?
+  document_reference     String?
+  verification_method    String?
+  result                 String
+  verified_at            DateTime?     @db.Timestamptz(6)
+  verified_by            String?       @db.Uuid
+  expiry_date            DateTime?     @db.Date
+  notes                  String?
+  created_at             DateTime      @default(now()) @db.Timestamptz(6)
+  party                  party         @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user_account           user_account? @relation(fields: [verified_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([party_id], map: "idx_verification_party")
+}
+
+model workflow_event {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  instance_id       String            @db.Uuid
+  event_type        String
+  from_stage        String?
+  to_stage          String?
+  payload           Json?             @default("{}")
+  triggered_by      String?
+  occurred_at       DateTime          @default(now()) @db.Timestamptz(6)
+  workflow_instance workflow_instance @relation(fields: [instance_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([instance_id], map: "idx_we_instance")
+  @@index([occurred_at], map: "idx_we_occurred")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model workflow_instance {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  template_id       String            @db.Uuid
+  template_version  Int
+  engagement_id     String?           @db.Uuid
+  household_id      String?           @db.Uuid
+  party_id          String?           @db.Uuid
+  current_stage     String
+  status            String            @default("active")
+  started_at        DateTime          @default(now()) @db.Timestamptz(6)
+  completed_at      DateTime?         @db.Timestamptz(6)
+  last_event_at     DateTime?         @db.Timestamptz(6)
+  context_data      Json?             @default("{}")
+  created_at        DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime          @default(now()) @db.Timestamptz(6)
+  workflow_event    workflow_event[]
+  engagement        engagement?       @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  household_group   household_group?  @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party             party?            @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  workflow_template workflow_template @relation(fields: [template_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([engagement_id], map: "idx_wfi_engagement")
+  @@index([current_stage], map: "idx_wfi_stage")
+  @@index([status], map: "idx_wfi_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model workflow_template {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String
+  version           Int                 @default(1)
+  description       String?
+  stages            Json
+  status            String              @default("draft")
+  deployed_at       DateTime?           @db.Timestamptz(6)
+  created_by        String?             @db.Uuid
+  created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  workflow_instance workflow_instance[]
+  user_account      user_account?       @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([name, version], map: "idx_wft_name_version")
 }
