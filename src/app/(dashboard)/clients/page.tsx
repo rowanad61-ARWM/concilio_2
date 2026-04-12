@@ -13,16 +13,19 @@ export default async function ClientsPage() {
     const givenName = party.person?.preferred_name || party.person?.legal_given_name || ""
     const familyName = party.person?.legal_family_name || ""
     const fullName = `${givenName} ${familyName}`.trim() || party.display_name
+    const cls = Array.isArray(party.client_classification)
+      ? party.client_classification[0]
+      : party.client_classification
     return {
       id: party.id,
       fullName,
       partyType: party.party_type,
       status: party.status,
       updatedAt: party.updated_at.toISOString(),
-      classification: party.client_classification
+      classification: cls
         ? {
-            serviceTier: party.client_classification.service_tier,
-            lifecycleStage: party.client_classification.lifecycle_stage,
+            serviceTier: cls.service_tier,
+            lifecycleStage: cls.lifecycle_stage,
           }
         : null,
     }

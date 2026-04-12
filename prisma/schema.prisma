@@ -96,6 +96,7 @@ model client_classification {
   notes               String?
   created_at          DateTime         @default(now()) @db.Timestamptz(6)
   updated_at          DateTime         @default(now()) @db.Timestamptz(6)
+  lifecycle_stage     String?
   user_account        user_account?    @relation(fields: [assigned_adviser_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   household_group     household_group? @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   party               party            @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
