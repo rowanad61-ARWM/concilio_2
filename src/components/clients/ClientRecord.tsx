@@ -11,7 +11,7 @@ type ClientRecordProps = {
 }
 
 type TimelineFilter = "all" | "emails" | "notes" | "docs"
-type NoteCategory = "phone_call" | "meeting" | "internal" | "action_required" | "fyi"
+type NoteCategory = "general" | "meeting" | "phone_call" | "email" | "compliance" | "other"
 
 const timelineFilters: { label: string; value: TimelineFilter }[] = [
   { label: "All", value: "all" },
@@ -21,11 +21,12 @@ const timelineFilters: { label: string; value: TimelineFilter }[] = [
 ]
 
 const noteCategories: { label: string; value: NoteCategory }[] = [
-  { label: "Phone Call", value: "phone_call" },
+  { label: "General", value: "general" },
   { label: "Meeting", value: "meeting" },
-  { label: "Internal", value: "internal" },
-  { label: "Action Required", value: "action_required" },
-  { label: "FYI", value: "fyi" },
+  { label: "Phone Call", value: "phone_call" },
+  { label: "Email", value: "email" },
+  { label: "Compliance", value: "compliance" },
+  { label: "Other", value: "other" },
 ]
 
 function formatDate(value: string | null) {
@@ -104,7 +105,7 @@ function NoteIcon() {
 export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [activeFilter, setActiveFilter] = useState<TimelineFilter>("all")
   const [isNotePanelOpen, setIsNotePanelOpen] = useState(false)
-  const [noteCategory, setNoteCategory] = useState<NoteCategory>("internal")
+  const [noteCategory, setNoteCategory] = useState<NoteCategory>("general")
   const [noteBody, setNoteBody] = useState("")
   const [isSaving, setIsSaving] = useState(false)
   const [localNotes, setLocalNotes] = useState(notes)
@@ -151,7 +152,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
         ...currentNotes,
       ])
       setNoteBody("")
-      setNoteCategory("internal")
+      setNoteCategory("general")
       setIsNotePanelOpen(false)
       setActiveFilter("notes")
     } catch (error) {
@@ -168,7 +169,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
   function handleCancelNote() {
     setNoteBody("")
-    setNoteCategory("internal")
+    setNoteCategory("general")
     setIsNotePanelOpen(false)
   }
 
