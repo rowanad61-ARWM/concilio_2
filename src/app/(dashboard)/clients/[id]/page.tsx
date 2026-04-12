@@ -11,7 +11,7 @@ export default async function ClientRecordPage({
 }) {
   const { id } = await params
 
-  const [party, fileNotes] = await Promise.all([
+  const [party, fileNotes, householdMembership] = await Promise.all([
     db.party.findUnique({
       where: { id },
       include: {
@@ -29,11 +29,35 @@ export default async function ClientRecordPage({
       },
       take: 50,
     }),
+    db.household_member.findFirst({
+      where: {
+        party_id: id,
+        end_date: null,
+      },
+      include: {
+        household_group: true,
+      },
+    }),
   ])
 
   if (!party) {
     notFound()
   }
+
+  const householdMembers = householdMembership
+    ? await db.household_member.findMany({
+        where: {
+          household_id: householdMembership.household_id,
+          end_date: null,
+        },
+        include: {
+          party: true,
+        },
+        orderBy: {
+          created_at: "asc",
+        },
+      })
+    : []
 
   const client: ClientDetail = {
     id: party.id,
@@ -41,6 +65,18 @@ export default async function ClientRecordPage({
     partyType: party.party_type,
     status: party.status,
     updatedAt: party.updated_at.toISOString(),
+    household: householdMembership
+      ? {
+          id: householdMembership.household_group.id,
+          name: householdMembership.household_group.household_name,
+          role: householdMembership.role_in_household,
+          members: householdMembers.map((member) => ({
+            id: member.party.id,
+            displayName: member.party.display_name,
+            role: member.role_in_household,
+          })),
+        }
+      : null,
     classification: party.client_classification
       ? {
           serviceTier: party.client_classification.service_tier,

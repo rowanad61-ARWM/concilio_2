@@ -111,6 +111,10 @@ function formatClassificationValue(value: string) {
     .join(" ")
 }
 
+function formatHouseholdRole(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
 function DetailField({
   label,
   value,
@@ -168,12 +172,16 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [isSavingChanges, setIsSavingChanges] = useState(false)
   const [editForm, setEditForm] = useState<EditFormState>(() => buildEditForm(client))
+  const [isLinkingHousehold, setIsLinkingHousehold] = useState(false)
+  const [householdNameInput, setHouseholdNameInput] = useState("")
+  const [isCreatingHousehold, setIsCreatingHousehold] = useState(false)
 
   const fullLegalName = clientData.person
     ? `${clientData.person.legalGivenName} ${clientData.person.legalFamilyName}`.trim()
     : null
 
   const visibleNotes = activeFilter === "all" || activeFilter === "notes" ? localNotes : []
+  const otherHouseholdMembers = clientData.household?.members.filter((member) => member.id !== clientData.id) ?? []
 
   function updateEditField<Key extends keyof EditFormState>(key: Key, value: EditFormState[Key]) {
     setEditForm((current) => ({ ...current, [key]: value }))
@@ -278,6 +286,56 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       console.error(error)
     } finally {
       setIsSavingChanges(false)
+    }
+  }
+
+  async function handleCreateHousehold() {
+    if (!householdNameInput.trim()) {
+      return
+    }
+
+    setIsCreatingHousehold(true)
+
+    try {
+      const response = await fetch("/api/households", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          householdName: householdNameInput,
+          memberIds: [clientData.id],
+          primaryMemberId: clientData.id,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to create household")
+      }
+
+      const result = await response.json()
+
+      setClientData((current) => ({
+        ...current,
+        household: {
+          id: result.id,
+          name: householdNameInput,
+          role: "primary",
+          members: [
+            {
+              id: current.id,
+              displayName: current.displayName,
+              role: "primary",
+            },
+          ],
+        },
+      }))
+      setHouseholdNameInput("")
+      setIsLinkingHousehold(false)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsCreatingHousehold(false)
     }
   }
 
@@ -392,6 +450,57 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 value={clientData.person?.preferredContactMethod ?? null}
               />
             </div>
+          </section>
+
+          <section className="mt-6 space-y-4">
+            <h2 className="text-[11px] font-medium text-[#113238]">Household</h2>
+            {clientData.household ? (
+              <div className="space-y-3">
+                <p className="text-[12px] font-medium text-[#113238]">{clientData.household.name}</p>
+                <p className="text-[11px] text-[#9ca3af]">{formatHouseholdRole(clientData.household.role)}</p>
+                {otherHouseholdMembers.length > 0 ? (
+                  <div className="space-y-1">
+                    {otherHouseholdMembers.map((member) => (
+                      <Link
+                        key={member.id}
+                        href={`/clients/${member.id}`}
+                        className="block text-[11px] text-[#113238] underline-offset-2 hover:underline"
+                      >
+                        {member.displayName}
+                      </Link>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-[11px] text-[#9ca3af]">No household</p>
+                <button
+                  type="button"
+                  onClick={() => setIsLinkingHousehold((current) => !current)}
+                  className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                >
+                  Link to household
+                </button>
+                {isLinkingHousehold ? (
+                  <div className="space-y-2">
+                    <input
+                      value={householdNameInput}
+                      onChange={(event) => setHouseholdNameInput(event.target.value)}
+                      className={inputClassName}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCreateHousehold}
+                      disabled={isCreatingHousehold}
+                      className="w-full rounded-[6px] bg-[#FF8C42] px-[8px] py-[6px] text-[10px] text-white disabled:opacity-60"
+                    >
+                      Create & link
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            )}
           </section>
 
           <section className="mt-6 space-y-4">

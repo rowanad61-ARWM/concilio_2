@@ -174,6 +174,9 @@ export default function ClientList({ clients }: ClientListProps) {
                     )}
                   </span>
                 </div>
+                {client.householdName ? (
+                  <p className="mt-1 text-[10px] text-[#9ca3af]">{client.householdName}</p>
+                ) : null}
               </div>
             </div>
             <div>

@@ -11,6 +11,16 @@ export type ClientDetail = {
   partyType: string
   status: string
   updatedAt: string
+  household: {
+    id: string
+    name: string
+    role: string
+    members: {
+      id: string
+      displayName: string
+      role: string
+    }[]
+  } | null
   classification: {
     serviceTier: string | null
     lifecycleStage: string | null

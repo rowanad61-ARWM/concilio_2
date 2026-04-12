@@ -1,11 +1,22 @@
-﻿import ClientList from "@/components/clients/ClientList"
+import ClientList from "@/components/clients/ClientList"
 import { db } from "@/lib/db"
 import type { ClientListItem } from "@/types/clients"
 
 export default async function ClientsPage() {
   const parties = await db.party.findMany({
     where: { party_type: "person" },
-    include: { person: true, client_classification: true },
+    include: {
+      person: true,
+      client_classification: true,
+      household_member: {
+        where: {
+          end_date: null,
+        },
+        include: {
+          household_group: true,
+        },
+      },
+    },
     orderBy: { display_name: "asc" },
   })
 
@@ -13,19 +24,18 @@ export default async function ClientsPage() {
     const givenName = party.person?.preferred_name || party.person?.legal_given_name || ""
     const familyName = party.person?.legal_family_name || ""
     const fullName = `${givenName} ${familyName}`.trim() || party.display_name
-    const cls = Array.isArray(party.client_classification)
-      ? party.client_classification[0]
-      : party.client_classification
+
     return {
       id: party.id,
       fullName,
       partyType: party.party_type,
       status: party.status,
       updatedAt: party.updated_at.toISOString(),
-      classification: cls
+      householdName: party.household_member[0]?.household_group.household_name ?? null,
+      classification: party.client_classification
         ? {
-            serviceTier: cls.service_tier,
-            lifecycleStage: cls.lifecycle_stage,
+            serviceTier: party.client_classification.service_tier,
+            lifecycleStage: party.client_classification.lifecycle_stage,
           }
         : null,
     }
