@@ -1,6 +1,7 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import type { ClientListItem } from "@/types/clients";
@@ -46,6 +47,7 @@ function getStatusClasses(status: string) {
 }
 
 export default function ClientList({ clients }: ClientListProps) {
+  const router = useRouter();
   const [activeFilter, setActiveFilter] = useState<FilterValue>("all");
 
   const filteredClients =
@@ -57,6 +59,11 @@ export default function ClientList({ clients }: ClientListProps) {
 
   return (
     <div className="p-6">
+      <div className="mb-[18px] flex items-center gap-2">
+        <h1 className="text-[17px] font-semibold text-[#113238]">Clients</h1>
+        <p className="text-[12px] text-[#6b7280]">{clients.length} contacts</p>
+      </div>
+
       <div className="mb-[18px] grid grid-cols-4 gap-[10px]">
         <div className="rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-3">
           <p className="text-[10px] uppercase tracking-[0.08em] text-[#6b7280]">Total Clients</p>
@@ -106,7 +113,8 @@ export default function ClientList({ clients }: ClientListProps) {
         {filteredClients.map((client) => (
           <div
             key={client.id}
-            className="grid grid-cols-[minmax(0,1.8fr)_140px_140px_110px] items-center border-b-[0.5px] border-[#e5e7eb] px-[14px] py-[11px] hover:bg-[#F5F7FA]"
+            onClick={() => router.push(`/clients/${client.id}`)}
+            className="grid cursor-pointer grid-cols-[minmax(0,1.8fr)_140px_140px_110px] items-center border-b-[0.5px] border-[#e5e7eb] px-[14px] py-[11px] hover:bg-[#F5F7FA]"
           >
             <div className="flex min-w-0 items-center gap-3">
               <div className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full bg-[#EAF0F1] text-[11px] font-semibold text-[#113238]">
@@ -128,6 +136,7 @@ export default function ClientList({ clients }: ClientListProps) {
             <div>
               <Link
                 href={`/clients/${client.id}`}
+                onClick={(event) => event.stopPropagation()}
                 className="inline-flex rounded-[6px] border-[0.5px] border-[#e5e7eb] px-[10px] py-1 text-[11px] text-[#113238]"
               >
                 View
@@ -139,4 +148,3 @@ export default function ClientList({ clients }: ClientListProps) {
     </div>
   );
 }
-
