@@ -547,6 +547,31 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     }
   }
 
+  async function handleCopyAddressFromMember(memberId: string) {
+    try {
+      const response = await fetch(`/api/clients/${memberId}/address`)
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch household member address")
+      }
+
+      const result = await response.json()
+      const copiedAddress = mapAddress(result.addressResidential)
+
+      setEditForm((current) => ({
+        ...current,
+        addressLine1: copiedAddress?.line1 ?? "",
+        addressLine2: copiedAddress?.line2 ?? "",
+        addressSuburb: copiedAddress?.suburb ?? "",
+        addressState: copiedAddress?.state ?? "",
+        addressPostcode: copiedAddress?.postcode ?? "",
+        addressCountry: copiedAddress?.country ?? "",
+      }))
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
   function openNotePanel() {
     setIsNotePanelOpen(true)
     setActiveFilter("notes")
@@ -662,6 +687,20 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
           <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
             <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Address</h2>
+            {isEditing && otherHouseholdMembers.length > 0 ? (
+              <div className="mb-[10px] space-y-1">
+                {otherHouseholdMembers.map((member) => (
+                  <button
+                    key={member.id}
+                    type="button"
+                    onClick={() => void handleCopyAddressFromMember(member.id)}
+                    className="block cursor-pointer border-0 bg-transparent p-0 text-left text-[11px] text-[#FF8C42] hover:underline"
+                  >
+                    Same address as {member.displayName}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {isEditing ? (
               <div className="space-y-[10px]">
                 <EditField label="Line 1">
