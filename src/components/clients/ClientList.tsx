@@ -200,9 +200,20 @@ export default function ClientList({
                 <div className="min-w-0">
                   <p className="truncate text-[13px] font-medium text-[#113238]">{item.displayName}</p>
                   {item.isHousehold ? (
-                    <p className="mt-1 truncate text-[10px] text-[#9ca3af]">
-                      {item.members.map((member) => member.displayName).join(" · ")}
-                    </p>
+                    <div className="mt-1 truncate text-[10px] text-[#9ca3af]">
+                      {item.members.map((member, index) => (
+                        <span key={member.id}>
+                          {index > 0 ? <span className="px-1 text-[#9ca3af]">{"\u00B7"}</span> : null}
+                          <Link
+                            href={`/clients/${member.id}`}
+                            onClick={(event) => event.stopPropagation()}
+                            className="cursor-pointer text-[#9ca3af] hover:text-[#113238]"
+                          >
+                            {member.displayName}
+                          </Link>
+                        </span>
+                      ))}
+                    </div>
                   ) : null}
                   <div className="mt-1">
                     <span
