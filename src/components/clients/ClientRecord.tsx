@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import Link from "next/link"
 import { useState } from "react"
@@ -66,7 +66,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
       <header className="flex items-start justify-between border-b-[0.5px] border-[#e5e7eb] bg-white px-5 py-[14px]">
         <div className="space-y-2">
           <Link href="/clients" className="inline-flex text-[11px] text-[#9ca3af]">
-            ← Clients
+            ← Clients
           </Link>
           <div className="flex items-center gap-2">
             <h1 className="text-[17px] font-semibold text-[#113238]">{client.displayName}</h1>
@@ -187,3 +187,4 @@ export default function ClientRecord({ client }: ClientRecordProps) {
     </div>
   )
 }
+
