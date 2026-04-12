@@ -13,6 +13,17 @@ type ClientRecordProps = {
 type TimelineFilter = "all" | "emails" | "notes" | "docs"
 type NoteCategory = "general" | "meeting" | "phone_call" | "email" | "compliance" | "other"
 
+type EditFormState = {
+  firstName: string
+  lastName: string
+  preferredName: string
+  dateOfBirth: string
+  email: string
+  mobile: string
+  relationshipStatus: string
+  countryOfResidence: string
+}
+
 const timelineFilters: { label: string; value: TimelineFilter }[] = [
   { label: "All", value: "all" },
   { label: "Emails", value: "emails" },
@@ -28,6 +39,24 @@ const noteCategories: { label: string; value: NoteCategory }[] = [
   { label: "Compliance", value: "compliance" },
   { label: "Other", value: "other" },
 ]
+
+const relationshipOptions = ["single", "married", "de_facto", "separated", "divorced", "widowed"]
+
+const inputClassName =
+  "w-full rounded-[6px] border-[0.5px] border-[#e5e7eb] px-[8px] py-[6px] text-[12px] text-[#113238] outline-none"
+
+function buildEditForm(client: ClientDetail): EditFormState {
+  return {
+    firstName: client.person?.legalGivenName ?? "",
+    lastName: client.person?.legalFamilyName ?? "",
+    preferredName: client.person?.preferredName ?? "",
+    dateOfBirth: client.person?.dateOfBirth ? client.person.dateOfBirth.slice(0, 10) : "",
+    email: client.person?.emailPrimary ?? "",
+    mobile: client.person?.mobilePhone ?? "",
+    relationshipStatus: client.person?.relationshipStatus ?? "",
+    countryOfResidence: client.person?.countryOfResidence ?? "",
+  }
+}
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -97,6 +126,21 @@ function DetailField({
   )
 }
 
+function EditField({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-[10px] text-[#9ca3af]">{label}</span>
+      {children}
+    </label>
+  )
+}
+
 function NoteIcon() {
   return (
     <div className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-[#FEF0E7] text-[#C45F1A]">
@@ -114,18 +158,26 @@ function NoteIcon() {
 }
 
 export default function ClientRecord({ client, notes }: ClientRecordProps) {
+  const [clientData, setClientData] = useState(client)
   const [activeFilter, setActiveFilter] = useState<TimelineFilter>("all")
   const [isNotePanelOpen, setIsNotePanelOpen] = useState(false)
   const [noteCategory, setNoteCategory] = useState<NoteCategory>("general")
   const [noteBody, setNoteBody] = useState("")
   const [isSaving, setIsSaving] = useState(false)
   const [localNotes, setLocalNotes] = useState(notes)
+  const [isEditing, setIsEditing] = useState(false)
+  const [isSavingChanges, setIsSavingChanges] = useState(false)
+  const [editForm, setEditForm] = useState<EditFormState>(() => buildEditForm(client))
 
-  const fullLegalName = client.person
-    ? `${client.person.legalGivenName} ${client.person.legalFamilyName}`.trim()
+  const fullLegalName = clientData.person
+    ? `${clientData.person.legalGivenName} ${clientData.person.legalFamilyName}`.trim()
     : null
 
   const visibleNotes = activeFilter === "all" || activeFilter === "notes" ? localNotes : []
+
+  function updateEditField<Key extends keyof EditFormState>(key: Key, value: EditFormState[Key]) {
+    setEditForm((current) => ({ ...current, [key]: value }))
+  }
 
   async function handleSaveNote() {
     if (!noteBody.trim()) {
@@ -141,7 +193,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          partyId: client.id,
+          partyId: clientData.id,
           body: noteBody,
           category: noteCategory,
         }),
@@ -173,6 +225,62 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     }
   }
 
+  async function handleSaveChanges() {
+    setIsSavingChanges(true)
+
+    try {
+      const response = await fetch(`/api/clients/${clientData.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(editForm),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to update client")
+      }
+
+      const updated = await response.json()
+
+      const nextClientData: ClientDetail = {
+        ...clientData,
+        displayName: updated.displayName,
+        person: clientData.person
+          ? {
+              ...clientData.person,
+              legalGivenName: updated.person.legal_given_name,
+              legalFamilyName: updated.person.legal_family_name,
+              preferredName: updated.person.preferred_name,
+              dateOfBirth: updated.person.date_of_birth,
+              emailPrimary: updated.person.email_primary,
+              mobilePhone: updated.person.mobile_phone,
+              relationshipStatus: updated.person.relationship_status,
+              countryOfResidence: updated.person.country_of_residence,
+            }
+          : {
+              legalGivenName: updated.person.legal_given_name,
+              legalFamilyName: updated.person.legal_family_name,
+              preferredName: updated.person.preferred_name,
+              dateOfBirth: updated.person.date_of_birth,
+              mobilePhone: updated.person.mobile_phone,
+              emailPrimary: updated.person.email_primary,
+              relationshipStatus: updated.person.relationship_status,
+              countryOfResidence: updated.person.country_of_residence,
+              preferredContactMethod: null,
+            },
+      }
+
+      setClientData(nextClientData)
+      setEditForm(buildEditForm(nextClientData))
+      setIsEditing(false)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsSavingChanges(false)
+    }
+  }
+
   function openNotePanel() {
     setIsNotePanelOpen(true)
     setActiveFilter("notes")
@@ -184,6 +292,16 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     setIsNotePanelOpen(false)
   }
 
+  function handleStartEditing() {
+    setEditForm(buildEditForm(clientData))
+    setIsEditing(true)
+  }
+
+  function handleCancelEditing() {
+    setEditForm(buildEditForm(clientData))
+    setIsEditing(false)
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <header className="flex items-start justify-between border-b-[0.5px] border-[#e5e7eb] bg-white px-5 py-[14px]">
@@ -192,17 +310,24 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             {"\u2190"} Clients
           </Link>
           <div className="flex items-center gap-2">
-            <h1 className="text-[17px] font-semibold text-[#113238]">{client.displayName}</h1>
+            <h1 className="text-[17px] font-semibold text-[#113238]">{clientData.displayName}</h1>
             <span
-              className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${getStatusClasses(client.status)}`}
+              className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${getStatusClasses(clientData.status)}`}
             >
-              {client.status}
+              {clientData.status}
             </span>
           </div>
           <p className="text-[11px] text-[#6b7280]">Adviser: Andrew Rowan</p>
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleStartEditing}
+            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[11px] text-[#113238]"
+          >
+            Edit
+          </button>
           <button
             type="button"
             className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[11px] text-[#113238]"
@@ -230,12 +355,41 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           <section className="space-y-4">
             <h2 className="text-[11px] font-medium text-[#113238]">Contact</h2>
             <div className="space-y-3">
-              <DetailField label="Email" value={client.person?.emailPrimary ?? null} />
-              <DetailField label="Mobile" value={client.person?.mobilePhone ?? null} />
-              <DetailField label="Date of birth" value={formatDate(client.person?.dateOfBirth ?? null)} />
+              {isEditing ? (
+                <>
+                  <EditField label="Email">
+                    <input
+                      value={editForm.email}
+                      onChange={(event) => updateEditField("email", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+                  <EditField label="Mobile">
+                    <input
+                      value={editForm.mobile}
+                      onChange={(event) => updateEditField("mobile", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+                  <EditField label="Date of birth">
+                    <input
+                      type="date"
+                      value={editForm.dateOfBirth}
+                      onChange={(event) => updateEditField("dateOfBirth", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+                </>
+              ) : (
+                <>
+                  <DetailField label="Email" value={clientData.person?.emailPrimary ?? null} />
+                  <DetailField label="Mobile" value={clientData.person?.mobilePhone ?? null} />
+                  <DetailField label="Date of birth" value={formatDate(clientData.person?.dateOfBirth ?? null)} />
+                </>
+              )}
               <DetailField
                 label="Preferred contact method"
-                value={client.person?.preferredContactMethod ?? null}
+                value={clientData.person?.preferredContactMethod ?? null}
               />
             </div>
           </section>
@@ -243,9 +397,58 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           <section className="mt-6 space-y-4">
             <h2 className="text-[11px] font-medium text-[#113238]">Personal</h2>
             <div className="space-y-3">
-              <DetailField label="Full legal name" value={fullLegalName} />
-              <DetailField label="Relationship status" value={client.person?.relationshipStatus ?? null} />
-              <DetailField label="Country of residence" value={client.person?.countryOfResidence ?? null} />
+              {isEditing ? (
+                <>
+                  <EditField label="First name">
+                    <input
+                      value={editForm.firstName}
+                      onChange={(event) => updateEditField("firstName", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+                  <EditField label="Last name">
+                    <input
+                      value={editForm.lastName}
+                      onChange={(event) => updateEditField("lastName", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+                  <EditField label="Preferred name">
+                    <input
+                      value={editForm.preferredName}
+                      onChange={(event) => updateEditField("preferredName", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+                  <EditField label="Relationship status">
+                    <select
+                      value={editForm.relationshipStatus}
+                      onChange={(event) => updateEditField("relationshipStatus", event.target.value)}
+                      className={inputClassName}
+                    >
+                      <option value="">Select</option>
+                      {relationshipOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {formatCategory(option)}
+                        </option>
+                      ))}
+                    </select>
+                  </EditField>
+                  <EditField label="Country of residence">
+                    <input
+                      value={editForm.countryOfResidence}
+                      onChange={(event) => updateEditField("countryOfResidence", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+                </>
+              ) : (
+                <>
+                  <DetailField label="Full legal name" value={fullLegalName} />
+                  <DetailField label="Relationship status" value={clientData.person?.relationshipStatus ?? null} />
+                  <DetailField label="Country of residence" value={clientData.person?.countryOfResidence ?? null} />
+                </>
+              )}
             </div>
           </section>
 
@@ -256,20 +459,40 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
           <section className="mt-6 space-y-4">
             <h2 className="text-[11px] font-medium text-[#113238]">Service</h2>
-            {client.classification?.serviceTier ? (
+            {clientData.classification?.serviceTier ? (
               <DetailField
                 label="Service tier"
-                value={formatClassificationValue(client.classification.serviceTier)}
+                value={formatClassificationValue(clientData.classification.serviceTier)}
               />
-            ) : client.classification?.lifecycleStage ? (
+            ) : clientData.classification?.lifecycleStage ? (
               <DetailField
                 label="Lifecycle stage"
-                value={formatClassificationValue(client.classification.lifecycleStage)}
+                value={formatClassificationValue(clientData.classification.lifecycleStage)}
               />
             ) : (
               <p className="text-[12px] text-[#113238]">Not classified</p>
             )}
           </section>
+
+          {isEditing ? (
+            <div className="mt-6">
+              <button
+                type="button"
+                onClick={handleSaveChanges}
+                disabled={isSavingChanges}
+                className="w-full rounded-[7px] bg-[#FF8C42] px-4 py-[10px] text-[12px] text-white disabled:opacity-60"
+              >
+                {isSavingChanges ? "Saving..." : "Save changes"}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelEditing}
+                className="mt-[6px] w-full rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-4 py-[10px] text-[12px] text-[#113238]"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : null}
         </aside>
 
         <section className="flex flex-1 flex-col overflow-y-auto bg-[#F7F9FB] px-[18px] py-[14px]">
