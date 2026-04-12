@@ -189,7 +189,7 @@ export default function Sidebar() {
         </div>
         <div className="min-w-0">
           <p className="text-[12px] font-medium text-[#BFE3D3]">Andrew Rowan</p>
-          <p className="text-[10px] text-[rgba(191,227,211,0.4)]">Owner Â· Adviser</p>
+          <p className="text-[10px] text-[rgba(191,227,211,0.4)]">Owner · Adviser</p>
         </div>
       </div>
     </aside>
