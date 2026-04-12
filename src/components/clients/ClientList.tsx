@@ -14,6 +14,7 @@ type ClientListProps = {
   householdAwareTotal: number;
   householdAwareActive: number;
   contactCount: number;
+  search: string | null;
 };
 
 const filters: { label: string; value: FilterValue }[] = [
@@ -122,6 +123,7 @@ export default function ClientList({
   householdAwareTotal,
   householdAwareActive,
   contactCount,
+  search,
 }: ClientListProps) {
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState<FilterValue>("all");
@@ -177,6 +179,16 @@ export default function ClientList({
           );
         })}
       </div>
+
+      {search ? (
+        <div className="mb-[10px] flex items-center gap-3 text-[13px] text-[#6b7280]">
+          <span>Results for '{search}'</span>
+          <span>{householdItems.length} results</span>
+          <Link href="/clients" className="text-[#113238] hover:underline">
+            Clear search
+          </Link>
+        </div>
+      ) : null}
 
       <div className="overflow-hidden rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white">
         <div className="grid grid-cols-[minmax(0,1.8fr)_140px_140px_110px] bg-[#F8FAFB] px-[14px] py-[9px] text-[11px] uppercase text-[#6b7280]">

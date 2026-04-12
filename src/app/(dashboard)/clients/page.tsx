@@ -38,9 +38,55 @@ function sortMembersByRole(a: GroupMember, b: GroupMember) {
   return a.displayName.localeCompare(b.displayName)
 }
 
-export default async function ClientsPage() {
+export default async function ClientsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ search?: string }>
+}) {
+  const { search } = await searchParams
+  const normalizedSearch = search?.trim() ?? ""
+
   const parties = await db.party.findMany({
-    where: { party_type: "person" },
+    where: {
+      party_type: "person",
+      AND: normalizedSearch
+        ? [
+            {
+              OR: [
+                { display_name: { contains: normalizedSearch, mode: "insensitive" } },
+                {
+                  person: {
+                    is: {
+                      email_primary: { contains: normalizedSearch, mode: "insensitive" },
+                    },
+                  },
+                },
+                {
+                  person: {
+                    is: {
+                      mobile_phone: { contains: normalizedSearch, mode: "insensitive" },
+                    },
+                  },
+                },
+                {
+                  person: {
+                    is: {
+                      legal_given_name: { contains: normalizedSearch, mode: "insensitive" },
+                    },
+                  },
+                },
+                {
+                  person: {
+                    is: {
+                      legal_family_name: { contains: normalizedSearch, mode: "insensitive" },
+                    },
+                  },
+                },
+              ],
+            },
+          ]
+        : [],
+    },
     include: {
       person: true,
       client_classification: true,
@@ -163,6 +209,7 @@ export default async function ClientsPage() {
       householdAwareTotal={householdAwareTotal}
       householdAwareActive={householdAwareActive}
       contactCount={parties.length}
+      search={normalizedSearch || null}
     />
   )
 }
