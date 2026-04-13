@@ -53,4 +53,14 @@ export type ClientDetail = {
     value: string
     isPrimary: boolean
   }[]
+  verificationChecks: {
+    id: string
+    checkType: string
+    documentType: string | null
+    documentReference: string | null
+    result: string
+    verifiedAt: string | null
+    expiryDate: string | null
+    notes: string | null
+  }[]
 }

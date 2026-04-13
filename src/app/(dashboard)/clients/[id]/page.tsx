@@ -26,6 +26,22 @@ function mapAddress(value: unknown): ClientAddress | null {
   }
 }
 
+function mapVerificationResult(value: string) {
+  switch (value.toLowerCase()) {
+    case "verified":
+      return "pass"
+    case "failed":
+    case "expired":
+      return "fail"
+    case "pass":
+    case "pending":
+    case "fail":
+      return value.toLowerCase()
+    default:
+      return "pending"
+  }
+}
+
 export default async function ClientRecordPage({
   params,
 }: {
@@ -33,7 +49,7 @@ export default async function ClientRecordPage({
 }) {
   const { id } = await params
 
-  const [party, fileNotes, householdMembership] = await Promise.all([
+  const [party, fileNotes, householdMembership, verificationChecks] = await Promise.all([
     db.party.findUnique({
       where: { id },
       include: {
@@ -58,6 +74,14 @@ export default async function ClientRecordPage({
       },
       include: {
         household_group: true,
+      },
+    }),
+    db.verification_check.findMany({
+      where: {
+        party_id: id,
+      },
+      orderBy: {
+        created_at: "desc",
       },
     }),
   ])
@@ -125,6 +149,16 @@ export default async function ClientRecordPage({
       channel: contactMethod.channel,
       value: contactMethod.value,
       isPrimary: contactMethod.preferred_flag ?? false,
+    })),
+    verificationChecks: verificationChecks.map((check) => ({
+      id: check.id,
+      checkType: check.check_type,
+      documentType: check.identity_document_type,
+      documentReference: check.document_reference,
+      result: mapVerificationResult(check.result),
+      verifiedAt: check.verified_at?.toISOString() ?? null,
+      expiryDate: check.expiry_date?.toISOString() ?? null,
+      notes: check.notes,
     })),
   }
 

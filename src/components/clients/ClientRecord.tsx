@@ -14,6 +14,9 @@ type TimelineFilter = "all" | "emails" | "notes" | "docs"
 type NoteCategory = "general" | "meeting" | "phone_call" | "email" | "compliance" | "other"
 type LifecycleStage = "prospect" | "engagement" | "advising" | "implementation" | "lapsed"
 type ServiceTier = "transaction" | "cashflow_manager" | "wealth_manager" | "wealth_manager_plus"
+type VerificationResult = "pass" | "pending" | "fail"
+type VerificationDocumentType = "passport" | "drivers_licence" | "medicare_card" | "birth_certificate" | "other"
+type VerificationCheck = ClientDetail["verificationChecks"][number]
 
 type EditFormState = {
   firstName: string
@@ -30,6 +33,14 @@ type EditFormState = {
   addressState: string
   addressPostcode: string
   addressCountry: string
+}
+
+type AddIdFormState = {
+  documentType: VerificationDocumentType
+  documentReference: string
+  expiryDate: string
+  result: VerificationResult
+  notes: string
 }
 
 const timelineFilters: { label: string; value: TimelineFilter }[] = [
@@ -62,6 +73,18 @@ const serviceTierOptions: { label: string; value: ServiceTier | null }[] = [
   { label: "Cashflow Manager", value: "cashflow_manager" },
   { label: "Wealth Manager", value: "wealth_manager" },
   { label: "Wealth Manager+", value: "wealth_manager_plus" },
+]
+const verificationDocumentTypeOptions: { label: string; value: VerificationDocumentType }[] = [
+  { label: "Passport", value: "passport" },
+  { label: "Driver's Licence", value: "drivers_licence" },
+  { label: "Medicare Card", value: "medicare_card" },
+  { label: "Birth Certificate", value: "birth_certificate" },
+  { label: "Other", value: "other" },
+]
+const verificationResultOptions: { label: string; value: VerificationResult }[] = [
+  { label: "Pass", value: "pass" },
+  { label: "Pending", value: "pending" },
+  { label: "Fail", value: "fail" },
 ]
 
 const inputClassName =
@@ -101,6 +124,16 @@ function mapAddress(value: unknown): ClientAddress | null {
     state: typeof address.state === "string" ? address.state : null,
     postcode: typeof address.postcode === "string" ? address.postcode : null,
     country: typeof address.country === "string" ? address.country : null,
+  }
+}
+
+function buildAddIdForm(): AddIdFormState {
+  return {
+    documentType: "passport",
+    documentReference: "",
+    expiryDate: "",
+    result: "pending",
+    notes: "",
   }
 }
 
@@ -161,6 +194,94 @@ function formatDate(value: string | null) {
     month: "short",
     year: "numeric",
   }).format(new Date(value))
+}
+
+function formatVerificationResult(value: string): VerificationResult {
+  const normalized = value.toLowerCase()
+
+  if (normalized === "pass" || normalized === "verified") {
+    return "pass"
+  }
+
+  if (normalized === "fail" || normalized === "failed" || normalized === "expired") {
+    return "fail"
+  }
+
+  return "pending"
+}
+
+function getVerificationResultBadgeClasses(result: VerificationResult) {
+  switch (result) {
+    case "pass":
+      return "bg-[#E6F0EC] text-[#0F5C3A]"
+    case "fail":
+      return "bg-[#FCE8E8] text-[#E24B4A]"
+    default:
+      return "bg-[#F3F4F6] text-[#6B7280]"
+  }
+}
+
+function formatDocumentType(value: string | null) {
+  if (!value) {
+    return "ID Document"
+  }
+
+  const normalized = value.toLowerCase()
+  switch (normalized) {
+    case "passport":
+      return "Passport"
+    case "drivers_licence":
+      return "Driver's Licence"
+    case "medicare_card":
+      return "Medicare Card"
+    case "birth_certificate":
+      return "Birth Certificate"
+    case "other":
+      return "Other"
+    default:
+      return formatCategory(value)
+  }
+}
+
+function getExpiryState(value: string | null) {
+  if (!value) {
+    return "none"
+  }
+
+  const parsedDate = new Date(value)
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "none"
+  }
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const expiryDate = new Date(parsedDate)
+  expiryDate.setHours(0, 0, 0, 0)
+
+  if (expiryDate < today) {
+    return "expired"
+  }
+
+  const sixtyDaysFromNow = new Date(today)
+  sixtyDaysFromNow.setDate(sixtyDaysFromNow.getDate() + 60)
+
+  if (expiryDate <= sixtyDaysFromNow) {
+    return "dueSoon"
+  }
+
+  return "active"
+}
+
+function getExpiryTextClass(expiryState: string) {
+  switch (expiryState) {
+    case "expired":
+      return "text-[#E24B4A]"
+    case "dueSoon":
+      return "text-[#FF8C42]"
+    default:
+      return "text-[#113238]"
+  }
 }
 
 function formatTimelineTimestamp(value: string) {
@@ -273,6 +394,7 @@ function NoteIcon() {
 
 export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [clientData, setClientData] = useState(client)
+  const [verificationChecks, setVerificationChecks] = useState<VerificationCheck[]>(client.verificationChecks)
   const [activeFilter, setActiveFilter] = useState<TimelineFilter>("all")
   const [isNotePanelOpen, setIsNotePanelOpen] = useState(false)
   const [noteCategory, setNoteCategory] = useState<NoteCategory>("general")
@@ -289,6 +411,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [isUpdatingLifecycle, setIsUpdatingLifecycle] = useState(false)
   const [isServiceTierMenuOpen, setIsServiceTierMenuOpen] = useState(false)
   const [isUpdatingServiceTier, setIsUpdatingServiceTier] = useState(false)
+  const [isAddIdFormOpen, setIsAddIdFormOpen] = useState(false)
+  const [isSavingIdVerification, setIsSavingIdVerification] = useState(false)
+  const [addIdForm, setAddIdForm] = useState<AddIdFormState>(() => buildAddIdForm())
 
   const fullLegalName = clientData.person
     ? `${clientData.person.legalGivenName} ${clientData.person.legalFamilyName}`.trim()
@@ -306,6 +431,10 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
   function updateEditField<Key extends keyof EditFormState>(key: Key, value: EditFormState[Key]) {
     setEditForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function updateAddIdField<Key extends keyof AddIdFormState>(key: Key, value: AddIdFormState[Key]) {
+    setAddIdForm((current) => ({ ...current, [key]: value }))
   }
 
   async function handleSaveNote() {
@@ -572,6 +701,50 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     }
   }
 
+  async function handleSaveVerificationCheck() {
+    setIsSavingIdVerification(true)
+
+    try {
+      const response = await fetch(`/api/clients/${clientData.id}/verification`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          documentType: addIdForm.documentType,
+          documentReference: addIdForm.documentReference,
+          expiryDate: addIdForm.expiryDate,
+          result: addIdForm.result,
+          notes: addIdForm.notes,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to create verification check")
+      }
+
+      const created = await response.json()
+      const createdCheck: VerificationCheck = {
+        id: created.id,
+        checkType: created.check_type,
+        documentType: created.identity_document_type,
+        documentReference: created.document_reference,
+        result: formatVerificationResult(created.result),
+        verifiedAt: created.verified_at,
+        expiryDate: created.expiry_date,
+        notes: created.notes,
+      }
+
+      setVerificationChecks((current) => [createdCheck, ...current])
+      setAddIdForm(buildAddIdForm())
+      setIsAddIdFormOpen(false)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsSavingIdVerification(false)
+    }
+  }
+
   function openNotePanel() {
     setIsNotePanelOpen(true)
     setActiveFilter("notes")
@@ -591,6 +764,15 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   function handleCancelEditing() {
     setEditForm(buildEditForm(clientData))
     setIsEditing(false)
+  }
+
+  function handleOpenAddIdForm() {
+    setIsAddIdFormOpen(true)
+  }
+
+  function handleCancelAddIdForm() {
+    setAddIdForm(buildAddIdForm())
+    setIsAddIdFormOpen(false)
   }
 
   return (
@@ -884,8 +1066,131 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           </section>
 
           <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
-            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Identity</h2>
-            <p className="text-[11px] text-[#9ca3af]">No ID documents on file</p>
+            <div className="mb-[10px] flex items-center justify-between">
+              <h2 className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Identity</h2>
+              <button
+                type="button"
+                onClick={handleOpenAddIdForm}
+                className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+              >
+                + Add ID
+              </button>
+            </div>
+
+            {isAddIdFormOpen ? (
+              <div className="mb-3 space-y-[10px] rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-[10px]">
+                <EditField label="Document type">
+                  <select
+                    value={addIdForm.documentType}
+                    onChange={(event) => updateAddIdField("documentType", event.target.value as VerificationDocumentType)}
+                    className={inputClassName}
+                  >
+                    {verificationDocumentTypeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </EditField>
+
+                <EditField label="Document reference">
+                  <input
+                    value={addIdForm.documentReference}
+                    onChange={(event) => updateAddIdField("documentReference", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <EditField label="Expiry date">
+                  <input
+                    type="date"
+                    value={addIdForm.expiryDate}
+                    onChange={(event) => updateAddIdField("expiryDate", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <EditField label="Result">
+                  <select
+                    value={addIdForm.result}
+                    onChange={(event) => updateAddIdField("result", event.target.value as VerificationResult)}
+                    className={inputClassName}
+                  >
+                    {verificationResultOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </EditField>
+
+                <EditField label="Notes (optional)">
+                  <textarea
+                    value={addIdForm.notes}
+                    onChange={(event) => updateAddIdField("notes", event.target.value)}
+                    className={`${inputClassName} min-h-[70px] resize-y`}
+                  />
+                </EditField>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveVerificationCheck}
+                    disabled={isSavingIdVerification}
+                    className="rounded-[7px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white disabled:opacity-60"
+                  >
+                    {isSavingIdVerification ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelAddIdForm}
+                    className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {verificationChecks.length === 0 ? (
+              <p className="text-[12px] text-[#9ca3af]">No ID documents on file</p>
+            ) : (
+              <div className="space-y-2">
+                {verificationChecks.map((check) => {
+                  const result = formatVerificationResult(check.result)
+                  const expiryState = getExpiryState(check.expiryDate)
+
+                  return (
+                    <div key={check.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-[10px]">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[12px] font-medium text-[#113238]">{formatDocumentType(check.documentType)}</p>
+                        <span
+                          className={`inline-flex rounded-[999px] px-[8px] py-[2px] text-[10px] uppercase ${getVerificationResultBadgeClasses(result)}`}
+                        >
+                          {result}
+                        </span>
+                      </div>
+
+                      <p className="mt-1 text-[12px] text-[#6b7280]">
+                        {check.documentReference?.trim()
+                          ? `Reference: ${check.documentReference}`
+                          : "Reference not provided"}
+                      </p>
+
+                      {check.expiryDate ? (
+                        <p className={`mt-1 text-[12px] ${getExpiryTextClass(expiryState)}`}>
+                          Expires {formatDate(check.expiryDate)}
+                        </p>
+                      ) : null}
+
+                      <p className="mt-1 text-[11px] text-[#9ca3af]">verified {formatDate(check.verifiedAt)}</p>
+
+                      {check.notes ? <p className="mt-1 text-[11px] text-[#6b7280]">{check.notes}</p> : null}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </section>
 
           <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
