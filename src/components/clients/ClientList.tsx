@@ -182,7 +182,7 @@ export default function ClientList({
 
       {search ? (
         <div className="mb-[10px] flex items-center gap-3 text-[13px] text-[#6b7280]">
-          <span>Results for '{search}'</span>
+          <span>Results for &apos;{search}&apos;</span>
           <span>{householdItems.length} results</span>
           <Link href="/clients" className="text-[#113238] hover:underline">
             Clear search
