@@ -6,6 +6,7 @@
  */
 
 import { db } from '@/lib/db'
+import type { Prisma } from '@prisma/client'
 
 export type AuditAction =
   | 'CREATE'
@@ -34,18 +35,24 @@ export interface AuditEventInput {
 }
 
 export async function writeAuditEvent(input: AuditEventInput): Promise<void> {
+  const details: Prisma.InputJsonObject = {
+    before: (input.beforeState ?? {}) as Prisma.InputJsonObject,
+    after: (input.afterState ?? {}) as Prisma.InputJsonObject,
+    ip_address: input.ipAddress ?? null,
+    user_agent: input.userAgent ?? null,
+  }
+
   try {
     await db.audit_event.create({
       data: {
-        user_id: input.userId,
-        action: input.action,
-        entity_type: input.entityType,
-        entity_id: input.entityId,
-        before_state: input.beforeState ?? {},
-        after_state: input.afterState ?? {},
-        channel: input.channel,
-        ip_address: input.ipAddress ?? null,
-        user_agent: input.userAgent ?? null,
+        event_type: input.action,
+        actor_type: input.channel === 'staff_ui' ? 'user' :
+                    input.channel === 'portal' ? 'portal' :
+                    input.channel === 'api' ? 'api' : 'system',
+        actor_id: input.userId,
+        subject_type: input.entityType,
+        subject_id: input.entityId,
+        details,
       },
     })
   } catch (error) {

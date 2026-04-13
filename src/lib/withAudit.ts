@@ -19,7 +19,7 @@ export function withAudit(
 
     if (response.ok) {
       void writeAuditEvent({
-        userId: 'system',
+        userId: '00000000-0000-0000-0000-000000000001',
         action,
         entityType,
         entityId: 'unknown',
