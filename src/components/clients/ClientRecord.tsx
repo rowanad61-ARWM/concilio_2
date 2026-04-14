@@ -20,6 +20,7 @@ type VerificationResult = "pass" | "pending" | "fail"
 type VerificationDocumentType = "passport" | "drivers_licence" | "medicare_card" | "birth_certificate" | "other"
 type VerificationCheck = ClientDetail["verificationChecks"][number]
 type IncomeFrequency = "weekly" | "fortnightly" | "monthly" | "annual"
+type LiabilityRepaymentFrequency = "weekly" | "fortnightly" | "monthly"
 
 type EditFormState = {
   firstName: string
@@ -80,6 +81,59 @@ type IncomeFormState = {
   isGross: boolean
 }
 
+type PropertyAssetItem = {
+  id: string
+  address: {
+    line1: string | null
+    suburb: string | null
+    state: string | null
+    postcode: string | null
+  }
+  usageType: string | null
+  currentValue: number
+}
+
+type FinancialAccountItem = {
+  id: string
+  accountType: string
+  currentBalance: number
+  institutionName: string | null
+}
+
+type LiabilityItem = {
+  id: string
+  liabilityType: string
+  description: string | null
+  currentBalance: number
+  interestRate: number | null
+  repaymentAmount: number | null
+  repaymentFrequency: string | null
+}
+
+type PropertyFormState = {
+  usageType: string
+  currentValue: string
+  addressLine1: string
+  suburb: string
+  state: string
+  postcode: string
+}
+
+type AccountFormState = {
+  accountType: string
+  currentBalance: string
+  institutionName: string
+}
+
+type LiabilityFormState = {
+  liabilityType: string
+  description: string
+  currentBalance: string
+  interestRate: string
+  repaymentAmount: string
+  repaymentFrequency: LiabilityRepaymentFrequency
+}
+
 const timelineFilters: { label: string; value: TimelineFilter }[] = [
   { label: "All", value: "all" },
   { label: "Emails", value: "emails" },
@@ -123,6 +177,35 @@ const incomeTypeOptions = [
   "business",
   "centrelink",
   "other",
+]
+const propertyUsageOptions = ["owner_occupied", "investment", "holiday", "commercial", "rural", "other"]
+const accountTypeOptions = [
+  "bank",
+  "term_deposit",
+  "wrap_platform",
+  "super_accumulation",
+  "super_pension",
+  "direct_shares",
+  "managed_fund",
+  "insurance",
+  "loan",
+  "credit_card",
+  "other",
+]
+const liabilityTypeOptions = [
+  "home_loan",
+  "investment_loan",
+  "personal_loan",
+  "car_loan",
+  "credit_card",
+  "margin_loan",
+  "business_loan",
+  "other",
+]
+const liabilityRepaymentFrequencyOptions: { label: string; value: LiabilityRepaymentFrequency }[] = [
+  { label: "Weekly", value: "weekly" },
+  { label: "Fortnightly", value: "fortnightly" },
+  { label: "Monthly", value: "monthly" },
 ]
 const incomeFrequencyOptions: { label: string; value: IncomeFrequency }[] = [
   { label: "Weekly", value: "weekly" },
@@ -228,6 +311,36 @@ function buildIncomeForm(): IncomeFormState {
     amount: "",
     frequency: "monthly",
     isGross: true,
+  }
+}
+
+function buildPropertyForm(): PropertyFormState {
+  return {
+    usageType: "owner_occupied",
+    currentValue: "",
+    addressLine1: "",
+    suburb: "",
+    state: "",
+    postcode: "",
+  }
+}
+
+function buildAccountForm(): AccountFormState {
+  return {
+    accountType: "bank",
+    currentBalance: "",
+    institutionName: "",
+  }
+}
+
+function buildLiabilityForm(): LiabilityFormState {
+  return {
+    liabilityType: "home_loan",
+    description: "",
+    currentBalance: "",
+    interestRate: "",
+    repaymentAmount: "",
+    repaymentFrequency: "monthly",
   }
 }
 
@@ -468,6 +581,19 @@ function formatIncomeFrequency(value: string) {
   return formatCategory(value)
 }
 
+function formatAddressSummary(address: {
+  line1: string | null
+  suburb: string | null
+  state: string | null
+  postcode: string | null
+}) {
+  const parts = [address.line1, [address.suburb, address.state, address.postcode].filter(Boolean).join(" ")]
+    .map((part) => (typeof part === "string" ? part.trim() : ""))
+    .filter(Boolean)
+
+  return parts.length > 0 ? parts.join(", ") : "Address unavailable"
+}
+
 function formatClassificationValue(value: string) {
   if (value === "wealth_manager_plus") {
     return "Wealth Manager+"
@@ -573,6 +699,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [isSaving, setIsSaving] = useState(false)
   const [isSavingEngagement, setIsSavingEngagement] = useState(false)
   const [isSavingIncome, setIsSavingIncome] = useState(false)
+  const [isSavingProperty, setIsSavingProperty] = useState(false)
+  const [isSavingAccount, setIsSavingAccount] = useState(false)
+  const [isSavingLiability, setIsSavingLiability] = useState(false)
   const [localNotes, setLocalNotes] = useState(notes)
   const [localEngagements, setLocalEngagements] = useState<TimelineEngagement[]>(client.engagements)
   const [incomeItems, setIncomeItems] = useState<IncomeItem[]>([])
@@ -580,6 +709,19 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [isLoadingIncome, setIsLoadingIncome] = useState(false)
   const [isAddIncomeFormOpen, setIsAddIncomeFormOpen] = useState(false)
   const [incomeForm, setIncomeForm] = useState<IncomeFormState>(() => buildIncomeForm())
+  const [isAssetsDrawerOpen, setIsAssetsDrawerOpen] = useState(false)
+  const [isLoadingAssets, setIsLoadingAssets] = useState(false)
+  const [propertyAssets, setPropertyAssets] = useState<PropertyAssetItem[]>([])
+  const [financialAccounts, setFinancialAccounts] = useState<FinancialAccountItem[]>([])
+  const [isAddPropertyFormOpen, setIsAddPropertyFormOpen] = useState(false)
+  const [isAddAccountFormOpen, setIsAddAccountFormOpen] = useState(false)
+  const [propertyForm, setPropertyForm] = useState<PropertyFormState>(() => buildPropertyForm())
+  const [accountForm, setAccountForm] = useState<AccountFormState>(() => buildAccountForm())
+  const [isLiabilitiesDrawerOpen, setIsLiabilitiesDrawerOpen] = useState(false)
+  const [isLoadingLiabilities, setIsLoadingLiabilities] = useState(false)
+  const [liabilityItems, setLiabilityItems] = useState<LiabilityItem[]>([])
+  const [isAddLiabilityFormOpen, setIsAddLiabilityFormOpen] = useState(false)
+  const [liabilityForm, setLiabilityForm] = useState<LiabilityFormState>(() => buildLiabilityForm())
   const [engagementForm, setEngagementForm] = useState<EngagementFormState>(() => buildEngagementForm())
   const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplateOption[]>([])
   const [isLoadingWorkflowTemplates, setIsLoadingWorkflowTemplates] = useState(false)
@@ -747,6 +889,170 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     }
   }, [clientData.id, isIncomeDrawerOpen])
 
+  useEffect(() => {
+    if (!isAssetsDrawerOpen) {
+      return
+    }
+
+    let isMounted = true
+
+    async function loadAssets() {
+      setIsLoadingAssets(true)
+
+      try {
+        const response = await fetch(`/api/clients/${clientData.id}/assets`)
+        if (!response.ok) {
+          throw new Error("Failed to fetch assets")
+        }
+
+        const payload = await response.json()
+        if (!payload || typeof payload !== "object" || Array.isArray(payload) || !isMounted) {
+          return
+        }
+
+        const value = payload as Record<string, unknown>
+        const rawPropertyAssets = Array.isArray(value.propertyAssets) ? value.propertyAssets : []
+        const rawFinancialAccounts = Array.isArray(value.financialAccounts) ? value.financialAccounts : []
+
+        setPropertyAssets(
+          rawPropertyAssets
+            .map((item) => {
+              if (!item || typeof item !== "object" || Array.isArray(item)) {
+                return null
+              }
+
+              const asset = item as Record<string, unknown>
+              if (typeof asset.id !== "string" || typeof asset.currentValue !== "number") {
+                return null
+              }
+
+              const addressValue =
+                asset.address && typeof asset.address === "object" && !Array.isArray(asset.address)
+                  ? (asset.address as Record<string, unknown>)
+                  : null
+
+              return {
+                id: asset.id,
+                usageType: typeof asset.usageType === "string" ? asset.usageType : null,
+                currentValue: asset.currentValue,
+                address: {
+                  line1: typeof addressValue?.line1 === "string" ? addressValue.line1 : null,
+                  suburb: typeof addressValue?.suburb === "string" ? addressValue.suburb : null,
+                  state: typeof addressValue?.state === "string" ? addressValue.state : null,
+                  postcode: typeof addressValue?.postcode === "string" ? addressValue.postcode : null,
+                },
+              }
+            })
+            .filter((item): item is PropertyAssetItem => Boolean(item)),
+        )
+
+        setFinancialAccounts(
+          rawFinancialAccounts
+            .map((item) => {
+              if (!item || typeof item !== "object" || Array.isArray(item)) {
+                return null
+              }
+
+              const account = item as Record<string, unknown>
+              if (
+                typeof account.id !== "string" ||
+                typeof account.accountType !== "string" ||
+                typeof account.currentBalance !== "number"
+              ) {
+                return null
+              }
+
+              return {
+                id: account.id,
+                accountType: account.accountType,
+                currentBalance: account.currentBalance,
+                institutionName: typeof account.institutionName === "string" ? account.institutionName : null,
+              }
+            })
+            .filter((item): item is FinancialAccountItem => Boolean(item)),
+        )
+      } catch (error) {
+        console.error(error)
+      } finally {
+        if (isMounted) {
+          setIsLoadingAssets(false)
+        }
+      }
+    }
+
+    void loadAssets()
+
+    return () => {
+      isMounted = false
+    }
+  }, [clientData.id, isAssetsDrawerOpen])
+
+  useEffect(() => {
+    if (!isLiabilitiesDrawerOpen) {
+      return
+    }
+
+    let isMounted = true
+
+    async function loadLiabilities() {
+      setIsLoadingLiabilities(true)
+
+      try {
+        const response = await fetch(`/api/clients/${clientData.id}/liabilities`)
+        if (!response.ok) {
+          throw new Error("Failed to fetch liabilities")
+        }
+
+        const payload = await response.json()
+        if (!Array.isArray(payload) || !isMounted) {
+          return
+        }
+
+        setLiabilityItems(
+          payload
+            .map((item) => {
+              if (!item || typeof item !== "object" || Array.isArray(item)) {
+                return null
+              }
+
+              const value = item as Record<string, unknown>
+              if (
+                typeof value.id !== "string" ||
+                typeof value.liabilityType !== "string" ||
+                typeof value.currentBalance !== "number"
+              ) {
+                return null
+              }
+
+              return {
+                id: value.id,
+                liabilityType: value.liabilityType,
+                description: typeof value.description === "string" ? value.description : null,
+                currentBalance: value.currentBalance,
+                interestRate: typeof value.interestRate === "number" ? value.interestRate : null,
+                repaymentAmount: typeof value.repaymentAmount === "number" ? value.repaymentAmount : null,
+                repaymentFrequency:
+                  typeof value.repaymentFrequency === "string" ? value.repaymentFrequency : null,
+              }
+            })
+            .filter((item): item is LiabilityItem => Boolean(item)),
+        )
+      } catch (error) {
+        console.error(error)
+      } finally {
+        if (isMounted) {
+          setIsLoadingLiabilities(false)
+        }
+      }
+    }
+
+    void loadLiabilities()
+
+    return () => {
+      isMounted = false
+    }
+  }, [clientData.id, isLiabilitiesDrawerOpen])
+
   function updateEditField<Key extends keyof EditFormState>(key: Key, value: EditFormState[Key]) {
     setEditForm((current) => ({ ...current, [key]: value }))
   }
@@ -761,6 +1067,18 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
   function updateIncomeField<Key extends keyof IncomeFormState>(key: Key, value: IncomeFormState[Key]) {
     setIncomeForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function updatePropertyField<Key extends keyof PropertyFormState>(key: Key, value: PropertyFormState[Key]) {
+    setPropertyForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function updateAccountField<Key extends keyof AccountFormState>(key: Key, value: AccountFormState[Key]) {
+    setAccountForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function updateLiabilityField<Key extends keyof LiabilityFormState>(key: Key, value: LiabilityFormState[Key]) {
+    setLiabilityForm((current) => ({ ...current, [key]: value }))
   }
 
   async function handleSaveNote() {
@@ -1251,6 +1569,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   }
 
   function handleOpenIncomeDrawer() {
+    setIsAssetsDrawerOpen(false)
+    setIsLiabilitiesDrawerOpen(false)
     setIsIncomeDrawerOpen(true)
   }
 
@@ -1331,6 +1651,279 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       console.error(error)
     } finally {
       setIsSavingIncome(false)
+    }
+  }
+
+  function handleOpenAssetsDrawer() {
+    setIsIncomeDrawerOpen(false)
+    setIsLiabilitiesDrawerOpen(false)
+    setIsAssetsDrawerOpen(true)
+  }
+
+  function handleCloseAssetsDrawer() {
+    setIsAssetsDrawerOpen(false)
+    setIsAddPropertyFormOpen(false)
+    setIsAddAccountFormOpen(false)
+    setPropertyForm(buildPropertyForm())
+    setAccountForm(buildAccountForm())
+  }
+
+  function handleOpenAddPropertyForm() {
+    setIsAddPropertyFormOpen(true)
+    setIsAddAccountFormOpen(false)
+  }
+
+  function handleCancelAddPropertyForm() {
+    setIsAddPropertyFormOpen(false)
+    setPropertyForm(buildPropertyForm())
+  }
+
+  async function handleSaveProperty() {
+    const currentValue = Number(propertyForm.currentValue)
+    if (!Number.isFinite(currentValue) || currentValue <= 0) {
+      return
+    }
+
+    if (
+      !propertyForm.addressLine1.trim() ||
+      !propertyForm.suburb.trim() ||
+      !propertyForm.state.trim() ||
+      !propertyForm.postcode.trim()
+    ) {
+      return
+    }
+
+    setIsSavingProperty(true)
+
+    try {
+      const response = await fetch(`/api/clients/${clientData.id}/assets`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: "property",
+          usageType: propertyForm.usageType,
+          currentValue,
+          addressLine1: propertyForm.addressLine1,
+          suburb: propertyForm.suburb,
+          state: propertyForm.state,
+          postcode: propertyForm.postcode,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to create property asset")
+      }
+
+      const created = await response.json()
+      if (!created || typeof created !== "object" || Array.isArray(created)) {
+        throw new Error("Invalid property response")
+      }
+
+      const root = created as Record<string, unknown>
+      if (!root.item || typeof root.item !== "object" || Array.isArray(root.item)) {
+        throw new Error("Invalid property response")
+      }
+
+      const value = root.item as Record<string, unknown>
+      if (
+        typeof value.id !== "string" ||
+        (!value.address || typeof value.address !== "object" || Array.isArray(value.address)) ||
+        typeof value.currentValue !== "number"
+      ) {
+        throw new Error("Invalid property response")
+      }
+
+      const address = value.address as Record<string, unknown>
+      const createdProperty: PropertyAssetItem = {
+        id: value.id,
+        address: {
+          line1: typeof address.line1 === "string" ? address.line1 : null,
+          suburb: typeof address.suburb === "string" ? address.suburb : null,
+          state: typeof address.state === "string" ? address.state : null,
+          postcode: typeof address.postcode === "string" ? address.postcode : null,
+        },
+        usageType: typeof value.usageType === "string" ? value.usageType : null,
+        currentValue: value.currentValue,
+      }
+
+      setPropertyAssets((current) => [createdProperty, ...current])
+      setPropertyForm(buildPropertyForm())
+      setIsAddPropertyFormOpen(false)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsSavingProperty(false)
+    }
+  }
+
+  function handleOpenAddAccountForm() {
+    setIsAddAccountFormOpen(true)
+    setIsAddPropertyFormOpen(false)
+  }
+
+  function handleCancelAddAccountForm() {
+    setIsAddAccountFormOpen(false)
+    setAccountForm(buildAccountForm())
+  }
+
+  async function handleSaveAccount() {
+    const currentBalance = Number(accountForm.currentBalance)
+    if (!Number.isFinite(currentBalance) || currentBalance <= 0) {
+      return
+    }
+
+    setIsSavingAccount(true)
+
+    try {
+      const response = await fetch(`/api/clients/${clientData.id}/assets`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          type: "account",
+          accountType: accountForm.accountType,
+          currentBalance,
+          institutionName: accountForm.institutionName,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to create financial account")
+      }
+
+      const created = await response.json()
+      if (!created || typeof created !== "object" || Array.isArray(created)) {
+        throw new Error("Invalid account response")
+      }
+
+      const root = created as Record<string, unknown>
+      if (!root.item || typeof root.item !== "object" || Array.isArray(root.item)) {
+        throw new Error("Invalid account response")
+      }
+
+      const value = root.item as Record<string, unknown>
+      if (
+        typeof value.id !== "string" ||
+        typeof value.accountType !== "string" ||
+        typeof value.currentBalance !== "number"
+      ) {
+        throw new Error("Invalid account response")
+      }
+
+      const createdAccount: FinancialAccountItem = {
+        id: value.id,
+        accountType: value.accountType,
+        currentBalance: value.currentBalance,
+        institutionName: typeof value.institutionName === "string" ? value.institutionName : null,
+      }
+
+      setFinancialAccounts((current) => [createdAccount, ...current])
+      setAccountForm(buildAccountForm())
+      setIsAddAccountFormOpen(false)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsSavingAccount(false)
+    }
+  }
+
+  function handleOpenLiabilitiesDrawer() {
+    setIsIncomeDrawerOpen(false)
+    setIsAssetsDrawerOpen(false)
+    setIsLiabilitiesDrawerOpen(true)
+  }
+
+  function handleCloseLiabilitiesDrawer() {
+    setIsLiabilitiesDrawerOpen(false)
+    setIsAddLiabilityFormOpen(false)
+    setLiabilityForm(buildLiabilityForm())
+  }
+
+  function handleOpenAddLiabilityForm() {
+    setIsAddLiabilityFormOpen(true)
+  }
+
+  function handleCancelAddLiabilityForm() {
+    setIsAddLiabilityFormOpen(false)
+    setLiabilityForm(buildLiabilityForm())
+  }
+
+  async function handleSaveLiability() {
+    const currentBalance = Number(liabilityForm.currentBalance)
+    if (!Number.isFinite(currentBalance) || currentBalance <= 0) {
+      return
+    }
+
+    const interestRateValue = liabilityForm.interestRate.trim()
+      ? Number(liabilityForm.interestRate)
+      : null
+    if (interestRateValue !== null && !Number.isFinite(interestRateValue)) {
+      return
+    }
+
+    const repaymentAmountValue = liabilityForm.repaymentAmount.trim()
+      ? Number(liabilityForm.repaymentAmount)
+      : null
+    if (repaymentAmountValue !== null && !Number.isFinite(repaymentAmountValue)) {
+      return
+    }
+
+    setIsSavingLiability(true)
+
+    try {
+      const response = await fetch(`/api/clients/${clientData.id}/liabilities`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          liabilityType: liabilityForm.liabilityType,
+          description: liabilityForm.description,
+          currentBalance,
+          interestRate: interestRateValue,
+          repaymentAmount: repaymentAmountValue,
+          repaymentFrequency: liabilityForm.repaymentFrequency,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to create liability")
+      }
+
+      const created = await response.json()
+      if (!created || typeof created !== "object" || Array.isArray(created)) {
+        throw new Error("Invalid liability response")
+      }
+
+      const value = created as Record<string, unknown>
+      if (
+        typeof value.id !== "string" ||
+        typeof value.liabilityType !== "string" ||
+        typeof value.currentBalance !== "number"
+      ) {
+        throw new Error("Invalid liability response")
+      }
+
+      const createdLiability: LiabilityItem = {
+        id: value.id,
+        liabilityType: value.liabilityType,
+        description: typeof value.description === "string" ? value.description : null,
+        currentBalance: value.currentBalance,
+        interestRate: typeof value.interestRate === "number" ? value.interestRate : null,
+        repaymentAmount: typeof value.repaymentAmount === "number" ? value.repaymentAmount : null,
+        repaymentFrequency: typeof value.repaymentFrequency === "string" ? value.repaymentFrequency : null,
+      }
+
+      setLiabilityItems((current) => [createdLiability, ...current])
+      setLiabilityForm(buildLiabilityForm())
+      setIsAddLiabilityFormOpen(false)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsSavingLiability(false)
     }
   }
 
@@ -1420,6 +2013,20 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
           >
             Income
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenAssetsDrawer}
+            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+          >
+            Assets
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenLiabilitiesDrawer}
+            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+          >
+            Liabilities
           </button>
           <button
             type="button"
@@ -2419,6 +3026,391 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 className="mt-4 w-full rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[7px] text-[12px] text-[#113238]"
               >
                 + Add income
+              </button>
+            )}
+          </div>
+        </aside>
+      </div>
+
+      <div
+        className={`fixed inset-0 z-50 flex justify-end transition-opacity duration-200 ${
+          isAssetsDrawerOpen ? "pointer-events-auto bg-[rgba(17,50,56,0.18)] opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        onClick={handleCloseAssetsDrawer}
+      >
+        <aside
+          onClick={(event) => event.stopPropagation()}
+          className={`flex h-full w-full max-w-[400px] flex-col bg-white shadow-[-10px_0_30px_rgba(0,0,0,0.12)] transition-transform duration-300 ${
+            isAssetsDrawerOpen ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          <div className="flex items-center justify-between border-b-[0.5px] border-[#e5e7eb] px-4 py-3">
+            <h2 className="text-[16px] font-semibold text-[#113238]">Assets</h2>
+            <button
+              type="button"
+              onClick={handleCloseAssetsDrawer}
+              className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[9px] py-[4px] text-[14px] leading-none text-[#113238]"
+            >
+              x
+            </button>
+          </div>
+
+          <div className="flex-1 space-y-5 overflow-y-auto p-4">
+            <section>
+              <h3 className="text-[12px] font-semibold uppercase tracking-[0.6px] text-[#9ca3af]">Property assets</h3>
+              {isLoadingAssets ? (
+                <p className="mt-2 text-[12px] text-[#9ca3af]">Loading assets...</p>
+              ) : propertyAssets.length > 0 ? (
+                <div className="mt-2 space-y-2">
+                  {propertyAssets.map((item) => (
+                    <div key={item.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
+                      <p className="text-[12px] font-medium text-[#113238]">{formatAddressSummary(item.address)}</p>
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-[#6b7280]">
+                          {item.usageType ? formatCategory(item.usageType) : "Usage not provided"}
+                        </p>
+                        <p className="text-[13px] font-medium text-[#113238]">{formatCurrency(item.currentValue)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-[12px] text-[#9ca3af]">No property assets on file</p>
+              )}
+
+              {isAddPropertyFormOpen ? (
+                <div className="mt-3 space-y-[10px] rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-[10px]">
+                  <EditField label="Usage type">
+                    <select
+                      value={propertyForm.usageType}
+                      onChange={(event) => updatePropertyField("usageType", event.target.value)}
+                      className={inputClassName}
+                    >
+                      {propertyUsageOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {formatCategory(option)}
+                        </option>
+                      ))}
+                    </select>
+                  </EditField>
+
+                  <EditField label="Current value">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={propertyForm.currentValue}
+                      onChange={(event) => updatePropertyField("currentValue", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+
+                  <EditField label="Address line 1">
+                    <input
+                      value={propertyForm.addressLine1}
+                      onChange={(event) => updatePropertyField("addressLine1", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <EditField label="Suburb">
+                      <input
+                        value={propertyForm.suburb}
+                        onChange={(event) => updatePropertyField("suburb", event.target.value)}
+                        className={inputClassName}
+                      />
+                    </EditField>
+                    <EditField label="State">
+                      <input
+                        value={propertyForm.state}
+                        onChange={(event) => updatePropertyField("state", event.target.value)}
+                        className={inputClassName}
+                      />
+                    </EditField>
+                  </div>
+
+                  <EditField label="Postcode">
+                    <input
+                      value={propertyForm.postcode}
+                      onChange={(event) => updatePropertyField("postcode", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveProperty}
+                      disabled={isSavingProperty}
+                      className="rounded-[7px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white disabled:opacity-60"
+                    >
+                      {isSavingProperty ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelAddPropertyForm}
+                      className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleOpenAddPropertyForm}
+                  className="mt-3 w-full rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[7px] text-[12px] text-[#113238]"
+                >
+                  + Add property
+                </button>
+              )}
+            </section>
+
+            <section>
+              <h3 className="text-[12px] font-semibold uppercase tracking-[0.6px] text-[#9ca3af]">Financial accounts</h3>
+              {isLoadingAssets ? (
+                <p className="mt-2 text-[12px] text-[#9ca3af]">Loading accounts...</p>
+              ) : financialAccounts.length > 0 ? (
+                <div className="mt-2 space-y-2">
+                  {financialAccounts.map((item) => (
+                    <div key={item.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[12px] font-medium text-[#113238]">{formatCategory(item.accountType)}</p>
+                        <p className="text-[13px] font-medium text-[#113238]">{formatCurrency(item.currentBalance)}</p>
+                      </div>
+                      <p className="mt-1 text-[11px] text-[#6b7280]">
+                        {item.institutionName && item.institutionName.trim()
+                          ? item.institutionName
+                          : "Institution not provided"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-[12px] text-[#9ca3af]">No financial accounts on file</p>
+              )}
+
+              {isAddAccountFormOpen ? (
+                <div className="mt-3 space-y-[10px] rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-[10px]">
+                  <EditField label="Account type">
+                    <select
+                      value={accountForm.accountType}
+                      onChange={(event) => updateAccountField("accountType", event.target.value)}
+                      className={inputClassName}
+                    >
+                      {accountTypeOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {formatCategory(option)}
+                        </option>
+                      ))}
+                    </select>
+                  </EditField>
+
+                  <EditField label="Current balance">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={accountForm.currentBalance}
+                      onChange={(event) => updateAccountField("currentBalance", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+
+                  <EditField label="Institution name">
+                    <input
+                      value={accountForm.institutionName}
+                      onChange={(event) => updateAccountField("institutionName", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveAccount}
+                      disabled={isSavingAccount}
+                      className="rounded-[7px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white disabled:opacity-60"
+                    >
+                      {isSavingAccount ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelAddAccountForm}
+                      className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleOpenAddAccountForm}
+                  className="mt-3 w-full rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[7px] text-[12px] text-[#113238]"
+                >
+                  + Add account
+                </button>
+              )}
+            </section>
+          </div>
+        </aside>
+      </div>
+
+      <div
+        className={`fixed inset-0 z-50 flex justify-end transition-opacity duration-200 ${
+          isLiabilitiesDrawerOpen
+            ? "pointer-events-auto bg-[rgba(17,50,56,0.18)] opacity-100"
+            : "pointer-events-none opacity-0"
+        }`}
+        onClick={handleCloseLiabilitiesDrawer}
+      >
+        <aside
+          onClick={(event) => event.stopPropagation()}
+          className={`flex h-full w-full max-w-[400px] flex-col bg-white shadow-[-10px_0_30px_rgba(0,0,0,0.12)] transition-transform duration-300 ${
+            isLiabilitiesDrawerOpen ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          <div className="flex items-center justify-between border-b-[0.5px] border-[#e5e7eb] px-4 py-3">
+            <h2 className="text-[16px] font-semibold text-[#113238]">Liabilities</h2>
+            <button
+              type="button"
+              onClick={handleCloseLiabilitiesDrawer}
+              className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[9px] py-[4px] text-[14px] leading-none text-[#113238]"
+            >
+              x
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4">
+            {isLoadingLiabilities ? (
+              <p className="text-[12px] text-[#9ca3af]">Loading liabilities...</p>
+            ) : liabilityItems.length > 0 ? (
+              <div className="space-y-2">
+                {liabilityItems.map((item) => (
+                  <div key={item.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[12px] font-medium text-[#113238]">{formatCategory(item.liabilityType)}</p>
+                      <p className="text-[13px] font-medium text-[#113238]">{formatCurrency(item.currentBalance)}</p>
+                    </div>
+                    <p className="mt-1 text-[11px] text-[#6b7280]">
+                      {item.description && item.description.trim() ? item.description : "No description"}
+                    </p>
+                    <div className="mt-1 space-y-1 text-[11px] text-[#6b7280]">
+                      {item.interestRate !== null ? <p>Interest rate: {item.interestRate}%</p> : null}
+                      {item.repaymentAmount !== null ? (
+                        <p>
+                          Repayment: {formatCurrency(item.repaymentAmount)}
+                          {item.repaymentFrequency ? ` / ${formatCategory(item.repaymentFrequency)}` : ""}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[12px] text-[#9ca3af]">No liabilities on file</p>
+            )}
+
+            {isAddLiabilityFormOpen ? (
+              <div className="mt-4 space-y-[10px] rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-[10px]">
+                <EditField label="Liability type">
+                  <select
+                    value={liabilityForm.liabilityType}
+                    onChange={(event) => updateLiabilityField("liabilityType", event.target.value)}
+                    className={inputClassName}
+                  >
+                    {liabilityTypeOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {formatCategory(option)}
+                      </option>
+                    ))}
+                  </select>
+                </EditField>
+
+                <EditField label="Description">
+                  <input
+                    value={liabilityForm.description}
+                    onChange={(event) => updateLiabilityField("description", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <EditField label="Current balance">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={liabilityForm.currentBalance}
+                    onChange={(event) => updateLiabilityField("currentBalance", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <EditField label="Interest rate">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={liabilityForm.interestRate}
+                    onChange={(event) => updateLiabilityField("interestRate", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <EditField label="Repayment amount">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={liabilityForm.repaymentAmount}
+                    onChange={(event) => updateLiabilityField("repaymentAmount", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <EditField label="Repayment frequency">
+                  <select
+                    value={liabilityForm.repaymentFrequency}
+                    onChange={(event) =>
+                      updateLiabilityField("repaymentFrequency", event.target.value as LiabilityRepaymentFrequency)
+                    }
+                    className={inputClassName}
+                  >
+                    {liabilityRepaymentFrequencyOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </EditField>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveLiability}
+                    disabled={isSavingLiability}
+                    className="rounded-[7px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white disabled:opacity-60"
+                  >
+                    {isSavingLiability ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelAddLiabilityForm}
+                    className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleOpenAddLiabilityForm}
+                className="mt-4 w-full rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[7px] text-[12px] text-[#113238]"
+              >
+                + Add liability
               </button>
             )}
           </div>
