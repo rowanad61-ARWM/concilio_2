@@ -19,6 +19,7 @@ type ServiceTier = "transaction" | "cashflow_manager" | "wealth_manager" | "weal
 type VerificationResult = "pass" | "pending" | "fail"
 type VerificationDocumentType = "passport" | "drivers_licence" | "medicare_card" | "birth_certificate" | "other"
 type VerificationCheck = ClientDetail["verificationChecks"][number]
+type IncomeFrequency = "weekly" | "fortnightly" | "monthly" | "annual"
 
 type EditFormState = {
   firstName: string
@@ -35,6 +36,11 @@ type EditFormState = {
   addressState: string
   addressPostcode: string
   addressCountry: string
+  employmentStatus: string
+  employerName: string
+  occupation: string
+  industry: string
+  employmentType: string
 }
 
 type AddIdFormState = {
@@ -57,6 +63,23 @@ type WorkflowTemplateOption = {
   name: string
 }
 
+type IncomeItem = {
+  id: string
+  incomeType: string
+  description: string | null
+  amount: number
+  frequency: string
+  isGross: boolean
+}
+
+type IncomeFormState = {
+  incomeType: string
+  description: string
+  amount: string
+  frequency: IncomeFrequency
+  isGross: boolean
+}
+
 const timelineFilters: { label: string; value: TimelineFilter }[] = [
   { label: "All", value: "all" },
   { label: "Emails", value: "emails" },
@@ -74,6 +97,39 @@ const noteCategories: { label: string; value: NoteCategory }[] = [
 ]
 
 const relationshipOptions = ["single", "married", "de_facto", "separated", "divorced", "widowed"]
+const employmentStatusOptions = [
+  "employed_full_time",
+  "employed_part_time",
+  "self_employed",
+  "unemployed",
+  "retired",
+  "home_duties",
+  "student",
+  "other",
+]
+const employmentTypeOptions = [
+  "employed_full_time",
+  "employed_part_time",
+  "self_employed",
+  "other",
+]
+const incomeTypeOptions = [
+  "salary",
+  "pension_super",
+  "pension_government",
+  "rental",
+  "dividends",
+  "interest",
+  "business",
+  "centrelink",
+  "other",
+]
+const incomeFrequencyOptions: { label: string; value: IncomeFrequency }[] = [
+  { label: "Weekly", value: "weekly" },
+  { label: "Fortnightly", value: "fortnightly" },
+  { label: "Monthly", value: "monthly" },
+  { label: "Annual", value: "annual" },
+]
 const lifecycleStageOptions: { label: string; value: LifecycleStage }[] = [
   { label: "Prospect", value: "prospect" },
   { label: "Engagement", value: "engagement" },
@@ -122,6 +178,11 @@ function buildEditForm(client: ClientDetail): EditFormState {
     addressState: residentialAddress?.state ?? "",
     addressPostcode: residentialAddress?.postcode ?? "",
     addressCountry: residentialAddress?.country ?? "AU",
+    employmentStatus: client.employment?.employmentStatus ?? "",
+    employerName: client.employment?.employerName ?? "",
+    occupation: client.employment?.occupation ?? "",
+    industry: client.employment?.industry ?? "",
+    employmentType: client.employment?.employmentType ?? "",
   }
 }
 
@@ -157,6 +218,16 @@ function buildEngagementForm(): EngagementFormState {
     engagementType: ENGAGEMENT_TYPE_VALUES[0],
     templateId: "",
     description: "",
+  }
+}
+
+function buildIncomeForm(): IncomeFormState {
+  return {
+    incomeType: "salary",
+    description: "",
+    amount: "",
+    frequency: "monthly",
+    isGross: true,
   }
 }
 
@@ -321,6 +392,14 @@ function formatTimelineTimestamp(value: string) {
   }).format(new Date(value))
 }
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: "AUD",
+    minimumFractionDigits: 2,
+  }).format(value)
+}
+
 function getWorkflowStageState(index: number, currentIndex: number, workflowStatus: string) {
   if (workflowStatus === "completed") {
     return "completed"
@@ -379,6 +458,14 @@ function formatCategory(category: string) {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ")
+}
+
+function formatIncomeFrequency(value: string) {
+  if (value === "annually" || value === "annual") {
+    return "Annual"
+  }
+
+  return formatCategory(value)
 }
 
 function formatClassificationValue(value: string) {
@@ -485,8 +572,14 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [noteBody, setNoteBody] = useState("")
   const [isSaving, setIsSaving] = useState(false)
   const [isSavingEngagement, setIsSavingEngagement] = useState(false)
+  const [isSavingIncome, setIsSavingIncome] = useState(false)
   const [localNotes, setLocalNotes] = useState(notes)
   const [localEngagements, setLocalEngagements] = useState<TimelineEngagement[]>(client.engagements)
+  const [incomeItems, setIncomeItems] = useState<IncomeItem[]>([])
+  const [isIncomeDrawerOpen, setIsIncomeDrawerOpen] = useState(false)
+  const [isLoadingIncome, setIsLoadingIncome] = useState(false)
+  const [isAddIncomeFormOpen, setIsAddIncomeFormOpen] = useState(false)
+  const [incomeForm, setIncomeForm] = useState<IncomeFormState>(() => buildIncomeForm())
   const [engagementForm, setEngagementForm] = useState<EngagementFormState>(() => buildEngagementForm())
   const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplateOption[]>([])
   const [isLoadingWorkflowTemplates, setIsLoadingWorkflowTemplates] = useState(false)
@@ -588,6 +681,72 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     }
   }, [])
 
+  useEffect(() => {
+    if (!isIncomeDrawerOpen) {
+      return
+    }
+
+    let isMounted = true
+
+    async function loadIncomeItems() {
+      setIsLoadingIncome(true)
+
+      try {
+        const response = await fetch(`/api/clients/${clientData.id}/income`)
+        if (!response.ok) {
+          throw new Error("Failed to fetch income items")
+        }
+
+        const payload = await response.json()
+        if (!Array.isArray(payload) || !isMounted) {
+          return
+        }
+
+        setIncomeItems(
+          payload
+            .map((item) => {
+              if (!item || typeof item !== "object" || Array.isArray(item)) {
+                return null
+              }
+
+              const value = item as Record<string, unknown>
+              if (
+                typeof value.id !== "string" ||
+                typeof value.incomeType !== "string" ||
+                typeof value.amount !== "number" ||
+                typeof value.frequency !== "string" ||
+                typeof value.isGross !== "boolean"
+              ) {
+                return null
+              }
+
+              return {
+                id: value.id,
+                incomeType: value.incomeType,
+                description: typeof value.description === "string" ? value.description : null,
+                amount: value.amount,
+                frequency: value.frequency,
+                isGross: value.isGross,
+              }
+            })
+            .filter((item): item is IncomeItem => Boolean(item)),
+        )
+      } catch (error) {
+        console.error(error)
+      } finally {
+        if (isMounted) {
+          setIsLoadingIncome(false)
+        }
+      }
+    }
+
+    void loadIncomeItems()
+
+    return () => {
+      isMounted = false
+    }
+  }, [clientData.id, isIncomeDrawerOpen])
+
   function updateEditField<Key extends keyof EditFormState>(key: Key, value: EditFormState[Key]) {
     setEditForm((current) => ({ ...current, [key]: value }))
   }
@@ -598,6 +757,10 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
   function updateEngagementField<Key extends keyof EngagementFormState>(key: Key, value: EngagementFormState[Key]) {
     setEngagementForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function updateIncomeField<Key extends keyof IncomeFormState>(key: Key, value: IncomeFormState[Key]) {
+    setIncomeForm((current) => ({ ...current, [key]: value }))
   }
 
   async function handleSaveNote() {
@@ -815,6 +978,11 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           mobile: editForm.mobile,
           relationshipStatus: editForm.relationshipStatus,
           countryOfResidence: editForm.countryOfResidence,
+          employmentStatus: editForm.employmentStatus || null,
+          employerName: editForm.employerName || null,
+          occupation: editForm.occupation || null,
+          industry: editForm.industry || null,
+          employmentType: editForm.employmentType || null,
           addressResidential: {
             line1: editForm.addressLine1 || null,
             line2: editForm.addressLine2 || null,
@@ -862,6 +1030,29 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               addressResidential: mapAddress(updated.person.address_residential),
               addressPostal: mapAddress(updated.person.address_postal),
             },
+        employment:
+          updated.employment && typeof updated.employment === "object" && !Array.isArray(updated.employment)
+            ? {
+                employmentStatus:
+                  typeof updated.employment.employmentStatus === "string"
+                    ? updated.employment.employmentStatus
+                    : null,
+                employerName:
+                  typeof updated.employment.employerName === "string"
+                    ? updated.employment.employerName
+                    : null,
+                occupation:
+                  typeof updated.employment.occupation === "string"
+                    ? updated.employment.occupation
+                    : null,
+                industry:
+                  typeof updated.employment.industry === "string" ? updated.employment.industry : null,
+                employmentType:
+                  typeof updated.employment.employmentType === "string"
+                    ? updated.employment.employmentType
+                    : null,
+              }
+            : clientData.employment,
       }
 
       setClientData(nextClientData)
@@ -1059,6 +1250,90 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     }
   }
 
+  function handleOpenIncomeDrawer() {
+    setIsIncomeDrawerOpen(true)
+  }
+
+  function handleCloseIncomeDrawer() {
+    setIsIncomeDrawerOpen(false)
+    setIsAddIncomeFormOpen(false)
+    setIncomeForm(buildIncomeForm())
+  }
+
+  function handleOpenAddIncomeForm() {
+    setIsAddIncomeFormOpen(true)
+  }
+
+  function handleCancelAddIncomeForm() {
+    setIsAddIncomeFormOpen(false)
+    setIncomeForm(buildIncomeForm())
+  }
+
+  async function handleSaveIncome() {
+    const amountValue = Number(incomeForm.amount)
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      return
+    }
+
+    setIsSavingIncome(true)
+
+    try {
+      const response = await fetch(`/api/clients/${clientData.id}/income`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          incomeType: incomeForm.incomeType,
+          description: incomeForm.description,
+          amount: amountValue,
+          frequency: incomeForm.frequency,
+          isGross: incomeForm.isGross,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to create income item")
+      }
+
+      const created = await response.json()
+      if (!created || typeof created !== "object" || Array.isArray(created)) {
+        throw new Error("Invalid income response")
+      }
+
+      const value = created as Record<string, unknown>
+      if (
+        typeof value.id !== "string" ||
+        typeof value.incomeType !== "string" ||
+        typeof value.amount !== "number" ||
+        typeof value.frequency !== "string" ||
+        typeof value.isGross !== "boolean"
+      ) {
+        throw new Error("Invalid income response")
+      }
+
+      const createdIncome: IncomeItem = {
+        id: value.id,
+        incomeType: value.incomeType,
+        description: typeof value.description === "string" ? value.description : null,
+        amount: value.amount,
+        frequency: value.frequency,
+        isGross: value.isGross,
+      }
+
+      setIncomeItems((current) => [
+        createdIncome,
+        ...current,
+      ])
+      setIncomeForm(buildIncomeForm())
+      setIsAddIncomeFormOpen(false)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsSavingIncome(false)
+    }
+  }
+
   function openNotePanel() {
     setIsNotePanelOpen(true)
     setIsEngagementPanelOpen(false)
@@ -1138,6 +1413,13 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
           >
             SMS
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenIncomeDrawer}
+            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+          >
+            Income
           </button>
           <button
             type="button"
@@ -1389,6 +1671,91 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 </>
               )}
             </div>
+          </section>
+
+          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
+            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Employment</h2>
+            {isEditing ? (
+              <div className="space-y-[10px]">
+                <EditField label="Employment status">
+                  <select
+                    value={editForm.employmentStatus}
+                    onChange={(event) => updateEditField("employmentStatus", event.target.value)}
+                    className={inputClassName}
+                  >
+                    <option value="">Select</option>
+                    {employmentStatusOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {formatCategory(option)}
+                      </option>
+                    ))}
+                  </select>
+                </EditField>
+
+                <EditField label="Employer name">
+                  <input
+                    value={editForm.employerName}
+                    onChange={(event) => updateEditField("employerName", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <EditField label="Occupation">
+                  <input
+                    value={editForm.occupation}
+                    onChange={(event) => updateEditField("occupation", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <EditField label="Industry">
+                  <input
+                    value={editForm.industry}
+                    onChange={(event) => updateEditField("industry", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <EditField label="Employment type">
+                  <select
+                    value={editForm.employmentType}
+                    onChange={(event) => updateEditField("employmentType", event.target.value)}
+                    className={inputClassName}
+                  >
+                    <option value="">Select</option>
+                    {employmentTypeOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {formatCategory(option)}
+                      </option>
+                    ))}
+                  </select>
+                </EditField>
+              </div>
+            ) : clientData.employment ? (
+              <div className="space-y-[10px]">
+                <DetailField
+                  label="Employment status"
+                  value={
+                    clientData.employment.employmentStatus
+                      ? formatCategory(clientData.employment.employmentStatus)
+                      : null
+                  }
+                />
+                <DetailField label="Employer name" value={clientData.employment.employerName} />
+                <DetailField label="Occupation" value={clientData.employment.occupation} />
+                <DetailField label="Industry" value={clientData.employment.industry} />
+                <DetailField
+                  label="Employment type"
+                  value={
+                    clientData.employment.employmentType
+                      ? formatCategory(clientData.employment.employmentType)
+                      : null
+                  }
+                />
+              </div>
+            ) : (
+              <p className="text-[12px] text-[#9ca3af]">No employment on file</p>
+            )}
           </section>
 
           <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
@@ -1917,6 +2284,145 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             </div>
           )}
         </section>
+      </div>
+
+      <div
+        className={`fixed inset-0 z-50 flex justify-end transition-opacity duration-200 ${
+          isIncomeDrawerOpen ? "pointer-events-auto bg-[rgba(17,50,56,0.18)] opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        onClick={handleCloseIncomeDrawer}
+      >
+        <aside
+          onClick={(event) => event.stopPropagation()}
+          className={`flex h-full w-full max-w-[400px] flex-col bg-white shadow-[-10px_0_30px_rgba(0,0,0,0.12)] transition-transform duration-300 ${
+            isIncomeDrawerOpen ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          <div className="flex items-center justify-between border-b-[0.5px] border-[#e5e7eb] px-4 py-3">
+            <h2 className="text-[16px] font-semibold text-[#113238]">Income</h2>
+            <button
+              type="button"
+              onClick={handleCloseIncomeDrawer}
+              className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[9px] py-[4px] text-[14px] leading-none text-[#113238]"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4">
+            {isLoadingIncome ? (
+              <p className="text-[12px] text-[#9ca3af]">Loading income...</p>
+            ) : incomeItems.length > 0 ? (
+              <div className="space-y-2">
+                {incomeItems.map((item) => (
+                  <div key={item.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[12px] font-medium text-[#113238]">{formatCategory(item.incomeType)}</p>
+                      <span className="inline-flex rounded-[999px] bg-[#F3F4F6] px-[8px] py-[2px] text-[10px] text-[#6B7280]">
+                        {item.isGross ? "Gross" : "Net"}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[12px] text-[#6b7280]">
+                      {item.description && item.description.trim() ? item.description : "No description"}
+                    </p>
+                    <div className="mt-1 flex items-center justify-between">
+                      <p className="text-[13px] font-medium text-[#113238]">{formatCurrency(item.amount)}</p>
+                      <p className="text-[11px] text-[#9ca3af]">{formatIncomeFrequency(item.frequency)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[12px] text-[#9ca3af]">No income items on file</p>
+            )}
+
+            {isAddIncomeFormOpen ? (
+              <div className="mt-4 space-y-[10px] rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-[10px]">
+                <EditField label="Income type">
+                  <select
+                    value={incomeForm.incomeType}
+                    onChange={(event) => updateIncomeField("incomeType", event.target.value)}
+                    className={inputClassName}
+                  >
+                    {incomeTypeOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {formatCategory(option)}
+                      </option>
+                    ))}
+                  </select>
+                </EditField>
+
+                <EditField label="Description">
+                  <input
+                    value={incomeForm.description}
+                    onChange={(event) => updateIncomeField("description", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <EditField label="Amount">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={incomeForm.amount}
+                    onChange={(event) => updateIncomeField("amount", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <EditField label="Frequency">
+                  <select
+                    value={incomeForm.frequency}
+                    onChange={(event) => updateIncomeField("frequency", event.target.value as IncomeFrequency)}
+                    className={inputClassName}
+                  >
+                    {incomeFrequencyOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </EditField>
+
+                <label className="flex items-center gap-2 text-[12px] text-[#113238]">
+                  <input
+                    type="checkbox"
+                    checked={incomeForm.isGross}
+                    onChange={(event) => updateIncomeField("isGross", event.target.checked)}
+                  />
+                  Is gross
+                </label>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveIncome}
+                    disabled={isSavingIncome}
+                    className="rounded-[7px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white disabled:opacity-60"
+                  >
+                    {isSavingIncome ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelAddIncomeForm}
+                    className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleOpenAddIncomeForm}
+                className="mt-4 w-full rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[7px] text-[12px] text-[#113238]"
+              >
+                + Add income
+              </button>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   )

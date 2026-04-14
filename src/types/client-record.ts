@@ -81,5 +81,12 @@ export type ClientDetail = {
     expiryDate: string | null
     notes: string | null
   }[]
+  employment: {
+    employmentStatus: string | null
+    employerName: string | null
+    occupation: string | null
+    industry: string | null
+    employmentType: string | null
+  } | null
   engagements: TimelineEngagement[]
 }

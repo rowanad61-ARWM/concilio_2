@@ -50,7 +50,7 @@ export default async function ClientRecordPage({
 }) {
   const { id } = await params
 
-  const [party, fileNotes, householdMembership, verificationChecks] = await Promise.all([
+  const [party, fileNotes, householdMembership, verificationChecks, employmentProfile] = await Promise.all([
     db.party.findUnique({
       where: { id },
       include: {
@@ -84,6 +84,20 @@ export default async function ClientRecordPage({
       orderBy: {
         created_at: "desc",
       },
+    }),
+    db.employment_profile.findFirst({
+      where: {
+        party_id: id,
+        effective_to: null,
+      },
+      orderBy: [
+        {
+          effective_from: "desc",
+        },
+        {
+          created_at: "desc",
+        },
+      ],
     }),
   ])
 
@@ -183,6 +197,15 @@ export default async function ClientRecordPage({
       expiryDate: check.expiry_date?.toISOString() ?? null,
       notes: check.notes,
     })),
+    employment: employmentProfile
+      ? {
+          employmentStatus: employmentProfile.employment_status,
+          employerName: employmentProfile.employer_business_name,
+          occupation: employmentProfile.occupation_title,
+          industry: employmentProfile.industry,
+          employmentType: null,
+        }
+      : null,
     engagements: engagementRows.map((engagement) => mapEngagementRow(engagement)),
   }
 

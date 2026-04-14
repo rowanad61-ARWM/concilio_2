@@ -1,6 +1,62 @@
-﻿import { NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
 import { db } from "@/lib/db"
+
+type ColumnRow = {
+  column_name: string
+}
+
+type ConstraintRow = {
+  definition: string
+}
+
+function extractConstraintValues(definition: string) {
+  const matches = definition.matchAll(/'([^']+)'/g)
+  const values = new Set<string>()
+
+  for (const match of matches) {
+    if (match[1]) {
+      values.add(match[1])
+    }
+  }
+
+  return [...values]
+}
+
+function toNullableString(value: unknown) {
+  if (typeof value !== "string") {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
+}
+
+async function getEmploymentColumns() {
+  const rows = await db.$queryRawUnsafe<ColumnRow[]>(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'employment_profile'`,
+  )
+
+  return new Set(rows.map((row) => row.column_name))
+}
+
+async function getEmploymentStatusOptions() {
+  const rows = await db.$queryRawUnsafe<ConstraintRow[]>(
+    `SELECT pg_get_constraintdef(c.oid) AS definition
+     FROM pg_constraint c
+     JOIN pg_class t ON c.conrelid = t.oid
+     JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE n.nspname = 'public'
+       AND t.relname = 'employment_profile'
+       AND c.contype = 'c'
+       AND pg_get_constraintdef(c.oid) ILIKE '%employment_status%'`,
+  )
+
+  return rows.flatMap((row) => extractConstraintValues(row.definition))
+}
 
 export async function PATCH(
   request: Request,
@@ -34,6 +90,13 @@ export async function PATCH(
 
     const hasAddressResidential = Object.prototype.hasOwnProperty.call(payload, "addressResidential")
     const hasAddressPostal = Object.prototype.hasOwnProperty.call(payload, "addressPostal")
+    const hasEmploymentStatus = Object.prototype.hasOwnProperty.call(payload, "employmentStatus")
+    const hasEmployerName = Object.prototype.hasOwnProperty.call(payload, "employerName")
+    const hasOccupation = Object.prototype.hasOwnProperty.call(payload, "occupation")
+    const hasIndustry = Object.prototype.hasOwnProperty.call(payload, "industry")
+    const hasEmploymentType = Object.prototype.hasOwnProperty.call(payload, "employmentType")
+    const hasEmploymentPayload =
+      hasEmploymentStatus || hasEmployerName || hasOccupation || hasIndustry || hasEmploymentType
 
     const updatedPerson = await db.person.update({
       where: { id },
@@ -64,14 +127,157 @@ export async function PATCH(
       })
     }
 
+    let employmentColumns: Set<string> | null = null
+
+    if (hasEmploymentPayload) {
+      const [existingEmployment, statusOptions, columns] = await Promise.all([
+        db.employment_profile.findFirst({
+          where: {
+            party_id: id,
+            effective_to: null,
+          },
+          orderBy: [
+            {
+              effective_from: "desc",
+            },
+            {
+              created_at: "desc",
+            },
+          ],
+        }),
+        getEmploymentStatusOptions(),
+        getEmploymentColumns(),
+      ])
+
+      employmentColumns = columns
+      const statusValues = statusOptions.length > 0 ? statusOptions : ["other"]
+
+      const incomingEmploymentStatus = toNullableString(payload.employmentStatus)
+      const resolvedEmploymentStatus =
+        incomingEmploymentStatus && statusValues.includes(incomingEmploymentStatus)
+          ? incomingEmploymentStatus
+          : existingEmployment?.employment_status && statusValues.includes(existingEmployment.employment_status)
+            ? existingEmployment.employment_status
+            : statusValues.includes("other")
+              ? "other"
+              : statusValues[0]
+
+      const incomingEmployerName = hasEmployerName
+        ? toNullableString(payload.employerName)
+        : undefined
+      const incomingOccupation = hasOccupation ? toNullableString(payload.occupation) : undefined
+      const incomingIndustry = hasIndustry ? toNullableString(payload.industry) : undefined
+      const incomingEmploymentType = hasEmploymentType
+        ? toNullableString(payload.employmentType)
+        : undefined
+
+      const hasAnyEmploymentInput = Boolean(
+        incomingEmploymentStatus ||
+          incomingEmployerName ||
+          incomingOccupation ||
+          incomingIndustry ||
+          incomingEmploymentType,
+      )
+
+      if (existingEmployment) {
+        await db.employment_profile.update({
+          where: {
+            id: existingEmployment.id,
+          },
+          data: {
+            employment_status: resolvedEmploymentStatus,
+            employer_business_name:
+              incomingEmployerName !== undefined
+                ? incomingEmployerName
+                : existingEmployment.employer_business_name,
+            occupation_title:
+              incomingOccupation !== undefined
+                ? incomingOccupation
+                : existingEmployment.occupation_title,
+            industry: incomingIndustry !== undefined ? incomingIndustry : existingEmployment.industry,
+          },
+        })
+
+        if (columns.has("employment_type") && incomingEmploymentType !== undefined) {
+          await db.$executeRawUnsafe(
+            `UPDATE employment_profile
+             SET employment_type = $1
+             WHERE id = $2`,
+            incomingEmploymentType,
+            existingEmployment.id,
+          )
+        }
+      } else if (hasAnyEmploymentInput) {
+        const createdEmployment = await db.employment_profile.create({
+          data: {
+            party_id: id,
+            employment_status: resolvedEmploymentStatus,
+            employer_business_name: incomingEmployerName ?? null,
+            occupation_title: incomingOccupation ?? null,
+            industry: incomingIndustry ?? null,
+            effective_from: new Date(),
+          },
+        })
+
+        if (columns.has("employment_type") && incomingEmploymentType !== undefined) {
+          await db.$executeRawUnsafe(
+            `UPDATE employment_profile
+             SET employment_type = $1
+             WHERE id = $2`,
+            incomingEmploymentType,
+            createdEmployment.id,
+          )
+        }
+      }
+    }
+
     const updatedParty = await db.party.findUnique({
       where: { id },
     })
 
+    const columns = employmentColumns ?? (await getEmploymentColumns())
+    const employmentRows = await db.$queryRawUnsafe<Record<string, unknown>[]>(
+      `SELECT
+         employment_status,
+         employer_business_name,
+         occupation_title,
+         industry,
+         ${columns.has("employment_type") ? "employment_type" : "NULL::text AS employment_type"}
+       FROM employment_profile
+       WHERE party_id = $1
+         AND effective_to IS NULL
+       ORDER BY effective_from DESC, created_at DESC
+       LIMIT 1`,
+      id,
+    )
+
+    const employment = employmentRows[0]
+
     return NextResponse.json({
       id,
-      displayName: updatedParty?.display_name ?? `${updatedPerson.legal_given_name} ${updatedPerson.legal_family_name}`.trim(),
+      displayName:
+        updatedParty?.display_name ??
+        `${updatedPerson.legal_given_name} ${updatedPerson.legal_family_name}`.trim(),
       person: updatedPerson,
+      employment: employment
+        ? {
+            employmentStatus:
+              typeof employment.employment_status === "string"
+                ? employment.employment_status
+                : null,
+            employerName:
+              typeof employment.employer_business_name === "string"
+                ? employment.employer_business_name
+                : null,
+            occupation:
+              typeof employment.occupation_title === "string"
+                ? employment.occupation_title
+                : null,
+            industry: typeof employment.industry === "string" ? employment.industry : null,
+            employmentType:
+              typeof employment.employment_type === "string" ? employment.employment_type : null,
+          }
+        : null,
     })
   } catch (error) {
     console.error("[client update error]", error)
