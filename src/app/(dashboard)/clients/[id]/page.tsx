@@ -2,6 +2,7 @@ import { notFound } from "next/navigation"
 
 import ClientRecord from "@/components/clients/ClientRecord"
 import { db } from "@/lib/db"
+import { mapEngagementRow } from "@/lib/engagement"
 import type { Prisma } from "@prisma/client"
 import type { ClientAddress } from "@/types/client-record"
 import type { ClientDetail, TimelineNote } from "@/types/client-record"
@@ -90,20 +91,29 @@ export default async function ClientRecordPage({
     notFound()
   }
 
-  const householdMembers = householdMembership
-    ? await db.household_member.findMany({
-        where: {
-          household_id: householdMembership.household_id,
-          end_date: null,
-        },
-        include: {
-          party: true,
-        },
-        orderBy: {
-          created_at: "asc",
-        },
-      })
-    : []
+  const [householdMembers, engagementRows] = householdMembership
+    ? await Promise.all([
+        db.household_member.findMany({
+          where: {
+            household_id: householdMembership.household_id,
+            end_date: null,
+          },
+          include: {
+            party: true,
+          },
+          orderBy: {
+            created_at: "asc",
+          },
+        }),
+        db.$queryRawUnsafe<Record<string, unknown>[]>(
+          `SELECT *
+           FROM engagement
+           WHERE household_id = $1
+           ORDER BY created_at DESC`,
+          householdMembership.household_id,
+        ),
+      ])
+    : [[], []]
 
   const client: ClientDetail = {
     id: party.id,
@@ -160,6 +170,7 @@ export default async function ClientRecordPage({
       expiryDate: check.expiry_date?.toISOString() ?? null,
       notes: check.notes,
     })),
+    engagements: engagementRows.map((engagement) => mapEngagementRow(engagement)),
   }
 
   const notes: TimelineNote[] = fileNotes.map((note) => ({

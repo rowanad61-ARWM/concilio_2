@@ -3,7 +3,8 @@
 import Link from "next/link"
 import { useState } from "react"
 
-import type { ClientAddress, ClientDetail, TimelineNote } from "@/types/client-record"
+import { ENGAGEMENT_TYPE_VALUES } from "@/lib/engagement"
+import type { ClientAddress, ClientDetail, TimelineEngagement, TimelineNote } from "@/types/client-record"
 
 type ClientRecordProps = {
   client: ClientDetail
@@ -12,6 +13,7 @@ type ClientRecordProps = {
 
 type TimelineFilter = "all" | "emails" | "notes" | "docs"
 type NoteCategory = "general" | "meeting" | "phone_call" | "email" | "compliance" | "other"
+type EngagementType = (typeof ENGAGEMENT_TYPE_VALUES)[number]
 type LifecycleStage = "prospect" | "engagement" | "advising" | "implementation" | "lapsed"
 type ServiceTier = "transaction" | "cashflow_manager" | "wealth_manager" | "wealth_manager_plus"
 type VerificationResult = "pass" | "pending" | "fail"
@@ -41,6 +43,12 @@ type AddIdFormState = {
   expiryDate: string
   result: VerificationResult
   notes: string
+}
+
+type EngagementFormState = {
+  title: string
+  engagementType: EngagementType
+  description: string
 }
 
 const timelineFilters: { label: string; value: TimelineFilter }[] = [
@@ -134,6 +142,14 @@ function buildAddIdForm(): AddIdFormState {
     expiryDate: "",
     result: "pending",
     notes: "",
+  }
+}
+
+function buildEngagementForm(): EngagementFormState {
+  return {
+    title: "",
+    engagementType: ENGAGEMENT_TYPE_VALUES[0],
+    description: "",
   }
 }
 
@@ -298,10 +314,27 @@ function formatTimelineTimestamp(value: string) {
   }).format(new Date(value))
 }
 
+function getTimelineSortValue(value: string) {
+  if (value === "just-now") {
+    return Number.MAX_SAFE_INTEGER
+  }
+
+  const parsed = new Date(value).getTime()
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
 function getStatusClasses(status: string) {
   switch (status.toLowerCase()) {
     case "active":
+    case "open":
       return "bg-[#E6F0EC] text-[#0F5C3A]"
+    case "in_progress":
+      return "bg-[#E6F1FB] text-[#185FA5]"
+    case "completed":
+    case "implemented":
+      return "bg-[#EAF0F1] text-[#113238]"
+    case "cancelled":
+      return "bg-[#FCE8E8] text-[#E24B4A]"
     default:
       return "bg-[#F3F4F6] text-[#6B7280]"
   }
@@ -392,15 +425,35 @@ function NoteIcon() {
   )
 }
 
+function EngagementIcon() {
+  return (
+    <div className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-[#E6F1FB] text-[#185FA5]">
+      <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5">
+        <path
+          d="M3.5 4.5h9m-9 3h9m-9 3h5m-7-7.5A1.5 1.5 0 0 1 3 1.5h10A1.5 1.5 0 0 1 14.5 3v10a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 13V3z"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  )
+}
+
 export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [clientData, setClientData] = useState(client)
   const [verificationChecks, setVerificationChecks] = useState<VerificationCheck[]>(client.verificationChecks)
   const [activeFilter, setActiveFilter] = useState<TimelineFilter>("all")
   const [isNotePanelOpen, setIsNotePanelOpen] = useState(false)
+  const [isEngagementPanelOpen, setIsEngagementPanelOpen] = useState(false)
   const [noteCategory, setNoteCategory] = useState<NoteCategory>("general")
   const [noteBody, setNoteBody] = useState("")
   const [isSaving, setIsSaving] = useState(false)
+  const [isSavingEngagement, setIsSavingEngagement] = useState(false)
   const [localNotes, setLocalNotes] = useState(notes)
+  const [localEngagements, setLocalEngagements] = useState<TimelineEngagement[]>(client.engagements)
+  const [engagementForm, setEngagementForm] = useState<EngagementFormState>(() => buildEngagementForm())
   const [isEditing, setIsEditing] = useState(false)
   const [isSavingChanges, setIsSavingChanges] = useState(false)
   const [editForm, setEditForm] = useState<EditFormState>(() => buildEditForm(client))
@@ -420,6 +473,21 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     : null
 
   const visibleNotes = activeFilter === "all" || activeFilter === "notes" ? localNotes : []
+  const visibleEngagements = activeFilter === "all" ? localEngagements : []
+  const timelineItems = [
+    ...visibleEngagements.map((engagement) => ({
+      kind: "engagement" as const,
+      id: `engagement-${engagement.id}`,
+      timestamp: engagement.startedAt,
+      engagement,
+    })),
+    ...visibleNotes.map((note) => ({
+      kind: "note" as const,
+      id: `note-${note.id}`,
+      timestamp: note.createdAt,
+      note,
+    })),
+  ].sort((left, right) => getTimelineSortValue(right.timestamp) - getTimelineSortValue(left.timestamp))
   const otherHouseholdMembers = clientData.household?.members.filter((member) => member.id !== clientData.id) ?? []
   const lifecycleStage = clientData.classification?.lifecycleStage ?? null
   const serviceTier = clientData.classification?.serviceTier ?? null
@@ -435,6 +503,10 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
   function updateAddIdField<Key extends keyof AddIdFormState>(key: Key, value: AddIdFormState[Key]) {
     setAddIdForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function updateEngagementField<Key extends keyof EngagementFormState>(key: Key, value: EngagementFormState[Key]) {
+    setEngagementForm((current) => ({ ...current, [key]: value }))
   }
 
   async function handleSaveNote() {
@@ -480,6 +552,65 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       console.error(error)
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  async function handleSaveEngagement() {
+    if (!clientData.household || !engagementForm.title.trim()) {
+      return
+    }
+
+    setIsSavingEngagement(true)
+
+    try {
+      const response = await fetch("/api/engagements", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          householdId: clientData.household.id,
+          engagementType: engagementForm.engagementType,
+          title: engagementForm.title,
+          description: engagementForm.description,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to save engagement")
+      }
+
+      const createdEngagement = await response.json()
+
+      setLocalEngagements((current) => [
+        {
+          id: typeof createdEngagement.id === "string" ? createdEngagement.id : String(Date.now()),
+          engagementType:
+            typeof createdEngagement.engagementType === "string"
+              ? createdEngagement.engagementType
+              : engagementForm.engagementType,
+          title:
+            typeof createdEngagement.title === "string" && createdEngagement.title.trim()
+              ? createdEngagement.title
+              : engagementForm.title.trim(),
+          status:
+            typeof createdEngagement.status === "string" && createdEngagement.status.trim()
+              ? createdEngagement.status
+              : "active",
+          startedAt:
+            typeof createdEngagement.startedAt === "string" && createdEngagement.startedAt.trim()
+              ? createdEngagement.startedAt
+              : "just-now",
+        },
+        ...current,
+      ])
+      setEngagementForm(buildEngagementForm())
+      setIsEngagementPanelOpen(false)
+      setActiveFilter("all")
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsSavingEngagement(false)
     }
   }
 
@@ -747,6 +878,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
   function openNotePanel() {
     setIsNotePanelOpen(true)
+    setIsEngagementPanelOpen(false)
     setActiveFilter("notes")
   }
 
@@ -754,6 +886,17 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     setNoteBody("")
     setNoteCategory("general")
     setIsNotePanelOpen(false)
+  }
+
+  function openEngagementPanel() {
+    setIsEngagementPanelOpen(true)
+    setIsNotePanelOpen(false)
+    setActiveFilter("all")
+  }
+
+  function handleCancelEngagement() {
+    setEngagementForm(buildEngagementForm())
+    setIsEngagementPanelOpen(false)
   }
 
   function handleStartEditing() {
@@ -1353,8 +1496,78 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               >
                 + Note
               </button>
+              <button
+                type="button"
+                onClick={openEngagementPanel}
+                className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+              >
+                + Engagement
+              </button>
             </div>
           </div>
+
+          {isEngagementPanelOpen ? (
+            <div className="mt-[14px] rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
+              {!clientData.household ? (
+                <p className="text-[12px] text-[#9ca3af]">
+                  Link this client to a household before creating an engagement.
+                </p>
+              ) : null}
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <EditField label="Title">
+                  <input
+                    value={engagementForm.title}
+                    onChange={(event) => updateEngagementField("title", event.target.value)}
+                    className={inputClassName}
+                    required
+                  />
+                </EditField>
+
+                <EditField label="Type">
+                  <select
+                    value={engagementForm.engagementType}
+                    onChange={(event) => updateEngagementField("engagementType", event.target.value as EngagementType)}
+                    className={inputClassName}
+                  >
+                    {ENGAGEMENT_TYPE_VALUES.map((type) => (
+                      <option key={type} value={type}>
+                        {formatCategory(type)}
+                      </option>
+                    ))}
+                  </select>
+                </EditField>
+              </div>
+
+              <div className="mt-3">
+                <EditField label="Description (optional)">
+                  <textarea
+                    value={engagementForm.description}
+                    onChange={(event) => updateEngagementField("description", event.target.value)}
+                    className={`${inputClassName} min-h-[80px] resize-y`}
+                  />
+                </EditField>
+              </div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveEngagement}
+                  disabled={isSavingEngagement || !clientData.household || !engagementForm.title.trim()}
+                  className="rounded-[7px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white disabled:opacity-60"
+                >
+                  {isSavingEngagement ? "Saving..." : "Save"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelEngagement}
+                  className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {isNotePanelOpen ? (
             <div className="mt-[14px] rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
@@ -1405,26 +1618,47 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             </div>
           ) : null}
 
-          {visibleNotes.length > 0 ? (
+          {timelineItems.length > 0 ? (
             <div className="mt-[14px]">
-              {visibleNotes.map((note) => (
-                <div
-                  key={note.id}
-                  className="mb-2 rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-[10px]"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <NoteIcon />
-                      <p className="text-[13px] font-medium text-[#113238]">
-                        {formatCategory(note.noteType)}
-                      </p>
-                      <p className="text-[11px] text-[#9ca3af]">Andrew Rowan</p>
-                    </div>
-                    <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
-                      {formatTimelineTimestamp(note.createdAt)}
-                    </p>
-                  </div>
-                  <p className="mt-[6px] text-[13px] leading-[1.6] text-[#374151]">{note.text}</p>
+              {timelineItems.map((item) => (
+                <div key={item.id} className="mb-2 rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-[10px]">
+                  {item.kind === "engagement" ? (
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <EngagementIcon />
+                          <p className="text-[13px] font-medium text-[#113238]">{item.engagement.title}</p>
+                          <p className="text-[11px] text-[#9ca3af]">{formatCategory(item.engagement.engagementType)}</p>
+                        </div>
+                        <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
+                          {formatTimelineTimestamp(item.timestamp)}
+                        </p>
+                      </div>
+                      <div className="mt-[6px] flex items-center gap-2">
+                        <span
+                          className={`inline-flex rounded-[999px] px-[8px] py-[2px] text-[10px] uppercase ${getStatusClasses(item.engagement.status)}`}
+                        >
+                          {formatCategory(item.engagement.status)}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <NoteIcon />
+                          <p className="text-[13px] font-medium text-[#113238]">
+                            {formatCategory(item.note.noteType)}
+                          </p>
+                          <p className="text-[11px] text-[#9ca3af]">Andrew Rowan</p>
+                        </div>
+                        <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
+                          {formatTimelineTimestamp(item.timestamp)}
+                        </p>
+                      </div>
+                      <p className="mt-[6px] text-[13px] leading-[1.6] text-[#374151]">{item.note.text}</p>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
@@ -1433,7 +1667,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               <div className="text-center">
                 <p className="text-[14px] text-[#9ca3af]">No activity yet</p>
                 <p className="mt-1 text-[11px] text-[#9ca3af]">
-                  Notes, emails and documents will appear here
+                  Notes, engagements, emails and documents will appear here
                 </p>
               </div>
             </div>

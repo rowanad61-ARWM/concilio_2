@@ -5,6 +5,14 @@ export type TimelineNote = {
   createdAt: string
 }
 
+export type TimelineEngagement = {
+  id: string
+  engagementType: string
+  title: string
+  status: string
+  startedAt: string
+}
+
 export type ClientAddress = {
   line1: string | null
   line2: string | null
@@ -63,4 +71,5 @@ export type ClientDetail = {
     expiryDate: string | null
     notes: string | null
   }[]
+  engagements: TimelineEngagement[]
 }
