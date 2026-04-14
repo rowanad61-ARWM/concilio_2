@@ -11,6 +11,16 @@ export type TimelineEngagement = {
   title: string
   status: string
   startedAt: string
+  workflowInstance: {
+    id: string
+    currentStage: string
+    status: string
+    stages: {
+      key: string
+      label: string
+      order: number
+    }[]
+  } | null
 }
 
 export type ClientAddress = {

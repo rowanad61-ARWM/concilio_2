@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { ENGAGEMENT_TYPE_VALUES } from "@/lib/engagement"
 import type { ClientAddress, ClientDetail, TimelineEngagement, TimelineNote } from "@/types/client-record"
@@ -48,7 +48,13 @@ type AddIdFormState = {
 type EngagementFormState = {
   title: string
   engagementType: EngagementType
+  templateId: string
   description: string
+}
+
+type WorkflowTemplateOption = {
+  id: string
+  name: string
 }
 
 const timelineFilters: { label: string; value: TimelineFilter }[] = [
@@ -149,6 +155,7 @@ function buildEngagementForm(): EngagementFormState {
   return {
     title: "",
     engagementType: ENGAGEMENT_TYPE_VALUES[0],
+    templateId: "",
     description: "",
   }
 }
@@ -314,6 +321,33 @@ function formatTimelineTimestamp(value: string) {
   }).format(new Date(value))
 }
 
+function getWorkflowStageState(index: number, currentIndex: number, workflowStatus: string) {
+  if (workflowStatus === "completed") {
+    return "completed"
+  }
+
+  if (index < currentIndex) {
+    return "completed"
+  }
+
+  if (index === currentIndex) {
+    return "current"
+  }
+
+  return "upcoming"
+}
+
+function getWorkflowStageClasses(state: string) {
+  switch (state) {
+    case "completed":
+      return "border-[#113238] bg-[#113238]"
+    case "current":
+      return "border-[#FF8C42] bg-[#FF8C42]"
+    default:
+      return "border-[#e5e7eb] bg-white"
+  }
+}
+
 function getTimelineSortValue(value: string) {
   if (value === "just-now") {
     return Number.MAX_SAFE_INTEGER
@@ -454,6 +488,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [localNotes, setLocalNotes] = useState(notes)
   const [localEngagements, setLocalEngagements] = useState<TimelineEngagement[]>(client.engagements)
   const [engagementForm, setEngagementForm] = useState<EngagementFormState>(() => buildEngagementForm())
+  const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplateOption[]>([])
+  const [isLoadingWorkflowTemplates, setIsLoadingWorkflowTemplates] = useState(false)
+  const [advancingWorkflowId, setAdvancingWorkflowId] = useState<string | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [isSavingChanges, setIsSavingChanges] = useState(false)
   const [editForm, setEditForm] = useState<EditFormState>(() => buildEditForm(client))
@@ -496,6 +533,60 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const residentialAddressLines = formatAddressLines(residentialAddress)
   const postalAddressLines = formatAddressLines(postalAddress)
   const showPostalAddress = postalAddressLines.length > 0 && !addressesEqual(residentialAddress, postalAddress)
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadWorkflowTemplates() {
+      setIsLoadingWorkflowTemplates(true)
+
+      try {
+        const response = await fetch("/api/workflow-templates")
+        if (!response.ok) {
+          throw new Error("Failed to fetch workflow templates")
+        }
+
+        const templatesPayload = await response.json()
+        if (!Array.isArray(templatesPayload)) {
+          return
+        }
+
+        if (isMounted) {
+          setWorkflowTemplates(
+            templatesPayload
+              .map((template) => {
+                if (!template || typeof template !== "object" || Array.isArray(template)) {
+                  return null
+                }
+
+                const value = template as Record<string, unknown>
+                if (typeof value.id !== "string" || typeof value.name !== "string") {
+                  return null
+                }
+
+                return {
+                  id: value.id,
+                  name: value.name,
+                }
+              })
+              .filter((template): template is WorkflowTemplateOption => Boolean(template)),
+          )
+        }
+      } catch (error) {
+        console.error(error)
+      } finally {
+        if (isMounted) {
+          setIsLoadingWorkflowTemplates(false)
+        }
+      }
+    }
+
+    void loadWorkflowTemplates()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   function updateEditField<Key extends keyof EditFormState>(key: Key, value: EditFormState[Key]) {
     setEditForm((current) => ({ ...current, [key]: value }))
@@ -573,6 +664,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           engagementType: engagementForm.engagementType,
           title: engagementForm.title,
           description: engagementForm.description,
+          templateId: engagementForm.templateId || undefined,
         }),
       })
 
@@ -601,6 +693,48 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             typeof createdEngagement.startedAt === "string" && createdEngagement.startedAt.trim()
               ? createdEngagement.startedAt
               : "just-now",
+          workflowInstance:
+            createdEngagement.workflowInstance &&
+            typeof createdEngagement.workflowInstance === "object" &&
+            !Array.isArray(createdEngagement.workflowInstance) &&
+            typeof (createdEngagement.workflowInstance as Record<string, unknown>).id === "string" &&
+            typeof (createdEngagement.workflowInstance as Record<string, unknown>).currentStage === "string"
+              ? {
+                  id: (createdEngagement.workflowInstance as Record<string, string>).id,
+                  currentStage: (createdEngagement.workflowInstance as Record<string, string>).currentStage,
+                  status:
+                    (createdEngagement.workflowInstance as Record<string, string>).status?.trim() ||
+                    "active",
+                  stages: Array.isArray(
+                    (createdEngagement.workflowInstance as Record<string, unknown>).stages,
+                  )
+                    ? ((createdEngagement.workflowInstance as Record<string, unknown>).stages as unknown[])
+                        .map((stage) => {
+                          if (!stage || typeof stage !== "object" || Array.isArray(stage)) {
+                            return null
+                          }
+
+                          const stageValue = stage as Record<string, unknown>
+                          if (
+                            typeof stageValue.key !== "string" ||
+                            typeof stageValue.label !== "string" ||
+                            typeof stageValue.order !== "number"
+                          ) {
+                            return null
+                          }
+
+                          return {
+                            key: stageValue.key,
+                            label: stageValue.label,
+                            order: stageValue.order,
+                          }
+                        })
+                        .filter(
+                          (stage): stage is { key: string; label: string; order: number } => Boolean(stage),
+                        )
+                    : [],
+                }
+              : null,
         },
         ...current,
       ])
@@ -611,6 +745,55 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       console.error(error)
     } finally {
       setIsSavingEngagement(false)
+    }
+  }
+
+  async function handleAdvanceWorkflowStage(workflowInstanceId: string) {
+    setAdvancingWorkflowId(workflowInstanceId)
+
+    try {
+      const response = await fetch(`/api/workflow-instances/${workflowInstanceId}`, {
+        method: "PATCH",
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to advance workflow stage")
+      }
+
+      const updatedWorkflow = await response.json()
+      if (!updatedWorkflow || typeof updatedWorkflow !== "object" || Array.isArray(updatedWorkflow)) {
+        return
+      }
+
+      const workflowValue = updatedWorkflow as Record<string, unknown>
+      const nextCurrentStage =
+        typeof workflowValue.currentStage === "string" ? workflowValue.currentStage : null
+      const nextStatus = typeof workflowValue.status === "string" ? workflowValue.status : null
+
+      if (!nextCurrentStage || !nextStatus) {
+        return
+      }
+
+      setLocalEngagements((current) =>
+        current.map((engagement) => {
+          if (engagement.workflowInstance?.id !== workflowInstanceId) {
+            return engagement
+          }
+
+          return {
+            ...engagement,
+            workflowInstance: {
+              ...engagement.workflowInstance,
+              currentStage: nextCurrentStage,
+              status: nextStatus,
+            },
+          }
+        }),
+      )
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setAdvancingWorkflowId(null)
     }
   }
 
@@ -1539,6 +1722,24 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 </EditField>
               </div>
 
+              <div className="mt-3 md:max-w-[50%]">
+                <EditField label="Workflow template">
+                  <select
+                    value={engagementForm.templateId}
+                    onChange={(event) => updateEngagementField("templateId", event.target.value)}
+                    className={inputClassName}
+                    disabled={isLoadingWorkflowTemplates}
+                  >
+                    <option value="">None</option>
+                    {workflowTemplates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </select>
+                </EditField>
+              </div>
+
               <div className="mt-3">
                 <EditField label="Description (optional)">
                   <textarea
@@ -1641,6 +1842,49 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                           {formatCategory(item.engagement.status)}
                         </span>
                       </div>
+                      {item.engagement.workflowInstance ? (
+                        <div className="mt-2 rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-2">
+                          <div className="flex items-center gap-2">
+                            {item.engagement.workflowInstance.stages.map((stage, index) => {
+                              const currentIndex = item.engagement.workflowInstance
+                                ? item.engagement.workflowInstance.stages.findIndex(
+                                    (stageItem) => stageItem.key === item.engagement.workflowInstance?.currentStage,
+                                  )
+                                : -1
+                              const stageState = getWorkflowStageState(
+                                index,
+                                currentIndex < 0 ? 0 : currentIndex,
+                                item.engagement.workflowInstance?.status ?? "active",
+                              )
+
+                              return (
+                                <span
+                                  key={stage.key}
+                                  className={`h-[8px] w-[8px] rounded-full border ${getWorkflowStageClasses(stageState)}`}
+                                  title={stage.label}
+                                />
+                              )
+                            })}
+                          </div>
+                          <p className="mt-2 text-[11px] text-[#6b7280]">
+                            {item.engagement.workflowInstance.stages.find(
+                              (stage) => stage.key === item.engagement.workflowInstance?.currentStage,
+                            )?.label ?? formatCategory(item.engagement.workflowInstance.currentStage)}
+                          </p>
+                          {item.engagement.workflowInstance.status !== "completed" ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleAdvanceWorkflowStage(item.engagement.workflowInstance!.id)}
+                              disabled={advancingWorkflowId === item.engagement.workflowInstance.id}
+                              className="mt-2 rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-transparent px-[8px] py-[4px] text-[11px] text-[#113238] disabled:opacity-60"
+                            >
+                              {advancingWorkflowId === item.engagement.workflowInstance.id
+                                ? "Advancing..."
+                                : "Advance stage"}
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </>
                   ) : (
                     <>

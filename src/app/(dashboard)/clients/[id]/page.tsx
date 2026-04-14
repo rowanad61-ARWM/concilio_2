@@ -106,10 +106,23 @@ export default async function ClientRecordPage({
           },
         }),
         db.$queryRawUnsafe<Record<string, unknown>[]>(
-          `SELECT *
-           FROM engagement
-           WHERE household_id = $1
-           ORDER BY created_at DESC`,
+          `SELECT
+             e.*,
+             wi.id AS workflow_instance_id,
+             wi.current_stage AS workflow_current_stage,
+             wi.status AS workflow_status,
+             wt.stages AS workflow_template_stages
+           FROM engagement e
+           LEFT JOIN LATERAL (
+             SELECT wi_inner.*
+             FROM workflow_instance wi_inner
+             WHERE wi_inner.engagement_id = e.id
+             ORDER BY wi_inner.created_at DESC
+             LIMIT 1
+           ) wi ON true
+           LEFT JOIN workflow_template wt ON wt.id = wi.template_id
+           WHERE e.household_id = $1
+           ORDER BY e.created_at DESC`,
           householdMembership.household_id,
         ),
       ])
