@@ -87,22 +87,7 @@ const navItems: NavItem[] = [
       </svg>
     ),
   },
-  {
-    href: "/documents",
-    label: "Documents",
-    icon: (
-      <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4">
-        <path
-          d="M5 2.5h4l2 2v7A1.5 1.5 0 0 1 9.5 13h-4A1.5 1.5 0 0 1 4 11.5v-7A1.5 1.5 0 0 1 5.5 3h3.25M9 2.75V5h2.25M6 8h4M6 10.5h4"
-          stroke="currentColor"
-          strokeWidth="1.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  },
-  {
+   {
     href: "/settings",
     label: "Settings",
     icon: (

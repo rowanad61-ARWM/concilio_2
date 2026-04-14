@@ -2086,6 +2086,16 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     setActiveFilter("all")
   }
 
+  function openDocumentsTab() {
+    setActiveDetailTab("documents")
+    setIsEngagementPanelOpen(false)
+    setIsNotePanelOpen(false)
+  }
+
+  function openTimelineTab() {
+    setActiveDetailTab("timeline")
+  }
+
   function handleCancelEngagement() {
     setEngagementForm(buildEngagementForm())
     setIsEngagementPanelOpen(false)
@@ -2903,7 +2913,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           <div className="mb-3 flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setActiveDetailTab("timeline")}
+              onClick={openTimelineTab}
               className={`rounded-[7px] border-[0.5px] px-[10px] py-[5px] text-[12px] ${
                 activeDetailTab === "timeline"
                   ? "border-[#113238] bg-[#113238] text-white"
@@ -2914,11 +2924,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             </button>
             <button
               type="button"
-              onClick={() => {
-                setActiveDetailTab("documents")
-                setIsEngagementPanelOpen(false)
-                setIsNotePanelOpen(false)
-              }}
+              onClick={openDocumentsTab}
               className={`rounded-[7px] border-[0.5px] px-[10px] py-[5px] text-[12px] ${
                 activeDetailTab === "documents"
                   ? "border-[#113238] bg-[#113238] text-white"
@@ -2929,7 +2935,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             </button>
           </div>
 
-          {activeDetailTab === "timeline" ? (
+          {activeDetailTab === "timeline" && (
             <>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -3209,7 +3215,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             </div>
           )}
             </>
-          ) : (
+          )}
+
+          {activeDetailTab === "documents" && (
             <DocumentsTab clientId={clientData.id} />
           )}
         </section>

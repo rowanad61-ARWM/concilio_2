@@ -17,15 +17,6 @@ function decodeSegment(value: string) {
   }
 }
 
-function isGraphNotFound(error: unknown) {
-  return Boolean(
-    error &&
-      typeof error === "object" &&
-      "statusCode" in error &&
-      (error as { statusCode?: unknown }).statusCode === 404,
-  )
-}
-
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ clientId: string; folder: string }> },
@@ -43,12 +34,8 @@ export async function GET(
     const files = await listFiles(resolvedClientId, resolvedFolder)
     return NextResponse.json(files)
   } catch (error) {
-    if (isGraphNotFound(error)) {
-      return NextResponse.json([])
-    }
-
     console.error("[documents list error]", error)
-    return NextResponse.json({ error: "failed to list documents" }, { status: 500 })
+    return NextResponse.json([], { status: 200 })
   }
 }
 
