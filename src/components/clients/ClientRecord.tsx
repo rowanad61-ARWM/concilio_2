@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useEffect, useState } from "react"
 
+import DocumentsTab from "@/components/clients/DocumentsTab"
 import { ENGAGEMENT_TYPE_VALUES } from "@/lib/engagement"
 import { scoreToAllocation, type RiskAllocation } from "@/lib/risk"
 import type { ClientAddress, ClientDetail, TimelineEngagement, TimelineNote } from "@/types/client-record"
@@ -13,6 +14,7 @@ type ClientRecordProps = {
 }
 
 type TimelineFilter = "all" | "emails" | "notes" | "docs"
+type ClientDetailTab = "timeline" | "documents"
 type NoteCategory = "general" | "meeting" | "phone_call" | "email" | "compliance" | "other"
 type EngagementType = (typeof ENGAGEMENT_TYPE_VALUES)[number]
 type LifecycleStage = "prospect" | "engagement" | "advising" | "implementation" | "lapsed"
@@ -718,6 +720,7 @@ function EngagementIcon() {
 
 export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [clientData, setClientData] = useState(client)
+  const [activeDetailTab, setActiveDetailTab] = useState<ClientDetailTab>("timeline")
   const [verificationChecks, setVerificationChecks] = useState<VerificationCheck[]>(client.verificationChecks)
   const [activeFilter, setActiveFilter] = useState<TimelineFilter>("all")
   const [isNotePanelOpen, setIsNotePanelOpen] = useState(false)
@@ -2064,6 +2067,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   }
 
   function openNotePanel() {
+    setActiveDetailTab("timeline")
     setIsNotePanelOpen(true)
     setIsEngagementPanelOpen(false)
     setActiveFilter("notes")
@@ -2076,6 +2080,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   }
 
   function openEngagementPanel() {
+    setActiveDetailTab("timeline")
     setIsEngagementPanelOpen(true)
     setIsNotePanelOpen(false)
     setActiveFilter("all")
@@ -2895,6 +2900,37 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
         </aside>
 
         <section className="flex flex-1 flex-col overflow-y-auto bg-[#F7F9FB] px-[18px] py-[14px]">
+          <div className="mb-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveDetailTab("timeline")}
+              className={`rounded-[7px] border-[0.5px] px-[10px] py-[5px] text-[12px] ${
+                activeDetailTab === "timeline"
+                  ? "border-[#113238] bg-[#113238] text-white"
+                  : "border-[#e5e7eb] bg-white text-[#113238]"
+              }`}
+            >
+              Timeline
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveDetailTab("documents")
+                setIsEngagementPanelOpen(false)
+                setIsNotePanelOpen(false)
+              }}
+              className={`rounded-[7px] border-[0.5px] px-[10px] py-[5px] text-[12px] ${
+                activeDetailTab === "documents"
+                  ? "border-[#113238] bg-[#113238] text-white"
+                  : "border-[#e5e7eb] bg-white text-[#113238]"
+              }`}
+            >
+              Documents
+            </button>
+          </div>
+
+          {activeDetailTab === "timeline" ? (
+            <>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               {timelineFilters.map((filter) => {
@@ -3171,6 +3207,10 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 </p>
               </div>
             </div>
+          )}
+            </>
+          ) : (
+            <DocumentsTab clientId={clientData.id} />
           )}
         </section>
       </div>
