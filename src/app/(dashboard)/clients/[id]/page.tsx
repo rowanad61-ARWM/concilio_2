@@ -50,7 +50,7 @@ export default async function ClientRecordPage({
 }) {
   const { id } = await params
 
-  const [party, fileNotes, householdMembership, verificationChecks, employmentProfile] = await Promise.all([
+  const [party, fileNotes, householdMembership, verificationChecks, employmentProfile, riskProfile] = await Promise.all([
     db.party.findUnique({
       where: { id },
       include: {
@@ -93,6 +93,19 @@ export default async function ClientRecordPage({
       orderBy: [
         {
           effective_from: "desc",
+        },
+        {
+          created_at: "desc",
+        },
+      ],
+    }),
+    db.risk_profile.findFirst({
+      where: {
+        party_id: id,
+      },
+      orderBy: [
+        {
+          completed_at: "desc",
         },
         {
           created_at: "desc",
@@ -204,6 +217,18 @@ export default async function ClientRecordPage({
           occupation: employmentProfile.occupation_title,
           industry: employmentProfile.industry,
           employmentType: null,
+        }
+      : null,
+    riskProfile: riskProfile
+      ? {
+          id: riskProfile.id,
+          riskResult: riskProfile.risk_result,
+          score: riskProfile.score,
+          capacityForLoss: riskProfile.capacity_for_loss,
+          overrideFlag: riskProfile.override_flag ?? false,
+          overrideReason: riskProfile.override_reason,
+          completedAt: riskProfile.completed_at?.toISOString() ?? null,
+          validUntil: riskProfile.valid_until?.toISOString() ?? null,
         }
       : null,
     engagements: engagementRows.map((engagement) => mapEngagementRow(engagement)),

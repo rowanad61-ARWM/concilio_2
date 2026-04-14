@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 
 import { ENGAGEMENT_TYPE_VALUES } from "@/lib/engagement"
+import { scoreToAllocation, type RiskAllocation } from "@/lib/risk"
 import type { ClientAddress, ClientDetail, TimelineEngagement, TimelineNote } from "@/types/client-record"
 
 type ClientRecordProps = {
@@ -21,6 +22,7 @@ type VerificationDocumentType = "passport" | "drivers_licence" | "medicare_card"
 type VerificationCheck = ClientDetail["verificationChecks"][number]
 type IncomeFrequency = "weekly" | "fortnightly" | "monthly" | "annual"
 type LiabilityRepaymentFrequency = "weekly" | "fortnightly" | "monthly"
+type CapacityForLoss = "low" | "medium" | "high"
 
 type EditFormState = {
   firstName: string
@@ -134,6 +136,15 @@ type LiabilityFormState = {
   repaymentFrequency: LiabilityRepaymentFrequency
 }
 
+type RiskProfileFormState = {
+  score: string
+  capacityForLoss: CapacityForLoss
+  validUntil: string
+  overrideFlag: boolean
+  overrideAllocation: RiskAllocation
+  overrideReason: string
+}
+
 const timelineFilters: { label: string; value: TimelineFilter }[] = [
   { label: "All", value: "all" },
   { label: "Emails", value: "emails" },
@@ -206,6 +217,12 @@ const liabilityRepaymentFrequencyOptions: { label: string; value: LiabilityRepay
   { label: "Weekly", value: "weekly" },
   { label: "Fortnightly", value: "fortnightly" },
   { label: "Monthly", value: "monthly" },
+]
+const riskAllocationOptions: RiskAllocation[] = ["30/70", "40/60", "50/50", "60/40", "70/30", "80/20", "100"]
+const capacityForLossOptions: { label: string; value: CapacityForLoss }[] = [
+  { label: "Low", value: "low" },
+  { label: "Medium", value: "medium" },
+  { label: "High", value: "high" },
 ]
 const incomeFrequencyOptions: { label: string; value: IncomeFrequency }[] = [
   { label: "Weekly", value: "weekly" },
@@ -341,6 +358,17 @@ function buildLiabilityForm(): LiabilityFormState {
     interestRate: "",
     repaymentAmount: "",
     repaymentFrequency: "monthly",
+  }
+}
+
+function buildRiskProfileForm(): RiskProfileFormState {
+  return {
+    score: "",
+    capacityForLoss: "medium",
+    validUntil: "",
+    overrideFlag: false,
+    overrideAllocation: "50/50",
+    overrideReason: "",
   }
 }
 
@@ -702,6 +730,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [isSavingProperty, setIsSavingProperty] = useState(false)
   const [isSavingAccount, setIsSavingAccount] = useState(false)
   const [isSavingLiability, setIsSavingLiability] = useState(false)
+  const [isSavingRiskProfile, setIsSavingRiskProfile] = useState(false)
   const [localNotes, setLocalNotes] = useState(notes)
   const [localEngagements, setLocalEngagements] = useState<TimelineEngagement[]>(client.engagements)
   const [incomeItems, setIncomeItems] = useState<IncomeItem[]>([])
@@ -722,6 +751,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [liabilityItems, setLiabilityItems] = useState<LiabilityItem[]>([])
   const [isAddLiabilityFormOpen, setIsAddLiabilityFormOpen] = useState(false)
   const [liabilityForm, setLiabilityForm] = useState<LiabilityFormState>(() => buildLiabilityForm())
+  const [isAddRiskProfileFormOpen, setIsAddRiskProfileFormOpen] = useState(false)
+  const [riskProfileForm, setRiskProfileForm] = useState<RiskProfileFormState>(() => buildRiskProfileForm())
   const [engagementForm, setEngagementForm] = useState<EngagementFormState>(() => buildEngagementForm())
   const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplateOption[]>([])
   const [isLoadingWorkflowTemplates, setIsLoadingWorkflowTemplates] = useState(false)
@@ -768,6 +799,11 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const residentialAddressLines = formatAddressLines(residentialAddress)
   const postalAddressLines = formatAddressLines(postalAddress)
   const showPostalAddress = postalAddressLines.length > 0 && !addressesEqual(residentialAddress, postalAddress)
+  const riskScoreValue = Number(riskProfileForm.score)
+  const recommendedAllocation =
+    Number.isFinite(riskScoreValue) && riskScoreValue >= 0 && riskScoreValue <= 100
+      ? scoreToAllocation(riskScoreValue)
+      : null
 
   useEffect(() => {
     let isMounted = true
@@ -1079,6 +1115,13 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
   function updateLiabilityField<Key extends keyof LiabilityFormState>(key: Key, value: LiabilityFormState[Key]) {
     setLiabilityForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function updateRiskProfileField<Key extends keyof RiskProfileFormState>(
+    key: Key,
+    value: RiskProfileFormState[Key],
+  ) {
+    setRiskProfileForm((current) => ({ ...current, [key]: value }))
   }
 
   async function handleSaveNote() {
@@ -1927,6 +1970,99 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     }
   }
 
+  function handleOpenAddRiskProfileForm() {
+    setRiskProfileForm(buildRiskProfileForm())
+    setIsAddRiskProfileFormOpen(true)
+  }
+
+  function handleCancelAddRiskProfileForm() {
+    setRiskProfileForm(buildRiskProfileForm())
+    setIsAddRiskProfileFormOpen(false)
+  }
+
+  function handleRiskProfileOverrideChange(checked: boolean) {
+    setRiskProfileForm((current) => {
+      const numericScore = Number(current.score)
+      const derivedAllocation =
+        Number.isFinite(numericScore) && numericScore >= 0 && numericScore <= 100
+          ? scoreToAllocation(numericScore)
+          : current.overrideAllocation
+
+      return {
+        ...current,
+        overrideFlag: checked,
+        overrideAllocation: checked ? derivedAllocation : current.overrideAllocation,
+        overrideReason: checked ? current.overrideReason : "",
+      }
+    })
+  }
+
+  async function handleSaveRiskProfile() {
+    const numericScore = Number(riskProfileForm.score)
+    if (!Number.isFinite(numericScore) || numericScore < 0 || numericScore > 100) {
+      return
+    }
+
+    if (riskProfileForm.overrideFlag && !riskProfileForm.overrideReason.trim()) {
+      return
+    }
+
+    setIsSavingRiskProfile(true)
+
+    try {
+      const response = await fetch(`/api/clients/${clientData.id}/risk-profile`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          score: Math.round(numericScore),
+          capacityForLoss: riskProfileForm.capacityForLoss,
+          validUntil: riskProfileForm.validUntil || null,
+          overrideFlag: riskProfileForm.overrideFlag,
+          overrideReason: riskProfileForm.overrideFlag ? riskProfileForm.overrideReason : null,
+          overrideAllocation: riskProfileForm.overrideFlag ? riskProfileForm.overrideAllocation : null,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to create risk profile")
+      }
+
+      const created = await response.json()
+      if (!created || typeof created !== "object" || Array.isArray(created)) {
+        throw new Error("Invalid risk profile response")
+      }
+
+      const value = created as Record<string, unknown>
+      if (typeof value.id !== "string" || typeof value.riskResult !== "string") {
+        throw new Error("Invalid risk profile response")
+      }
+
+      const createdRiskProfile: ClientDetail["riskProfile"] = {
+        id: value.id,
+        riskResult: value.riskResult,
+        score: typeof value.score === "number" ? value.score : null,
+        capacityForLoss: typeof value.capacityForLoss === "string" ? value.capacityForLoss : null,
+        overrideFlag: typeof value.overrideFlag === "boolean" ? value.overrideFlag : false,
+        overrideReason: typeof value.overrideReason === "string" ? value.overrideReason : null,
+        completedAt: typeof value.completedAt === "string" ? value.completedAt : null,
+        validUntil: typeof value.validUntil === "string" ? value.validUntil : null,
+      }
+
+      setClientData((current) => ({
+        ...current,
+        riskProfile: createdRiskProfile,
+      }))
+      setRiskProfileForm(buildRiskProfileForm())
+      setIsAddRiskProfileFormOpen(false)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsSavingRiskProfile(false)
+    }
+  }
+
   function openNotePanel() {
     setIsNotePanelOpen(true)
     setIsEngagementPanelOpen(false)
@@ -2363,6 +2499,152 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             ) : (
               <p className="text-[12px] text-[#9ca3af]">No employment on file</p>
             )}
+          </section>
+
+          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
+            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Risk Profile</h2>
+
+            {clientData.riskProfile ? (
+              <div className="space-y-2">
+                <p className="text-[20px] font-semibold text-[#113238]">{clientData.riskProfile.riskResult}</p>
+                <p className="text-[11px] text-[#9ca3af]">Risk / Defensive</p>
+                <p className="text-[12px] text-[#6b7280]">
+                  Finametrica score:{" "}
+                  {clientData.riskProfile.score !== null ? clientData.riskProfile.score : "Not provided"}
+                </p>
+                <p className="text-[11px] text-[#9ca3af]">
+                  Valid until: {formatDate(clientData.riskProfile.validUntil)}
+                </p>
+
+                {clientData.riskProfile.overrideFlag ? (
+                  <div className="rounded-[8px] border-[0.5px] border-[#FCD34D] bg-[#FFFBEB] p-2">
+                    <p className="text-[11px] text-[#92400E]">
+                      {clientData.riskProfile.overrideReason && clientData.riskProfile.overrideReason.trim()
+                        ? clientData.riskProfile.overrideReason
+                        : "Allocation overridden"}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {!clientData.riskProfile && !isAddRiskProfileFormOpen ? (
+              <div className="space-y-2">
+                <p className="text-[12px] text-[#9ca3af]">No risk profile on file</p>
+                <button
+                  type="button"
+                  onClick={handleOpenAddRiskProfileForm}
+                  className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+                >
+                  + Add
+                </button>
+              </div>
+            ) : null}
+
+            {isAddRiskProfileFormOpen ? (
+              <div className="space-y-[10px] rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-[10px]">
+                <EditField label="Finametrica Score">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={riskProfileForm.score}
+                    onChange={(event) => updateRiskProfileField("score", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <p className="text-[12px] text-[#FF8C42]">
+                  Recommended allocation: {recommendedAllocation ?? "Enter a score"}
+                </p>
+
+                <EditField label="Capacity for loss">
+                  <select
+                    value={riskProfileForm.capacityForLoss}
+                    onChange={(event) => updateRiskProfileField("capacityForLoss", event.target.value as CapacityForLoss)}
+                    className={inputClassName}
+                  >
+                    {capacityForLossOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </EditField>
+
+                <EditField label="Valid until (optional)">
+                  <input
+                    type="date"
+                    value={riskProfileForm.validUntil}
+                    onChange={(event) => updateRiskProfileField("validUntil", event.target.value)}
+                    className={inputClassName}
+                  />
+                </EditField>
+
+                <label className="flex items-center gap-2 text-[12px] text-[#113238]">
+                  <input
+                    type="checkbox"
+                    checked={riskProfileForm.overrideFlag}
+                    onChange={(event) => handleRiskProfileOverrideChange(event.target.checked)}
+                  />
+                  Override recommended allocation
+                </label>
+
+                {riskProfileForm.overrideFlag ? (
+                  <div className="space-y-[10px]">
+                    <div className="rounded-[8px] border-[0.5px] border-[#FCD34D] bg-[#FFFBEB] p-2">
+                      <p className="text-[11px] text-[#92400E]">Override requires a documented reason</p>
+                    </div>
+
+                    <EditField label="Allocation">
+                      <select
+                        value={riskProfileForm.overrideAllocation}
+                        onChange={(event) =>
+                          updateRiskProfileField("overrideAllocation", event.target.value as RiskAllocation)
+                        }
+                        className={inputClassName}
+                      >
+                        {riskAllocationOptions.map((allocation) => (
+                          <option key={allocation} value={allocation}>
+                            {allocation}
+                          </option>
+                        ))}
+                      </select>
+                    </EditField>
+
+                    <EditField label="Override reason">
+                      <textarea
+                        value={riskProfileForm.overrideReason}
+                        onChange={(event) => updateRiskProfileField("overrideReason", event.target.value)}
+                        className={`${inputClassName} min-h-[70px] resize-y`}
+                      />
+                    </EditField>
+                  </div>
+                ) : null}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveRiskProfile}
+                    disabled={
+                      isSavingRiskProfile ||
+                      !riskProfileForm.score.trim() ||
+                      (riskProfileForm.overrideFlag && !riskProfileForm.overrideReason.trim())
+                    }
+                    className="rounded-[7px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white disabled:opacity-60"
+                  >
+                    {isSavingRiskProfile ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelAddRiskProfileForm}
+                    className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">

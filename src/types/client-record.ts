@@ -88,5 +88,15 @@ export type ClientDetail = {
     industry: string | null
     employmentType: string | null
   } | null
+  riskProfile: {
+    id: string
+    riskResult: string
+    score: number | null
+    capacityForLoss: string | null
+    overrideFlag: boolean
+    overrideReason: string | null
+    completedAt: string | null
+    validUntil: string | null
+  } | null
   engagements: TimelineEngagement[]
 }
