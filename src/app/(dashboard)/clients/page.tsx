@@ -171,7 +171,7 @@ export default async function ClientsPage({
     }
   }
 
-  const groupedItems: HouseholdListItem[] = Array.from(groupedHouseholds.values()).map((household) => {
+  const groupedItems: HouseholdListItem[] = Array.from(groupedHouseholds.values()).map((household: any) => {
     const sortedMembers = [...household.members].sort(sortMembersByRole)
     const primaryMember = sortedMembers[0]
 
@@ -179,7 +179,7 @@ export default async function ClientsPage({
       id: household.id,
       displayName: household.displayName,
       isHousehold: true,
-      members: sortedMembers.map((member) => ({
+      members: sortedMembers.map((member: any) => ({
         id: member.id,
         displayName: member.displayName,
         role: member.role,
@@ -191,14 +191,14 @@ export default async function ClientsPage({
     }
   })
 
-  const householdItems = [...groupedItems, ...ungroupedItems].sort((a, b) =>
+  const householdItems = [...groupedItems, ...ungroupedItems].sort((a: any, b: any) =>
     a.displayName.localeCompare(b.displayName),
   )
 
   const prospectStages = new Set(["prospect", "engagement", "advising", "implementation"])
   const householdAwareTotal = householdItems.length
-  const householdAwareActive = householdItems.filter((item) => item.status === "active").length
-  const prospectCount = householdItems.filter((item) =>
+  const householdAwareActive = householdItems.filter((item: any) => item.status === "active").length
+  const prospectCount = householdItems.filter((item: any) =>
     prospectStages.has(item.classification?.lifecycleStage ?? ""),
   ).length
 

@@ -33,7 +33,7 @@ export default async function DashboardPage() {
     }),
   ])
 
-  const prospectCount = parties.filter((party) => {
+  const prospectCount = parties.filter((party: any) => {
     const stage = party.client_classification?.lifecycle_stage
     return (
       stage === "prospect" ||

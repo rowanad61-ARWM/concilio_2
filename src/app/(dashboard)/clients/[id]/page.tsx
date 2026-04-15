@@ -197,7 +197,7 @@ export default async function ClientRecordPage({
       value: contactMethod.value,
       isPrimary: contactMethod.preferred_flag ?? false,
     })),
-    verificationChecks: verificationChecks.map((check) => ({
+    verificationChecks: verificationChecks.map((check: any) => ({
       id: check.id,
       checkType: check.check_type,
       documentType: check.identity_document_type,
@@ -228,10 +228,10 @@ export default async function ClientRecordPage({
           validUntil: riskProfile.valid_until?.toISOString() ?? null,
         }
       : null,
-    engagements: engagementRows.map((engagement) => mapEngagementRow(engagement)),
+    engagements: engagementRows.map((engagement: any) => mapEngagementRow(engagement)),
   }
 
-  const notes: TimelineNote[] = fileNotes.map((note) => ({
+  const notes: TimelineNote[] = fileNotes.map((note: any) => ({
     id: note.id,
     noteType: note.note_type ?? "internal",
     text: note.text,
