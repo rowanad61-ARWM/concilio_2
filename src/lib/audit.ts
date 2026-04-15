@@ -6,7 +6,6 @@
  */
 
 import { db } from '@/lib/db'
-import type { Prisma } from '@prisma/client'
 
 export type AuditAction =
   | 'CREATE'
@@ -35,9 +34,9 @@ export interface AuditEventInput {
 }
 
 export async function writeAuditEvent(input: AuditEventInput): Promise<void> {
-  const details: Prisma.InputJsonObject = {
-    before: (input.beforeState ?? {}) as Prisma.InputJsonObject,
-    after: (input.afterState ?? {}) as Prisma.InputJsonObject,
+  const details: any = {
+    before: (input.beforeState ?? {}) as any,
+    after: (input.afterState ?? {}) as any,
     ip_address: input.ipAddress ?? null,
     user_agent: input.userAgent ?? null,
   }
