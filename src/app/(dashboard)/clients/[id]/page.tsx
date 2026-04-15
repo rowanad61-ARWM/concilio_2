@@ -3,7 +3,6 @@ import { notFound } from "next/navigation"
 import ClientRecord from "@/components/clients/ClientRecord"
 import { db } from "@/lib/db"
 import { mapEngagementRow } from "@/lib/engagement"
-import { Prisma } from "@prisma/client"
 import type { ClientAddress } from "@/types/client-record"
 import type { ClientDetail, TimelineNote } from "@/types/client-record"
 
