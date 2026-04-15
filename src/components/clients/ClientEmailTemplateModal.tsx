@@ -19,6 +19,8 @@ type ClientEmailTemplateModalProps = {
   onClose: () => void
   clientId: string
   clientName: string
+  onToast: (toast: { kind: "success" | "error"; message: string }) => void
+  onSent: () => void
 }
 
 export default function ClientEmailTemplateModal({
@@ -26,12 +28,15 @@ export default function ClientEmailTemplateModal({
   onClose,
   clientId,
   clientName,
+  onToast,
+  onSent,
 }: ClientEmailTemplateModalProps) {
   const [templates, setTemplates] = useState<EmailTemplateOption[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState("")
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null)
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false)
   const [isRenderingPreview, setIsRenderingPreview] = useState(false)
+  const [isSending, setIsSending] = useState(false)
 
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.id === selectedTemplateId) ?? null,
@@ -114,9 +119,51 @@ export default function ClientEmailTemplateModal({
       setPreviewResult(data)
     } catch (error) {
       console.error(error)
-      alert("Unable to render email preview right now.")
+      onToast({ kind: "error", message: "Unable to render email preview right now." })
     } finally {
       setIsRenderingPreview(false)
+    }
+  }
+
+  async function handleSend() {
+    if (!selectedTemplateId) {
+      onToast({ kind: "error", message: "Select a template first." })
+      return
+    }
+
+    if (!previewResult) {
+      onToast({ kind: "error", message: "Render preview before sending." })
+      return
+    }
+
+    setIsSending(true)
+    try {
+      const response = await fetch("/api/email/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          clientId,
+          templateId: selectedTemplateId || null,
+          subject: previewResult.subject,
+          body: previewResult.body,
+        }),
+      })
+
+      const data = (await response.json()) as { ok?: boolean; error?: string }
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Failed to send email")
+      }
+
+      onToast({ kind: "success", message: `Email sent to ${clientName}` })
+      onSent()
+      onClose()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to send email"
+      onToast({ kind: "error", message })
+    } finally {
+      setIsSending(false)
     }
   }
 
@@ -209,15 +256,15 @@ export default function ClientEmailTemplateModal({
           </button>
           <button
             type="button"
-            disabled
-            title="Send wiring is enabled in Task 39."
-            className="rounded-[8px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-3 py-2 text-[12px] text-white opacity-60"
+            onClick={() => void handleSend()}
+            disabled={isSending || !previewResult}
+            title={!previewResult ? "Render preview first." : undefined}
+            className="rounded-[8px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-3 py-2 text-[12px] text-white disabled:opacity-60"
           >
-            Send (Task 39)
+            {isSending ? "Sending..." : "Send"}
           </button>
         </div>
       </div>
     </div>
   )
 }
-

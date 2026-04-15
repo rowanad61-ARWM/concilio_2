@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import ClientEmailTemplateModal from "@/components/clients/ClientEmailTemplateModal"
 import DocumentsTab from "@/components/clients/DocumentsTab"
@@ -113,6 +113,20 @@ type LiabilityItem = {
   interestRate: number | null
   repaymentAmount: number | null
   repaymentFrequency: string | null
+}
+
+type EmailLogEntry = {
+  id: string
+  sentAt: string
+  subject: string
+  sentBy: string
+  status: string
+  body: string
+}
+
+type EmailToastState = {
+  kind: "success" | "error"
+  message: string
 }
 
 type PropertyFormState = {
@@ -597,6 +611,12 @@ function getStatusClasses(status: string) {
   }
 }
 
+function getEmailLogStatusClasses(status: string) {
+  return status.toLowerCase() === "sent"
+    ? "bg-[#E6F0EC] text-[#0F5C3A]"
+    : "bg-[#FCE8E8] text-[#E24B4A]"
+}
+
 function formatCategory(category: string) {
   return category
     .split("_")
@@ -719,6 +739,22 @@ function EngagementIcon() {
   )
 }
 
+function EmailIcon() {
+  return (
+    <div className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-[#EAF0F1] text-[#113238]">
+      <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5">
+        <path
+          d="M2.5 4.5h11A1.5 1.5 0 0 1 15 6v4A1.5 1.5 0 0 1 13.5 11.5h-11A1.5 1.5 0 0 1 1 10V6a1.5 1.5 0 0 1 1.5-1.5zm0 0L8 8.5l5.5-4"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  )
+}
+
 export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [clientData, setClientData] = useState(client)
   const [activeDetailTab, setActiveDetailTab] = useState<ClientDetailTab>("timeline")
@@ -775,6 +811,10 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [isAddIdFormOpen, setIsAddIdFormOpen] = useState(false)
   const [isSavingIdVerification, setIsSavingIdVerification] = useState(false)
   const [addIdForm, setAddIdForm] = useState<AddIdFormState>(() => buildAddIdForm())
+  const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>([])
+  const [isLoadingEmailLogs, setIsLoadingEmailLogs] = useState(false)
+  const [expandedEmailLogId, setExpandedEmailLogId] = useState<string | null>(null)
+  const [emailToast, setEmailToast] = useState<EmailToastState | null>(null)
 
   const fullLegalName = clientData.person
     ? `${clientData.person.legalGivenName} ${clientData.person.legalFamilyName}`.trim()
@@ -782,6 +822,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
   const visibleNotes = activeFilter === "all" || activeFilter === "notes" ? localNotes : []
   const visibleEngagements = activeFilter === "all" ? localEngagements : []
+  const visibleEmails = activeFilter === "all" || activeFilter === "emails" ? emailLogs : []
   const timelineItems = [
     ...visibleEngagements.map((engagement) => ({
       kind: "engagement" as const,
@@ -795,7 +836,14 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       timestamp: note.createdAt,
       note,
     })),
+    ...visibleEmails.map((log) => ({
+      kind: "email" as const,
+      id: `email-${log.id}`,
+      timestamp: log.sentAt,
+      emailLog: log,
+    })),
   ].sort((left, right) => getTimelineSortValue(right.timestamp) - getTimelineSortValue(left.timestamp))
+  const isTimelineLoading = isLoadingEmailLogs && (activeFilter === "all" || activeFilter === "emails")
   const otherHouseholdMembers = clientData.household?.members.filter((member) => member.id !== clientData.id) ?? []
   const lifecycleStage = clientData.classification?.lifecycleStage ?? null
   const serviceTier = clientData.classification?.serviceTier ?? null
@@ -809,6 +857,56 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     Number.isFinite(riskScoreValue) && riskScoreValue >= 0 && riskScoreValue <= 100
       ? scoreToAllocation(riskScoreValue)
       : null
+
+  const loadEmailLogs = useCallback(async () => {
+    setIsLoadingEmailLogs(true)
+
+    try {
+      const response = await fetch(`/api/email/logs?clientId=${encodeURIComponent(clientData.id)}`)
+      if (!response.ok) {
+        throw new Error("Failed to load email logs")
+      }
+
+      const payload = (await response.json()) as { logs?: unknown[] }
+      const rawLogs = Array.isArray(payload.logs) ? payload.logs : []
+
+      setEmailLogs(
+        rawLogs
+          .map((item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) {
+              return null
+            }
+
+            const value = item as Record<string, unknown>
+            if (
+              typeof value.id !== "string" ||
+              typeof value.subject !== "string" ||
+              typeof value.sentAt !== "string" ||
+              typeof value.sentBy !== "string" ||
+              typeof value.status !== "string" ||
+              typeof value.body !== "string"
+            ) {
+              return null
+            }
+
+            return {
+              id: value.id,
+              subject: value.subject,
+              sentAt: value.sentAt,
+              sentBy: value.sentBy,
+              status: value.status,
+              body: value.body,
+            }
+          })
+          .filter((item): item is EmailLogEntry => Boolean(item)),
+      )
+    } catch (error) {
+      console.error(error)
+      setEmailToast({ kind: "error", message: "Failed to load email history" })
+    } finally {
+      setIsLoadingEmailLogs(false)
+    }
+  }, [clientData.id])
 
   useEffect(() => {
     let isMounted = true
@@ -863,6 +961,24 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       isMounted = false
     }
   }, [])
+
+  useEffect(() => {
+    void loadEmailLogs()
+  }, [loadEmailLogs])
+
+  useEffect(() => {
+    if (!emailToast) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      setEmailToast(null)
+    }, 3500)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [emailToast])
 
   useEffect(() => {
     if (!isIncomeDrawerOpen) {
@@ -2963,6 +3079,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={() => setIsEmailTemplateModalOpen(true)}
                 className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
               >
                 Email
@@ -3122,90 +3239,143 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
           {timelineItems.length > 0 ? (
             <div className="mt-[14px]">
-              {timelineItems.map((item) => (
-                <div key={item.id} className="mb-2 rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-[10px]">
-                  {item.kind === "engagement" ? (
-                    <>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <EngagementIcon />
-                          <p className="text-[13px] font-medium text-[#113238]">{item.engagement.title}</p>
-                          <p className="text-[11px] text-[#9ca3af]">{formatCategory(item.engagement.engagementType)}</p>
-                        </div>
-                        <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
-                          {formatTimelineTimestamp(item.timestamp)}
-                        </p>
-                      </div>
-                      <div className="mt-[6px] flex items-center gap-2">
-                        <span
-                          className={`inline-flex rounded-[999px] px-[8px] py-[2px] text-[10px] uppercase ${getStatusClasses(item.engagement.status)}`}
-                        >
-                          {formatCategory(item.engagement.status)}
-                        </span>
-                      </div>
-                      {item.engagement.workflowInstance ? (
-                        <div className="mt-2 rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-2">
-                          <div className="flex items-center gap-2">
-                            {item.engagement.workflowInstance.stages.map((stage, index) => {
-                              const currentIndex = item.engagement.workflowInstance
-                                ? item.engagement.workflowInstance.stages.findIndex(
-                                    (stageItem) => stageItem.key === item.engagement.workflowInstance?.currentStage,
-                                  )
-                                : -1
-                              const stageState = getWorkflowStageState(
-                                index,
-                                currentIndex < 0 ? 0 : currentIndex,
-                                item.engagement.workflowInstance?.status ?? "active",
-                              )
+              {timelineItems.map((item) => {
+                if (item.kind === "email") {
+                  const isExpanded = expandedEmailLogId === item.emailLog.id
+                  const statusLabel = item.emailLog.status.toLowerCase() === "sent" ? "Sent" : "Failed"
+                  const recipientLabel = fullLegalName || clientData.person?.emailPrimary || "Client"
 
-                              return (
-                                <span
-                                  key={stage.key}
-                                  className={`h-[8px] w-[8px] rounded-full border ${getWorkflowStageClasses(stageState)}`}
-                                  title={stage.label}
-                                />
-                              )
-                            })}
+                  return (
+                    <div
+                      key={item.id}
+                      className="mb-2 rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-[10px]"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedEmailLogId(isExpanded ? null : item.emailLog.id)}
+                        className="w-full text-left"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-start gap-2">
+                            <EmailIcon />
+                            <div className="min-w-0">
+                              <p className="truncate text-[13px] font-medium text-[#113238]">{item.emailLog.subject}</p>
+                              <p className="truncate text-[11px] text-[#9ca3af]">
+                                Sent by {item.emailLog.sentBy} -&gt; {recipientLabel}
+                              </p>
+                            </div>
                           </div>
-                          <p className="mt-2 text-[11px] text-[#6b7280]">
-                            {item.engagement.workflowInstance.stages.find(
-                              (stage) => stage.key === item.engagement.workflowInstance?.currentStage,
-                            )?.label ?? formatCategory(item.engagement.workflowInstance.currentStage)}
-                          </p>
-                          {item.engagement.workflowInstance.status !== "completed" ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleAdvanceWorkflowStage(item.engagement.workflowInstance!.id)}
-                              disabled={advancingWorkflowId === item.engagement.workflowInstance.id}
-                              className="mt-2 rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-transparent px-[8px] py-[4px] text-[11px] text-[#113238] disabled:opacity-60"
+                          <div className="shrink-0 text-right">
+                            <p className="text-[12px] text-[#9ca3af]">{formatTimelineTimestamp(item.timestamp)}</p>
+                            <span
+                              className={`mt-[6px] inline-flex rounded-[999px] px-[8px] py-[2px] text-[10px] uppercase ${getEmailLogStatusClasses(item.emailLog.status)}`}
                             >
-                              {advancingWorkflowId === item.engagement.workflowInstance.id
-                                ? "Advancing..."
-                                : "Advance stage"}
-                            </button>
-                          ) : null}
+                              {statusLabel}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                      {isExpanded ? (
+                        <div className="mt-2 rounded-[10px] border-[0.5px] border-[#eef2f7] bg-[#FAFBFC] px-3 py-3 text-[12px] text-[#113238]">
+                          <div dangerouslySetInnerHTML={{ __html: item.emailLog.body }} />
                         </div>
                       ) : null}
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <NoteIcon />
-                          <p className="text-[13px] font-medium text-[#113238]">
-                            {formatCategory(item.note.noteType)}
+                    </div>
+                  )
+                }
+
+                return (
+                  <div
+                    key={item.id}
+                    className="mb-2 rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-[10px]"
+                  >
+                    {item.kind === "engagement" ? (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <EngagementIcon />
+                            <p className="text-[13px] font-medium text-[#113238]">{item.engagement.title}</p>
+                            <p className="text-[11px] text-[#9ca3af]">{formatCategory(item.engagement.engagementType)}</p>
+                          </div>
+                          <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
+                            {formatTimelineTimestamp(item.timestamp)}
                           </p>
-                          <p className="text-[11px] text-[#9ca3af]">Andrew Rowan</p>
                         </div>
-                        <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
-                          {formatTimelineTimestamp(item.timestamp)}
-                        </p>
-                      </div>
-                      <p className="mt-[6px] text-[13px] leading-[1.6] text-[#374151]">{item.note.text}</p>
-                    </>
-                  )}
-                </div>
-              ))}
+                        <div className="mt-[6px] flex items-center gap-2">
+                          <span
+                            className={`inline-flex rounded-[999px] px-[8px] py-[2px] text-[10px] uppercase ${getStatusClasses(item.engagement.status)}`}
+                          >
+                            {formatCategory(item.engagement.status)}
+                          </span>
+                        </div>
+                        {item.engagement.workflowInstance ? (
+                          <div className="mt-2 rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-2">
+                            <div className="flex items-center gap-2">
+                              {item.engagement.workflowInstance.stages.map((stage, index) => {
+                                const currentIndex = item.engagement.workflowInstance
+                                  ? item.engagement.workflowInstance.stages.findIndex(
+                                      (stageItem) => stageItem.key === item.engagement.workflowInstance?.currentStage,
+                                    )
+                                  : -1
+                                const stageState = getWorkflowStageState(
+                                  index,
+                                  currentIndex < 0 ? 0 : currentIndex,
+                                  item.engagement.workflowInstance?.status ?? "active",
+                                )
+
+                                return (
+                                  <span
+                                    key={stage.key}
+                                    className={`h-[8px] w-[8px] rounded-full border ${getWorkflowStageClasses(stageState)}`}
+                                    title={stage.label}
+                                  />
+                                )
+                              })}
+                            </div>
+                            <p className="mt-2 text-[11px] text-[#6b7280]">
+                              {item.engagement.workflowInstance.stages.find(
+                                (stage) => stage.key === item.engagement.workflowInstance?.currentStage,
+                              )?.label ?? formatCategory(item.engagement.workflowInstance.currentStage)}
+                            </p>
+                            {item.engagement.workflowInstance.status !== "completed" ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleAdvanceWorkflowStage(item.engagement.workflowInstance!.id)}
+                                disabled={advancingWorkflowId === item.engagement.workflowInstance.id}
+                                className="mt-2 rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-transparent px-[8px] py-[4px] text-[11px] text-[#113238] disabled:opacity-60"
+                              >
+                                {advancingWorkflowId === item.engagement.workflowInstance.id
+                                  ? "Advancing..."
+                                  : "Advance stage"}
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <NoteIcon />
+                            <p className="text-[13px] font-medium text-[#113238]">
+                              {formatCategory(item.note.noteType)}
+                            </p>
+                            <p className="text-[11px] text-[#9ca3af]">Andrew Rowan</p>
+                          </div>
+                          <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
+                            {formatTimelineTimestamp(item.timestamp)}
+                          </p>
+                        </div>
+                        <p className="mt-[6px] text-[13px] leading-[1.6] text-[#374151]">{item.note.text}</p>
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ) : isTimelineLoading ? (
+            <div className="mt-[14px] rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-[12px]">
+              <p className="text-[12px] text-[#9ca3af]">Loading timeline...</p>
             </div>
           ) : (
             <div className="flex flex-1 items-center justify-center">
@@ -3755,7 +3925,19 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
         onClose={() => setIsEmailTemplateModalOpen(false)}
         clientId={clientData.id}
         clientName={clientData.displayName}
+        onToast={setEmailToast}
+        onSent={() => void loadEmailLogs()}
       />
+
+      {emailToast ? (
+        <div
+          className={`fixed bottom-5 right-5 z-50 rounded-[8px] px-3 py-2 text-[12px] shadow ${
+            emailToast.kind === "success" ? "bg-[#113238] text-white" : "bg-[#E24B4A] text-white"
+          }`}
+        >
+          {emailToast.message}
+        </div>
+      ) : null}
     </div>
   )
 }
