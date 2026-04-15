@@ -6,9 +6,7 @@ import { mapEngagementRow } from "@/lib/engagement"
 import type { ClientAddress } from "@/types/client-record"
 import type { ClientDetail, TimelineNote } from "@/types/client-record"
 
-type HouseholdMemberWithParty = Prisma.household_memberGetPayload<{
-  include: { party: true }
-}>
+type HouseholdMemberWithParty = any
 
 function mapAddress(value: unknown): ClientAddress | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
