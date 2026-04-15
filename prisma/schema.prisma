@@ -879,3 +879,31 @@ model workflow_template {
 
   @@unique([name, version], map: "idx_wft_name_version")
 }
+
+model EmailTemplate {
+  id        String    @id @default(cuid())
+  name      String
+  subject   String
+  body      String    @db.Text
+  category  String
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  emailLogs EmailLog[]
+}
+
+model EmailLog {
+  id             String        @id @default(cuid())
+  clientId       String
+  templateId     String?
+  subject        String
+  body           String        @db.Text
+  sentAt         DateTime      @default(now())
+  sentBy         String
+  status         String        @default("sent")
+  graphMessageId String?
+  template       EmailTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([clientId])
+  @@index([templateId])
+}

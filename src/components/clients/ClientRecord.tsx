@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useEffect, useState } from "react"
 
+import ClientEmailTemplateModal from "@/components/clients/ClientEmailTemplateModal"
 import DocumentsTab from "@/components/clients/DocumentsTab"
 import { ENGAGEMENT_TYPE_VALUES } from "@/lib/engagement"
 import { scoreToAllocation, type RiskAllocation } from "@/lib/risk"
@@ -750,6 +751,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [propertyForm, setPropertyForm] = useState<PropertyFormState>(() => buildPropertyForm())
   const [accountForm, setAccountForm] = useState<AccountFormState>(() => buildAccountForm())
   const [isLiabilitiesDrawerOpen, setIsLiabilitiesDrawerOpen] = useState(false)
+  const [isEmailTemplateModalOpen, setIsEmailTemplateModalOpen] = useState(false)
   const [isLoadingLiabilities, setIsLoadingLiabilities] = useState(false)
   const [liabilityItems, setLiabilityItems] = useState<LiabilityItem[]>([])
   const [isAddLiabilityFormOpen, setIsAddLiabilityFormOpen] = useState(false)
@@ -2148,6 +2150,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           </button>
           <button
             type="button"
+            onClick={() => setIsEmailTemplateModalOpen(true)}
             className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
           >
             Email
@@ -3746,6 +3749,13 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           </div>
         </aside>
       </div>
+
+      <ClientEmailTemplateModal
+        isOpen={isEmailTemplateModalOpen}
+        onClose={() => setIsEmailTemplateModalOpen(false)}
+        clientId={clientData.id}
+        clientName={clientData.displayName}
+      />
     </div>
   )
 }
