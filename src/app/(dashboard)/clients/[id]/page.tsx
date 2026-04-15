@@ -191,7 +191,7 @@ export default async function ClientRecordPage({
           addressPostal: mapAddress(party.person.address_postal),
         }
       : null,
-    contactMethods: party.contact_method.map((contactMethod) => ({
+    contactMethods: party.contact_method.map((contactMethod: any) => ({
       id: contactMethod.id,
       channel: contactMethod.channel,
       value: contactMethod.value,
