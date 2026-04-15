@@ -2,6 +2,8 @@ import ClientList from "@/components/clients/ClientList"
 import { db } from "@/lib/db"
 import type { HouseholdListItem } from "@/types/clients"
 
+export const dynamic = 'force-dynamic'
+
 type GroupMember = {
   id: string
   displayName: string

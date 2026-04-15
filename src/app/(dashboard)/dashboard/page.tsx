@@ -1,6 +1,8 @@
 import Dashboard from "@/components/dashboard/Dashboard"
 import { db } from "@/lib/db"
 
+export const dynamic = 'force-dynamic'
+
 export default async function DashboardPage() {
   const [parties, workflowCount] = await Promise.all([
     db.party.findMany({
