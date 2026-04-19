@@ -15,6 +15,15 @@ type GraphDriveItem = {
   file?: unknown
 }
 
+export type GraphFileMetadata = {
+  id: string
+  name: string
+  size: number
+  lastModifiedDateTime: string | null
+  webUrl: string | null
+  "@microsoft.graph.downloadUrl": string | null
+}
+
 type GraphCollectionResponse<T> = {
   value?: T[]
 }
@@ -89,6 +98,17 @@ async function createFolder(parentSegments: string[], folderName: string) {
     }
 
     throw error
+  }
+}
+
+function mapGraphFileMetadata(item: GraphDriveItem): GraphFileMetadata {
+  return {
+    id: item.id,
+    name: item.name,
+    size: item.size ?? 0,
+    lastModifiedDateTime: item.lastModifiedDateTime ?? null,
+    webUrl: item.webUrl ?? null,
+    "@microsoft.graph.downloadUrl": item["@microsoft.graph.downloadUrl"] ?? null,
   }
 }
 
@@ -197,14 +217,7 @@ export async function listFiles(clientId: string, folder: ClientDocumentFolder) 
 
     return items
       .filter((item) => Boolean(item.file))
-      .map((item) => ({
-        id: item.id,
-        name: item.name,
-        size: item.size ?? 0,
-        lastModifiedDateTime: item.lastModifiedDateTime ?? null,
-        webUrl: item.webUrl ?? null,
-        "@microsoft.graph.downloadUrl": item["@microsoft.graph.downloadUrl"] ?? null,
-      }))
+      .map((item) => mapGraphFileMetadata(item))
   } catch (error) {
     if (isGraphErrorWithStatus(error, 404)) {
       return []
@@ -230,18 +243,31 @@ export async function uploadFile(
     .header("Content-Type", "application/octet-stream")
     .put(buffer) as GraphDriveItem
 
-  return {
-    id: uploaded.id,
-    name: uploaded.name,
-    size: uploaded.size ?? 0,
-    lastModifiedDateTime: uploaded.lastModifiedDateTime ?? null,
-    webUrl: uploaded.webUrl ?? null,
-    "@microsoft.graph.downloadUrl": uploaded["@microsoft.graph.downloadUrl"] ?? null,
-  }
+  return mapGraphFileMetadata(uploaded)
 }
 
 export async function deleteFile(fileId: string) {
   const client = getGraphClient()
   const driveId = await getDriveId(await getSiteId())
   await client.api(`/drives/${driveId}/items/${fileId}`).delete()
+}
+
+export async function getFileById(fileId: string): Promise<GraphFileMetadata | null> {
+  const client = getGraphClient()
+  const driveId = await getDriveId(await getSiteId())
+
+  try {
+    const file = (await client.api(`/drives/${driveId}/items/${fileId}`).get()) as GraphDriveItem
+    if (!file?.id || !file?.name) {
+      return null
+    }
+
+    return mapGraphFileMetadata(file)
+  } catch (error) {
+    if (isGraphErrorWithStatus(error, 404)) {
+      return null
+    }
+
+    throw error
+  }
 }

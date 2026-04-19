@@ -8,6 +8,7 @@ import DocumentsTab from "@/components/clients/DocumentsTab"
 import TaskModal, {
   TASK_STATUS_OPTIONS,
   type EditableTaskEntry,
+  type TaskDocumentLinkEntry,
   type TaskOwnerOption,
   type TaskStatusValue,
   type TaskTypeGroup,
@@ -132,7 +133,7 @@ type EmailLogEntry = {
 }
 
 type EmailToastState = {
-  kind: "success" | "error"
+  kind: "success" | "error" | "warning"
   message: string
 }
 
@@ -141,7 +142,21 @@ type TaskEntry = EditableTaskEntry & {
   createdAt: string
   updatedAt: string
   completedAt: string | null
-  owner: TaskOwnerOption | null
+  linkedDocumentCount: number
+}
+
+type TaskLinkedDocument = {
+  id: string
+  taskId: string
+  sharepointDriveItemId: string
+  fileName: string
+  folder: string
+  createdAt: string
+  webUrl: string | null
+  downloadUrl: string | null
+  lastModifiedDateTime: string | null
+  size: number | null
+  existsInSharePoint: boolean
 }
 
 type PropertyFormState = {
@@ -638,6 +653,10 @@ function getTaskStatusClasses(status: TaskStatusValue) {
     return "bg-[#E6F0EC] text-[#0F5C3A]"
   }
 
+  if (status === "CANCELLED") {
+    return "bg-[#FCE8E8] text-[#E24B4A]"
+  }
+
   if (status === "STUCK" || status === "ON_HOLD") {
     return "bg-[#FEF3C7] text-[#92400E]"
   }
@@ -683,6 +702,34 @@ function formatTaskDueDateLabel(start: string | null, end: string | null) {
   }).format(endDate)
 
   return `${startLabel} - ${endLabel}`
+}
+
+function formatRecurrenceCadence(value: EditableTaskEntry["recurrenceCadence"]) {
+  if (!value) {
+    return null
+  }
+
+  return value
+    .split("_")
+    .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+    .join(" ")
+}
+
+function getOwnerInitials(fullName: string) {
+  const parts = fullName
+    .split(" ")
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  if (parts.length === 0) {
+    return "?"
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase()
+  }
+
+  return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase()
 }
 
 function formatCategory(category: string) {
@@ -904,6 +951,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [tasks, setTasks] = useState<TaskEntry[]>([])
   const [isLoadingTasks, setIsLoadingTasks] = useState(false)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
+  const [isLoadingTaskDocumentsForId, setIsLoadingTaskDocumentsForId] = useState<string | null>(null)
+  const [taskDocumentsByTaskId, setTaskDocumentsByTaskId] = useState<Record<string, TaskLinkedDocument[]>>({})
   const [taskTypeOptions, setTaskTypeOptions] = useState<TaskTypeGroup[]>([])
   const [ownerOptions, setOwnerOptions] = useState<TaskOwnerOption[]>([])
   const [emailToast, setEmailToast] = useState<EmailToastState | null>(null)
@@ -1020,6 +1069,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
       const payload = (await response.json()) as { tasks?: unknown[] }
       const rawTasks = Array.isArray(payload.tasks) ? payload.tasks : []
+      setTaskDocumentsByTaskId({})
+      setIsLoadingTaskDocumentsForId(null)
 
       setTasks(
         rawTasks
@@ -1045,21 +1096,62 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               return null
             }
 
-            const ownerValue =
-              value.owner && typeof value.owner === "object" && !Array.isArray(value.owner)
-                ? (value.owner as Record<string, unknown>)
-                : null
+            const rawOwners = Array.isArray(value.owners) ? value.owners : []
+            const owners = rawOwners
+              .map((owner): TaskOwnerOption | null => {
+                if (!owner || typeof owner !== "object" || Array.isArray(owner)) {
+                  return null
+                }
 
-            const owner =
-              ownerValue &&
-              typeof ownerValue.id === "string" &&
-              typeof ownerValue.fullName === "string" &&
-              typeof ownerValue.email === "string"
-                ? {
-                    id: ownerValue.id,
-                    fullName: ownerValue.fullName,
-                    email: ownerValue.email,
-                  }
+                const ownerValue = owner as Record<string, unknown>
+                if (
+                  typeof ownerValue.id !== "string" ||
+                  typeof ownerValue.fullName !== "string" ||
+                  typeof ownerValue.email !== "string"
+                ) {
+                  return null
+                }
+
+                return {
+                  id: ownerValue.id,
+                  fullName: ownerValue.fullName,
+                  email: ownerValue.email,
+                }
+              })
+              .filter((owner): owner is TaskOwnerOption => Boolean(owner))
+
+            const rawLinks = Array.isArray(value.documentLinks) ? value.documentLinks : []
+            const documentLinks = rawLinks
+              .map((documentLink): TaskDocumentLinkEntry | null => {
+                if (!documentLink || typeof documentLink !== "object" || Array.isArray(documentLink)) {
+                  return null
+                }
+
+                const linkValue = documentLink as Record<string, unknown>
+                if (
+                  typeof linkValue.id !== "string" ||
+                  typeof linkValue.sharepointDriveItemId !== "string" ||
+                  typeof linkValue.fileName !== "string" ||
+                  typeof linkValue.folder !== "string" ||
+                  typeof linkValue.createdAt !== "string"
+                ) {
+                  return null
+                }
+
+                return {
+                  id: linkValue.id,
+                  sharepointDriveItemId: linkValue.sharepointDriveItemId,
+                  fileName: linkValue.fileName,
+                  folder: linkValue.folder,
+                  createdAt: linkValue.createdAt,
+                }
+              })
+              .filter((documentLink): documentLink is TaskDocumentLinkEntry => Boolean(documentLink))
+
+            const recurrenceCadence =
+              typeof value.recurrenceCadence === "string" &&
+              ["WEEKLY", "MONTHLY", "QUARTERLY", "HALF_YEARLY", "YEARLY"].includes(value.recurrenceCadence)
+                ? (value.recurrenceCadence as EditableTaskEntry["recurrenceCadence"])
                 : null
 
             return {
@@ -1070,13 +1162,23 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               type: value.type,
               subtype: typeof value.subtype === "string" ? value.subtype : null,
               status: value.status as TaskStatusValue,
-              ownerUserId: typeof value.ownerUserId === "string" ? value.ownerUserId : null,
+              owners,
               dueDateStart: typeof value.dueDateStart === "string" ? value.dueDateStart : null,
               dueDateEnd: typeof value.dueDateEnd === "string" ? value.dueDateEnd : null,
               completedAt: typeof value.completedAt === "string" ? value.completedAt : null,
+              isRecurring: value.isRecurring === true,
+              recurrenceCadence,
+              recurrenceEndDate:
+                typeof value.recurrenceEndDate === "string" ? value.recurrenceEndDate : null,
+              recurrenceCount: typeof value.recurrenceCount === "number" ? value.recurrenceCount : null,
+              parentTaskId: typeof value.parentTaskId === "string" ? value.parentTaskId : null,
+              documentLinks,
               createdAt: value.createdAt,
               updatedAt: value.updatedAt,
-              owner,
+              linkedDocumentCount:
+                typeof value.linkedDocumentCount === "number"
+                  ? value.linkedDocumentCount
+                  : documentLinks.length,
             } satisfies TaskEntry
           })
           .filter((item): item is TaskEntry => Boolean(item)),
@@ -2488,6 +2590,81 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     setIsTaskModalOpen(true)
   }
 
+  const loadTaskDocuments = useCallback(async (taskId: string) => {
+    if (taskDocumentsByTaskId[taskId]) {
+      return
+    }
+
+    setIsLoadingTaskDocumentsForId(taskId)
+
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/documents`)
+      if (!response.ok) {
+        throw new Error("Failed to load linked task documents")
+      }
+
+      const payload = (await response.json()) as { documents?: unknown[] }
+      const rawDocuments = Array.isArray(payload.documents) ? payload.documents : []
+
+      const documents = rawDocuments
+        .map((item): TaskLinkedDocument | null => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return null
+          }
+
+          const value = item as Record<string, unknown>
+          if (
+            typeof value.id !== "string" ||
+            typeof value.taskId !== "string" ||
+            typeof value.sharepointDriveItemId !== "string" ||
+            typeof value.fileName !== "string" ||
+            typeof value.folder !== "string" ||
+            typeof value.createdAt !== "string"
+          ) {
+            return null
+          }
+
+          return {
+            id: value.id,
+            taskId: value.taskId,
+            sharepointDriveItemId: value.sharepointDriveItemId,
+            fileName: value.fileName,
+            folder: value.folder,
+            createdAt: value.createdAt,
+            webUrl: typeof value.webUrl === "string" ? value.webUrl : null,
+            downloadUrl: typeof value.downloadUrl === "string" ? value.downloadUrl : null,
+            lastModifiedDateTime: typeof value.lastModifiedDateTime === "string" ? value.lastModifiedDateTime : null,
+            size: typeof value.size === "number" ? value.size : null,
+            existsInSharePoint: value.existsInSharePoint === true,
+          }
+        })
+        .filter((item): item is TaskLinkedDocument => Boolean(item))
+
+      setTaskDocumentsByTaskId((current) => ({
+        ...current,
+        [taskId]: documents,
+      }))
+    } catch (error) {
+      console.error(error)
+      setEmailToast({
+        kind: "error",
+        message: "Failed to load linked task documents",
+      })
+    } finally {
+      setIsLoadingTaskDocumentsForId((current) => (current === taskId ? null : current))
+    }
+  }, [taskDocumentsByTaskId])
+
+  function toggleTaskExpand(taskId: string) {
+    setExpandedTaskId((current) => {
+      const next = current === taskId ? null : taskId
+      if (next) {
+        void loadTaskDocuments(next)
+      }
+      return next
+    })
+  }
+
   async function handleQuickTaskStatusChange(taskId: string, status: TaskStatusValue) {
     try {
       const response = await fetch(`/api/tasks/${taskId}`, {
@@ -3585,10 +3762,12 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               {timelineItems.map((item) => {
                 if (item.kind === "task") {
                   const isExpanded = expandedTaskId === item.task.id
-                  const subtitle = `${item.task.type}${item.task.subtype ? ` - ${item.task.subtype}` : ""} - Owner: ${
-                    item.task.owner?.fullName ?? "Unassigned"
-                  }`
+                  const subtitle = `${item.task.type}${item.task.subtype ? ` - ${item.task.subtype}` : ""}`
                   const dueDateLabel = formatTaskDueDateLabel(item.task.dueDateStart, item.task.dueDateEnd)
+                  const recurrenceLabel = item.task.isRecurring ? formatRecurrenceCadence(item.task.recurrenceCadence) : null
+                  const linkedDocumentCount = item.task.linkedDocumentCount ?? item.task.documentLinks.length
+                  const linkedDocuments = taskDocumentsByTaskId[item.task.id] ?? []
+                  const isLoadingLinkedDocuments = isLoadingTaskDocumentsForId === item.task.id
 
                   return (
                     <div
@@ -3597,7 +3776,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                     >
                       <button
                         type="button"
-                        onClick={() => setExpandedTaskId(isExpanded ? null : item.task.id)}
+                        onClick={() => toggleTaskExpand(item.task.id)}
                         className="w-full text-left"
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -3606,6 +3785,28 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                             <div className="min-w-0">
                               <p className="truncate text-[13px] font-medium text-[#113238]">{item.task.title}</p>
                               <p className="truncate text-[11px] text-[#9ca3af]">{subtitle}</p>
+                              <div className="mt-[6px] flex items-center gap-1">
+                                {item.task.owners.length > 0 ? (
+                                  <>
+                                    <div className="flex -space-x-1">
+                                      {item.task.owners.slice(0, 4).map((owner) => (
+                                        <span
+                                          key={owner.id}
+                                          title={owner.fullName}
+                                          className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-white bg-[#113238] text-[9px] text-white"
+                                        >
+                                          {getOwnerInitials(owner.fullName)}
+                                        </span>
+                                      ))}
+                                    </div>
+                                    <span className="text-[10px] text-[#6b7280]">
+                                      {item.task.owners.map((owner) => owner.fullName).join(", ")}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <span className="text-[10px] text-[#9ca3af]">Unassigned</span>
+                                )}
+                              </div>
                               <div className="mt-[6px] flex flex-wrap items-center gap-2">
                                 <span
                                   className={`inline-flex rounded-[999px] px-[8px] py-[2px] text-[10px] uppercase ${getTaskStatusClasses(item.task.status)}`}
@@ -3617,6 +3818,14 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                                     {dueDateLabel}
                                   </span>
                                 ) : null}
+                                {recurrenceLabel ? (
+                                  <span className="inline-flex rounded-[999px] bg-[#EEF2F7] px-[8px] py-[2px] text-[10px] text-[#1F3A5F]">
+                                    Recurring {recurrenceLabel}
+                                  </span>
+                                ) : null}
+                                <span className="inline-flex rounded-[999px] bg-[#F3F4F6] px-[8px] py-[2px] text-[10px] text-[#6b7280]">
+                                  📎 {linkedDocumentCount}
+                                </span>
                               </div>
                             </div>
                           </div>
@@ -3630,6 +3839,35 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                           <p className="text-[12px] leading-[1.6] text-[#374151]">
                             {item.task.description?.trim() ? item.task.description : "No description provided."}
                           </p>
+                          <div className="mt-3 rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white p-2">
+                            <p className="text-[11px] font-medium uppercase tracking-[0.5px] text-[#9ca3af]">
+                              Linked documents
+                            </p>
+                            {isLoadingLinkedDocuments ? (
+                              <p className="mt-2 text-[12px] text-[#9ca3af]">Loading linked documents...</p>
+                            ) : linkedDocuments.length > 0 ? (
+                              <div className="mt-2 space-y-1">
+                                {linkedDocuments.map((document) => (
+                                  <a
+                                    key={document.id}
+                                    href={document.webUrl ?? document.downloadUrl ?? "#"}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className={`flex items-center justify-between rounded-[6px] px-2 py-1 text-[12px] ${
+                                      document.webUrl || document.downloadUrl
+                                        ? "text-[#113238] hover:bg-[#F7F9FB] hover:underline"
+                                        : "cursor-default text-[#9ca3af]"
+                                    }`}
+                                  >
+                                    <span className="truncate pr-2">{document.fileName}</span>
+                                    <span className="shrink-0 text-[10px] text-[#9ca3af]">{document.folder}</span>
+                                  </a>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-2 text-[12px] text-[#9ca3af]">No linked documents</p>
+                            )}
+                          </div>
                           <div className="mt-3 flex flex-wrap items-center gap-2">
                             <select
                               value={item.task.status}
@@ -4364,12 +4602,17 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
         onClose={() => setIsTaskModalOpen(false)}
         onSaved={() => void loadTasks()}
         onError={(message) => setEmailToast({ kind: "error", message })}
+        onWarning={(message) => setEmailToast({ kind: "warning", message })}
       />
 
       {emailToast ? (
         <div
           className={`fixed bottom-5 right-5 z-50 rounded-[8px] px-3 py-2 text-[12px] shadow ${
-            emailToast.kind === "success" ? "bg-[#113238] text-white" : "bg-[#E24B4A] text-white"
+            emailToast.kind === "success"
+              ? "bg-[#113238] text-white"
+              : emailToast.kind === "warning"
+                ? "bg-[#B45309] text-white"
+                : "bg-[#E24B4A] text-white"
           }`}
         >
           {emailToast.message}

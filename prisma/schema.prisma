@@ -918,26 +918,67 @@ enum TaskStatus {
   STUCK
   ON_HOLD
   DONE
+  CANCELLED
+}
+
+enum RecurrenceCadence {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  YEARLY
 }
 
 model Task {
-  id           String      @id @default(cuid())
-  clientId     String      @db.Uuid
-  title        String
-  description  String?     @db.Text
-  type         String
-  subtype      String?
-  status       TaskStatus  @default(NOT_STARTED)
-  ownerUserId  String?     @db.Uuid
-  dueDateStart DateTime?
-  dueDateEnd   DateTime?
-  completedAt  DateTime?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id                String             @id @default(cuid())
+  clientId          String             @db.Uuid
+  title             String
+  description       String?            @db.Text
+  type              String
+  subtype           String?
+  status            TaskStatus         @default(NOT_STARTED)
+  dueDateStart      DateTime?
+  dueDateEnd        DateTime?
+  completedAt       DateTime?
+  isRecurring       Boolean            @default(false)
+  recurrenceCadence RecurrenceCadence?
+  recurrenceEndDate DateTime?
+  recurrenceCount   Int?
+  parentTaskId      String?
+  parent            Task?              @relation("TaskRecurrence", fields: [parentTaskId], references: [id])
+  children          Task[]             @relation("TaskRecurrence")
+  owners            TaskOwner[]
+  documentLinks     TaskDocumentLink[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   @@index([clientId])
-  @@index([ownerUserId])
   @@index([status])
+  @@index([parentTaskId])
+}
+
+model TaskOwner {
+  id     String @id @default(cuid())
+  taskId String
+  userId String @db.Uuid
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([userId])
+}
+
+model TaskDocumentLink {
+  id                    String   @id @default(cuid())
+  taskId                String
+  sharepointDriveItemId String
+  fileName              String
+  folder                String
+  createdAt             DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
 }
 
 model TaskTypeOption {
