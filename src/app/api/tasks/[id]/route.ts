@@ -3,6 +3,8 @@ import type { TaskStatus } from "@prisma/client"
 
 import { auth } from "@/auth"
 import { db } from "@/lib/db"
+import { archiveMondayItem } from "@/lib/monday"
+import { syncTaskToMonday } from "@/lib/task-sync"
 import {
   addCadence,
   isLiveSeriesStatus,
@@ -52,6 +54,18 @@ function isPrismaNotFoundError(error: unknown) {
     "code" in error &&
     (error as { code?: unknown }).code === "P2025"
   )
+}
+
+function toErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+
+  if (typeof error === "string" && error) {
+    return error
+  }
+
+  return "unknown error"
 }
 
 async function buildOwnerMap(ownerUserIds: string[]) {
@@ -486,7 +500,7 @@ export async function PUT(
   }
 
   try {
-    const task = await db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       if (effectiveParentTaskId) {
         const parentTask = await tx.task.findUnique({
           where: { id: effectiveParentTaskId },
@@ -519,6 +533,7 @@ export async function PUT(
         },
         include: taskInclude,
       })
+      let recurringTaskId: string | null = null
 
       if (updatedTask.isRecurring && !updatedTask.parentTaskId) {
         updatedTask = await tx.task.update({
@@ -536,7 +551,10 @@ export async function PUT(
         !isTerminalSeriesStatus(currentTask.status) && isTerminalSeriesStatus(updatedTask.status)
 
       if (!transitionedToTerminal || !updatedTask.isRecurring || !updatedTask.recurrenceCadence || !updatedTask.dueDateStart) {
-        return updatedTask
+        return {
+          updatedTask,
+          recurringTaskId,
+        }
       }
 
       const recurrenceRootId = updatedTask.parentTaskId ?? updatedTask.id
@@ -557,7 +575,10 @@ export async function PUT(
       })
 
       if (hasLiveInstance) {
-        return updatedTask
+        return {
+          updatedTask,
+          recurringTaskId,
+        }
       }
 
       const seriesCount = await tx.task.count({
@@ -567,7 +588,10 @@ export async function PUT(
       })
 
       if (updatedTask.recurrenceCount && seriesCount >= updatedTask.recurrenceCount) {
-        return updatedTask
+        return {
+          updatedTask,
+          recurringTaskId,
+        }
       }
 
       const cadence = updatedTask.recurrenceCadence as RecurrenceCadenceValue
@@ -575,10 +599,13 @@ export async function PUT(
       const nextDueEnd = updatedTask.dueDateEnd ? addCadence(updatedTask.dueDateEnd, cadence) : null
 
       if (updatedTask.recurrenceEndDate && nextDueStart.getTime() > updatedTask.recurrenceEndDate.getTime()) {
-        return updatedTask
+        return {
+          updatedTask,
+          recurringTaskId,
+        }
       }
 
-      await tx.task.create({
+      const recurringTask = await tx.task.create({
         data: {
           clientId: updatedTask.clientId,
           title: updatedTask.title,
@@ -602,12 +629,22 @@ export async function PUT(
               : undefined,
         },
       })
+      recurringTaskId = recurringTask.id
 
-      return updatedTask
+      return {
+        updatedTask,
+        recurringTaskId,
+      }
     })
+    const task = result.updatedTask
 
     const ownerMap = await buildOwnerMap(uniqueStrings(task.owners.map((owner) => owner.userId)))
-    return NextResponse.json({ task: serializeTask(task, ownerMap) })
+    const response = NextResponse.json({ task: serializeTask(task, ownerMap) })
+    void syncTaskToMonday(task.id)
+    if (result.recurringTaskId) {
+      void syncTaskToMonday(result.recurringTaskId)
+    }
+    return response
   } catch (error) {
     if (error instanceof Error && error.message === "parent-task-not-found") {
       return NextResponse.json({ error: "parentTaskId not found" }, { status: 400 })
@@ -634,9 +671,24 @@ export async function DELETE(
   const { id } = await params
 
   try {
+    const existingTask = await db.task.findUnique({
+      where: { id },
+      select: {
+        mondayItemId: true,
+      },
+    })
+
     await db.task.delete({
       where: { id },
     })
+
+    if (existingTask?.mondayItemId) {
+      const mondayItemId = existingTask.mondayItemId
+      void archiveMondayItem(mondayItemId).catch((error) => {
+        console.error(`[monday sync failed] ${id} archive-delete ${toErrorMessage(error)}`)
+      })
+    }
+
     return NextResponse.json({ ok: true })
   } catch (error) {
     if (isPrismaNotFoundError(error)) {

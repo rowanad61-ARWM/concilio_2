@@ -3,6 +3,7 @@ import type { RecurrenceCadence, TaskStatus } from "@prisma/client"
 
 import { auth } from "@/auth"
 import { db } from "@/lib/db"
+import { syncTaskToMonday } from "@/lib/task-sync"
 import {
   isLiveSeriesStatus,
   isRecurrenceCadence,
@@ -470,7 +471,9 @@ export async function POST(request: Request) {
     })
 
     const ownerMap = await buildOwnerMap(uniqueStrings(task.owners.map((owner) => owner.userId)))
-    return NextResponse.json({ task: serializeTask(task, ownerMap) }, { status: 201 })
+    const response = NextResponse.json({ task: serializeTask(task, ownerMap) }, { status: 201 })
+    void syncTaskToMonday(task.id)
+    return response
   } catch (error) {
     if (error instanceof Error && error.message === "parent-task-not-found") {
       return NextResponse.json({ error: "parentTaskId not found" }, { status: 400 })

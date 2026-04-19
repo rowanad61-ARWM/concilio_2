@@ -944,6 +944,8 @@ model Task {
   recurrenceCadence RecurrenceCadence?
   recurrenceEndDate DateTime?
   recurrenceCount   Int?
+  mondayItemId      String?
+  mondayLastSyncAt  DateTime?
   parentTaskId      String?
   parent            Task?              @relation("TaskRecurrence", fields: [parentTaskId], references: [id])
   children          Task[]             @relation("TaskRecurrence")
