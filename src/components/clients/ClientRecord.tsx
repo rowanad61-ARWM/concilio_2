@@ -5,6 +5,13 @@ import { useCallback, useEffect, useState } from "react"
 
 import ClientEmailTemplateModal from "@/components/clients/ClientEmailTemplateModal"
 import DocumentsTab from "@/components/clients/DocumentsTab"
+import TaskModal, {
+  TASK_STATUS_OPTIONS,
+  type EditableTaskEntry,
+  type TaskOwnerOption,
+  type TaskStatusValue,
+  type TaskTypeGroup,
+} from "@/components/clients/TaskModal"
 import { ENGAGEMENT_TYPE_VALUES } from "@/lib/engagement"
 import { scoreToAllocation, type RiskAllocation } from "@/lib/risk"
 import type { ClientAddress, ClientDetail, TimelineEngagement, TimelineNote } from "@/types/client-record"
@@ -14,7 +21,7 @@ type ClientRecordProps = {
   notes: TimelineNote[]
 }
 
-type TimelineFilter = "all" | "emails" | "notes" | "docs"
+type TimelineFilter = "all" | "emails" | "tasks" | "notes" | "docs"
 type ClientDetailTab = "timeline" | "documents"
 type NoteCategory = "general" | "meeting" | "phone_call" | "email" | "compliance" | "other"
 type EngagementType = (typeof ENGAGEMENT_TYPE_VALUES)[number]
@@ -129,6 +136,14 @@ type EmailToastState = {
   message: string
 }
 
+type TaskEntry = EditableTaskEntry & {
+  clientId: string
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
+  owner: TaskOwnerOption | null
+}
+
 type PropertyFormState = {
   usageType: string
   currentValue: string
@@ -165,6 +180,7 @@ type RiskProfileFormState = {
 const timelineFilters: { label: string; value: TimelineFilter }[] = [
   { label: "All", value: "all" },
   { label: "Emails", value: "emails" },
+  { label: "Tasks", value: "tasks" },
   { label: "Notes", value: "notes" },
   { label: "Docs", value: "docs" },
 ]
@@ -617,6 +633,58 @@ function getEmailLogStatusClasses(status: string) {
     : "bg-[#FCE8E8] text-[#E24B4A]"
 }
 
+function getTaskStatusClasses(status: TaskStatusValue) {
+  if (status === "DONE") {
+    return "bg-[#E6F0EC] text-[#0F5C3A]"
+  }
+
+  if (status === "STUCK" || status === "ON_HOLD") {
+    return "bg-[#FEF3C7] text-[#92400E]"
+  }
+
+  return "bg-[#E6F1FB] text-[#185FA5]"
+}
+
+function getTaskStatusLabel(status: TaskStatusValue) {
+  return TASK_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status
+}
+
+function formatTaskDueDateLabel(start: string | null, end: string | null) {
+  if (!start) {
+    return null
+  }
+
+  const startDate = new Date(start)
+  if (Number.isNaN(startDate.getTime())) {
+    return null
+  }
+
+  if (!end) {
+    return `Due ${new Intl.DateTimeFormat("en-AU", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(startDate)}`
+  }
+
+  const endDate = new Date(end)
+  if (Number.isNaN(endDate.getTime())) {
+    return null
+  }
+
+  const startLabel = new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+  }).format(startDate)
+  const endLabel = new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(endDate)
+
+  return `${startLabel} - ${endLabel}`
+}
+
 function formatCategory(category: string) {
   return category
     .split("_")
@@ -755,6 +823,22 @@ function EmailIcon() {
   )
 }
 
+function TaskIcon() {
+  return (
+    <div className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-[#E6F0EC] text-[#0F5C3A]">
+      <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5">
+        <path
+          d="M4 3.5h8M4 7.5h8M4 11.5h5M2.5 2h11A1.5 1.5 0 0 1 15 3.5v9A1.5 1.5 0 0 1 13.5 14h-11A1.5 1.5 0 0 1 1 12.5v-9A1.5 1.5 0 0 1 2.5 2z"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  )
+}
+
 export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [clientData, setClientData] = useState(client)
   const [activeDetailTab, setActiveDetailTab] = useState<ClientDetailTab>("timeline")
@@ -788,6 +872,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [accountForm, setAccountForm] = useState<AccountFormState>(() => buildAccountForm())
   const [isLiabilitiesDrawerOpen, setIsLiabilitiesDrawerOpen] = useState(false)
   const [isEmailTemplateModalOpen, setIsEmailTemplateModalOpen] = useState(false)
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false)
+  const [taskModalMode, setTaskModalMode] = useState<"create" | "edit">("create")
+  const [editingTask, setEditingTask] = useState<TaskEntry | null>(null)
   const [isLoadingLiabilities, setIsLoadingLiabilities] = useState(false)
   const [liabilityItems, setLiabilityItems] = useState<LiabilityItem[]>([])
   const [isAddLiabilityFormOpen, setIsAddLiabilityFormOpen] = useState(false)
@@ -814,6 +901,11 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>([])
   const [isLoadingEmailLogs, setIsLoadingEmailLogs] = useState(false)
   const [expandedEmailLogId, setExpandedEmailLogId] = useState<string | null>(null)
+  const [tasks, setTasks] = useState<TaskEntry[]>([])
+  const [isLoadingTasks, setIsLoadingTasks] = useState(false)
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
+  const [taskTypeOptions, setTaskTypeOptions] = useState<TaskTypeGroup[]>([])
+  const [ownerOptions, setOwnerOptions] = useState<TaskOwnerOption[]>([])
   const [emailToast, setEmailToast] = useState<EmailToastState | null>(null)
 
   const fullLegalName = clientData.person
@@ -823,6 +915,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const visibleNotes = activeFilter === "all" || activeFilter === "notes" ? localNotes : []
   const visibleEngagements = activeFilter === "all" ? localEngagements : []
   const visibleEmails = activeFilter === "all" || activeFilter === "emails" ? emailLogs : []
+  const visibleTasks = activeFilter === "all" || activeFilter === "tasks" ? tasks : []
   const timelineItems = [
     ...visibleEngagements.map((engagement) => ({
       kind: "engagement" as const,
@@ -842,8 +935,16 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       timestamp: log.sentAt,
       emailLog: log,
     })),
+    ...visibleTasks.map((task) => ({
+      kind: "task" as const,
+      id: `task-${task.id}`,
+      timestamp: task.createdAt,
+      task,
+    })),
   ].sort((left, right) => getTimelineSortValue(right.timestamp) - getTimelineSortValue(left.timestamp))
-  const isTimelineLoading = isLoadingEmailLogs && (activeFilter === "all" || activeFilter === "emails")
+  const isTimelineLoading =
+    (isLoadingEmailLogs && (activeFilter === "all" || activeFilter === "emails")) ||
+    (isLoadingTasks && (activeFilter === "all" || activeFilter === "tasks"))
   const otherHouseholdMembers = clientData.household?.members.filter((member) => member.id !== clientData.id) ?? []
   const lifecycleStage = clientData.classification?.lifecycleStage ?? null
   const serviceTier = clientData.classification?.serviceTier ?? null
@@ -908,6 +1009,164 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     }
   }, [clientData.id])
 
+  const loadTasks = useCallback(async () => {
+    setIsLoadingTasks(true)
+
+    try {
+      const response = await fetch(`/api/tasks?clientId=${encodeURIComponent(clientData.id)}`)
+      if (!response.ok) {
+        throw new Error("Failed to load tasks")
+      }
+
+      const payload = (await response.json()) as { tasks?: unknown[] }
+      const rawTasks = Array.isArray(payload.tasks) ? payload.tasks : []
+
+      setTasks(
+        rawTasks
+          .map((item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) {
+              return null
+            }
+
+            const value = item as Record<string, unknown>
+            if (
+              typeof value.id !== "string" ||
+              typeof value.clientId !== "string" ||
+              typeof value.title !== "string" ||
+              typeof value.type !== "string" ||
+              typeof value.status !== "string" ||
+              typeof value.createdAt !== "string" ||
+              typeof value.updatedAt !== "string"
+            ) {
+              return null
+            }
+
+            if (!TASK_STATUS_OPTIONS.some((option) => option.value === value.status)) {
+              return null
+            }
+
+            const ownerValue =
+              value.owner && typeof value.owner === "object" && !Array.isArray(value.owner)
+                ? (value.owner as Record<string, unknown>)
+                : null
+
+            const owner =
+              ownerValue &&
+              typeof ownerValue.id === "string" &&
+              typeof ownerValue.fullName === "string" &&
+              typeof ownerValue.email === "string"
+                ? {
+                    id: ownerValue.id,
+                    fullName: ownerValue.fullName,
+                    email: ownerValue.email,
+                  }
+                : null
+
+            return {
+              id: value.id,
+              clientId: value.clientId,
+              title: value.title,
+              description: typeof value.description === "string" ? value.description : null,
+              type: value.type,
+              subtype: typeof value.subtype === "string" ? value.subtype : null,
+              status: value.status as TaskStatusValue,
+              ownerUserId: typeof value.ownerUserId === "string" ? value.ownerUserId : null,
+              dueDateStart: typeof value.dueDateStart === "string" ? value.dueDateStart : null,
+              dueDateEnd: typeof value.dueDateEnd === "string" ? value.dueDateEnd : null,
+              completedAt: typeof value.completedAt === "string" ? value.completedAt : null,
+              createdAt: value.createdAt,
+              updatedAt: value.updatedAt,
+              owner,
+            } satisfies TaskEntry
+          })
+          .filter((item): item is TaskEntry => Boolean(item)),
+      )
+    } catch (error) {
+      console.error(error)
+      setEmailToast({ kind: "error", message: "Failed to load tasks" })
+    } finally {
+      setIsLoadingTasks(false)
+    }
+  }, [clientData.id])
+
+  const loadTaskTypeOptions = useCallback(async () => {
+    try {
+      const response = await fetch("/api/task-types")
+      if (!response.ok) {
+        throw new Error("Failed to load task type options")
+      }
+
+      const payload = (await response.json()) as unknown
+      if (!Array.isArray(payload)) {
+        setTaskTypeOptions([])
+        return
+      }
+
+      setTaskTypeOptions(
+        payload
+          .map((item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) {
+              return null
+            }
+
+            const value = item as Record<string, unknown>
+            if (typeof value.type !== "string" || !Array.isArray(value.subtypes)) {
+              return null
+            }
+
+            const subtypes = value.subtypes.filter(
+              (subtype): subtype is string => typeof subtype === "string" && subtype.trim().length > 0,
+            )
+
+            return {
+              type: value.type,
+              subtypes,
+            } satisfies TaskTypeGroup
+          })
+          .filter((item): item is TaskTypeGroup => Boolean(item)),
+      )
+    } catch (error) {
+      console.error(error)
+      setEmailToast({ kind: "error", message: "Failed to load task types" })
+    }
+  }, [])
+
+  const loadOwnerOptions = useCallback(async () => {
+    try {
+      const response = await fetch("/api/users")
+      if (!response.ok) {
+        throw new Error("Failed to load users")
+      }
+
+      const payload = (await response.json()) as { users?: unknown[] }
+      const rawUsers = Array.isArray(payload.users) ? payload.users : []
+
+      setOwnerOptions(
+        rawUsers
+          .map((item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) {
+              return null
+            }
+
+            const value = item as Record<string, unknown>
+            if (typeof value.id !== "string" || typeof value.fullName !== "string" || typeof value.email !== "string") {
+              return null
+            }
+
+            return {
+              id: value.id,
+              fullName: value.fullName,
+              email: value.email,
+            } satisfies TaskOwnerOption
+          })
+          .filter((item): item is TaskOwnerOption => Boolean(item)),
+      )
+    } catch (error) {
+      console.error(error)
+      setEmailToast({ kind: "error", message: "Failed to load task owners" })
+    }
+  }, [])
+
   useEffect(() => {
     let isMounted = true
 
@@ -965,6 +1224,15 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   useEffect(() => {
     void loadEmailLogs()
   }, [loadEmailLogs])
+
+  useEffect(() => {
+    void loadTasks()
+  }, [loadTasks])
+
+  useEffect(() => {
+    void loadTaskTypeOptions()
+    void loadOwnerOptions()
+  }, [loadOwnerOptions, loadTaskTypeOptions])
 
   useEffect(() => {
     if (!emailToast) {
@@ -2204,6 +2472,74 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     setActiveFilter("all")
   }
 
+  function openTaskModalForCreate() {
+    setActiveDetailTab("timeline")
+    setIsEngagementPanelOpen(false)
+    setIsNotePanelOpen(false)
+    setTaskModalMode("create")
+    setEditingTask(null)
+    setIsTaskModalOpen(true)
+    setActiveFilter("tasks")
+  }
+
+  function openTaskModalForEdit(task: TaskEntry) {
+    setTaskModalMode("edit")
+    setEditingTask(task)
+    setIsTaskModalOpen(true)
+  }
+
+  async function handleQuickTaskStatusChange(taskId: string, status: TaskStatusValue) {
+    try {
+      const response = await fetch(`/api/tasks/${taskId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status }),
+      })
+
+      const payload = (await response.json()) as { error?: string }
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to update task status")
+      }
+
+      await loadTasks()
+    } catch (error) {
+      console.error(error)
+      setEmailToast({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Failed to update task status",
+      })
+    }
+  }
+
+  async function handleDeleteTask(taskId: string) {
+    const isConfirmed = window.confirm("Delete this task?")
+    if (!isConfirmed) {
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/tasks/${taskId}`, {
+        method: "DELETE",
+      })
+
+      const payload = (await response.json()) as { error?: string }
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to delete task")
+      }
+
+      setExpandedTaskId((current) => (current === taskId ? null : current))
+      await loadTasks()
+    } catch (error) {
+      console.error(error)
+      setEmailToast({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Failed to delete task",
+      })
+    }
+  }
+
   function openDocumentsTab() {
     setActiveDetailTab("documents")
     setIsEngagementPanelOpen(false)
@@ -3099,6 +3435,13 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               </button>
               <button
                 type="button"
+                onClick={openTaskModalForCreate}
+                className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+              >
+                + Task
+              </button>
+              <button
+                type="button"
                 onClick={openEngagementPanel}
                 className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
               >
@@ -3240,6 +3583,88 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           {timelineItems.length > 0 ? (
             <div className="mt-[14px]">
               {timelineItems.map((item) => {
+                if (item.kind === "task") {
+                  const isExpanded = expandedTaskId === item.task.id
+                  const subtitle = `${item.task.type}${item.task.subtype ? ` - ${item.task.subtype}` : ""} - Owner: ${
+                    item.task.owner?.fullName ?? "Unassigned"
+                  }`
+                  const dueDateLabel = formatTaskDueDateLabel(item.task.dueDateStart, item.task.dueDateEnd)
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="mb-2 rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-[10px]"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedTaskId(isExpanded ? null : item.task.id)}
+                        className="w-full text-left"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-start gap-2">
+                            <TaskIcon />
+                            <div className="min-w-0">
+                              <p className="truncate text-[13px] font-medium text-[#113238]">{item.task.title}</p>
+                              <p className="truncate text-[11px] text-[#9ca3af]">{subtitle}</p>
+                              <div className="mt-[6px] flex flex-wrap items-center gap-2">
+                                <span
+                                  className={`inline-flex rounded-[999px] px-[8px] py-[2px] text-[10px] uppercase ${getTaskStatusClasses(item.task.status)}`}
+                                >
+                                  {getTaskStatusLabel(item.task.status)}
+                                </span>
+                                {dueDateLabel ? (
+                                  <span className="inline-flex rounded-[999px] bg-[#F3F4F6] px-[8px] py-[2px] text-[10px] text-[#6b7280]">
+                                    {dueDateLabel}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                          <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
+                            {formatTimelineTimestamp(item.timestamp)}
+                          </p>
+                        </div>
+                      </button>
+                      {isExpanded ? (
+                        <div className="mt-2 rounded-[10px] border-[0.5px] border-[#eef2f7] bg-[#FAFBFC] p-3">
+                          <p className="text-[12px] leading-[1.6] text-[#374151]">
+                            {item.task.description?.trim() ? item.task.description : "No description provided."}
+                          </p>
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <select
+                              value={item.task.status}
+                              onChange={(event) =>
+                                void handleQuickTaskStatusChange(item.task.id, event.target.value as TaskStatusValue)
+                              }
+                              className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+                            >
+                              {TASK_STATUS_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => openTaskModalForEdit(item.task)}
+                              className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteTask(item.task.id)}
+                              className="rounded-[7px] border-[0.5px] border-[#f9caca] bg-white px-[10px] py-[5px] text-[12px] text-[#E24B4A]"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                }
+
                 if (item.kind === "email") {
                   const isExpanded = expandedEmailLogId === item.emailLog.id
                   const statusLabel = item.emailLog.status.toLowerCase() === "sent" ? "Sent" : "Failed"
@@ -3927,6 +4352,18 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
         clientName={clientData.displayName}
         onToast={setEmailToast}
         onSent={() => void loadEmailLogs()}
+      />
+
+      <TaskModal
+        isOpen={isTaskModalOpen}
+        mode={taskModalMode}
+        clientId={clientData.id}
+        task={editingTask}
+        taskTypeOptions={taskTypeOptions}
+        ownerOptions={ownerOptions}
+        onClose={() => setIsTaskModalOpen(false)}
+        onSaved={() => void loadTasks()}
+        onError={(message) => setEmailToast({ kind: "error", message })}
       />
 
       {emailToast ? (

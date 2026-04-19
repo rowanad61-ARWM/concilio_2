@@ -907,3 +907,47 @@ model EmailLog {
   @@index([clientId])
   @@index([templateId])
 }
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  WAITING_EXTERNAL
+  WAITING_INTERNAL
+  NEEDS_REVIEW
+  WITH_CLIENT
+  STUCK
+  ON_HOLD
+  DONE
+}
+
+model Task {
+  id           String      @id @default(cuid())
+  clientId     String      @db.Uuid
+  title        String
+  description  String?     @db.Text
+  type         String
+  subtype      String?
+  status       TaskStatus  @default(NOT_STARTED)
+  ownerUserId  String?     @db.Uuid
+  dueDateStart DateTime?
+  dueDateEnd   DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([clientId])
+  @@index([ownerUserId])
+  @@index([status])
+}
+
+model TaskTypeOption {
+  id        String   @id @default(cuid())
+  type      String
+  subtype   String?
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([type, subtype])
+  @@index([type])
+}
