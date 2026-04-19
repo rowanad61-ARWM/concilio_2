@@ -6,11 +6,10 @@ import { db } from "@/lib/db"
 import { archiveMondayItem } from "@/lib/monday"
 import { syncTaskToMonday } from "@/lib/task-sync"
 import {
-  addCadence,
   isLiveSeriesStatus,
   isRecurrenceCadence,
   isTaskStatus,
-  isTerminalSeriesStatus,
+  maybeCreateNextRecurringTask,
   parseDocumentLinks,
   parseOwnerIds,
   toNullableBoolean,
@@ -18,7 +17,6 @@ import {
   toNullablePositiveInt,
   toNullableTrimmedString,
   type NormalizedDocumentLinkInput,
-  type RecurrenceCadenceValue,
 } from "@/lib/task-enrichment"
 
 const LIVE_STATUSES: TaskStatus[] = ["NOT_STARTED", "IN_PROGRESS"]
@@ -35,6 +33,11 @@ const taskInclude = {
   documentLinks: {
     orderBy: {
       createdAt: "desc" as const,
+    },
+  },
+  _count: {
+    select: {
+      notes: true,
     },
   },
 }
@@ -148,6 +151,9 @@ function serializeTask(
       folder: string
       createdAt: Date
     }[]
+    _count: {
+      notes: number
+    }
   },
   ownerMap: Map<string, OwnerSummary>,
 ) {
@@ -182,6 +188,7 @@ function serializeTask(
       createdAt: link.createdAt.toISOString(),
     })),
     linkedDocumentCount: task.documentLinks.length,
+    noteCount: task._count.notes,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   }
@@ -547,89 +554,10 @@ export async function PUT(
         })
       }
 
-      const transitionedToTerminal =
-        !isTerminalSeriesStatus(currentTask.status) && isTerminalSeriesStatus(updatedTask.status)
-
-      if (!transitionedToTerminal || !updatedTask.isRecurring || !updatedTask.recurrenceCadence || !updatedTask.dueDateStart) {
-        return {
-          updatedTask,
-          recurringTaskId,
-        }
-      }
-
-      const recurrenceRootId = updatedTask.parentTaskId ?? updatedTask.id
-
-      const hasLiveInstance = await tx.task.findFirst({
-        where: {
-          id: {
-            not: updatedTask.id,
-          },
-          OR: [{ id: recurrenceRootId }, { parentTaskId: recurrenceRootId }],
-          status: {
-            in: LIVE_STATUSES,
-          },
-        },
-        select: {
-          id: true,
-        },
+      recurringTaskId = await maybeCreateNextRecurringTask(tx, {
+        previousStatus: currentTask.status,
+        task: updatedTask,
       })
-
-      if (hasLiveInstance) {
-        return {
-          updatedTask,
-          recurringTaskId,
-        }
-      }
-
-      const seriesCount = await tx.task.count({
-        where: {
-          OR: [{ id: recurrenceRootId }, { parentTaskId: recurrenceRootId }],
-        },
-      })
-
-      if (updatedTask.recurrenceCount && seriesCount >= updatedTask.recurrenceCount) {
-        return {
-          updatedTask,
-          recurringTaskId,
-        }
-      }
-
-      const cadence = updatedTask.recurrenceCadence as RecurrenceCadenceValue
-      const nextDueStart = addCadence(updatedTask.dueDateStart, cadence)
-      const nextDueEnd = updatedTask.dueDateEnd ? addCadence(updatedTask.dueDateEnd, cadence) : null
-
-      if (updatedTask.recurrenceEndDate && nextDueStart.getTime() > updatedTask.recurrenceEndDate.getTime()) {
-        return {
-          updatedTask,
-          recurringTaskId,
-        }
-      }
-
-      const recurringTask = await tx.task.create({
-        data: {
-          clientId: updatedTask.clientId,
-          title: updatedTask.title,
-          description: updatedTask.description,
-          type: updatedTask.type,
-          subtype: updatedTask.subtype,
-          status: "NOT_STARTED",
-          dueDateStart: nextDueStart,
-          dueDateEnd: nextDueEnd,
-          completedAt: null,
-          isRecurring: true,
-          recurrenceCadence: updatedTask.recurrenceCadence,
-          recurrenceEndDate: updatedTask.recurrenceEndDate,
-          recurrenceCount: updatedTask.recurrenceCount,
-          parentTaskId: recurrenceRootId,
-          owners:
-            updatedTask.owners.length > 0
-              ? {
-                  create: updatedTask.owners.map((owner) => ({ userId: owner.userId })),
-                }
-              : undefined,
-        },
-      })
-      recurringTaskId = recurringTask.id
 
       return {
         updatedTask,

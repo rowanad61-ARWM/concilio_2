@@ -1,4 +1,5 @@
 import { normalizeClientDocumentFolder, type ClientDocumentFolder } from "@/lib/documents"
+import type { Prisma, TaskStatus } from "@prisma/client"
 
 export const TASK_STATUSES = [
   "NOT_STARTED",
@@ -213,4 +214,111 @@ export function addCadence(date: Date, cadence: RecurrenceCadenceValue) {
 
   next.setFullYear(next.getFullYear() + 1)
   return next
+}
+
+type RecurrenceAdvanceTask = {
+  id: string
+  clientId: string
+  title: string
+  description: string | null
+  type: string
+  subtype: string | null
+  status: string
+  dueDateStart: Date | null
+  dueDateEnd: Date | null
+  isRecurring: boolean
+  recurrenceCadence: string | null
+  recurrenceEndDate: Date | null
+  recurrenceCount: number | null
+  parentTaskId: string | null
+  owners: Array<{
+    userId: string
+  }>
+}
+
+const LIVE_SERIES_STATUS_VALUES: TaskStatus[] = ["NOT_STARTED", "IN_PROGRESS"]
+
+export async function maybeCreateNextRecurringTask(
+  tx: Prisma.TransactionClient,
+  params: {
+    previousStatus: string
+    task: RecurrenceAdvanceTask
+  },
+) {
+  const { task, previousStatus } = params
+
+  const transitionedToTerminal =
+    !isTerminalSeriesStatus(previousStatus) && isTerminalSeriesStatus(task.status)
+  if (!transitionedToTerminal || !task.isRecurring || !task.recurrenceCadence || !task.dueDateStart) {
+    return null
+  }
+
+  if (!isRecurrenceCadence(task.recurrenceCadence)) {
+    return null
+  }
+
+  const recurrenceRootId = task.parentTaskId ?? task.id
+
+  const hasLiveInstance = await tx.task.findFirst({
+    where: {
+      id: {
+        not: task.id,
+      },
+      OR: [{ id: recurrenceRootId }, { parentTaskId: recurrenceRootId }],
+      status: {
+        in: LIVE_SERIES_STATUS_VALUES,
+      },
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  if (hasLiveInstance) {
+    return null
+  }
+
+  const seriesCount = await tx.task.count({
+    where: {
+      OR: [{ id: recurrenceRootId }, { parentTaskId: recurrenceRootId }],
+    },
+  })
+
+  if (task.recurrenceCount && seriesCount >= task.recurrenceCount) {
+    return null
+  }
+
+  const nextDueStart = addCadence(task.dueDateStart, task.recurrenceCadence)
+  const nextDueEnd = task.dueDateEnd ? addCadence(task.dueDateEnd, task.recurrenceCadence) : null
+
+  if (task.recurrenceEndDate && nextDueStart.getTime() > task.recurrenceEndDate.getTime()) {
+    return null
+  }
+
+  const recurringTask = await tx.task.create({
+    data: {
+      clientId: task.clientId,
+      title: task.title,
+      description: task.description,
+      type: task.type,
+      subtype: task.subtype,
+      status: "NOT_STARTED",
+      dueDateStart: nextDueStart,
+      dueDateEnd: nextDueEnd,
+      completedAt: null,
+      isRecurring: true,
+      recurrenceCadence: task.recurrenceCadence,
+      recurrenceEndDate: task.recurrenceEndDate,
+      recurrenceCount: task.recurrenceCount,
+      parentTaskId: recurrenceRootId,
+      owners:
+        task.owners.length > 0
+          ? {
+              create: task.owners.map((owner) => ({ userId: owner.userId })),
+            }
+          : undefined,
+    },
+  })
+
+  return recurringTask.id
 }

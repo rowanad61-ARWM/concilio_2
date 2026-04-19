@@ -12,3 +12,7 @@ export const STATUS_MAP: Record<TaskStatus, string> = {
   DONE: "Done",
   CANCELLED: "Cancelled",
 }
+
+export const STATUS_LABEL_TO_STATUS_MAP = Object.fromEntries(
+  Object.entries(STATUS_MAP).map(([status, label]) => [label, status as TaskStatus]),
+) as Record<string, TaskStatus>

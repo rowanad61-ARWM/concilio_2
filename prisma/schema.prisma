@@ -799,6 +799,7 @@ model user_account {
   practice              practice                @relation(fields: [practice_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   verification_check    verification_check[]
   workflow_template     workflow_template[]
+  taskNotes             TaskNote[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -951,12 +952,35 @@ model Task {
   children          Task[]             @relation("TaskRecurrence")
   owners            TaskOwner[]
   documentLinks     TaskDocumentLink[]
+  notes             TaskNote[]
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
   @@index([clientId])
   @@index([status])
   @@index([parentTaskId])
+}
+
+enum TaskNoteSource {
+  CONCILIO
+  MONDAY
+  SYSTEM
+}
+
+model TaskNote {
+  id        String         @id @default(cuid())
+  taskId    String
+  authorId  String?        @db.Uuid
+  body      String         @db.Text
+  source    TaskNoteSource @default(CONCILIO)
+  createdAt DateTime       @default(now())
+
+  task   Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author user_account? @relation(fields: [authorId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([taskId])
+  @@index([authorId])
+  @@index([createdAt])
 }
 
 model TaskOwner {

@@ -143,6 +143,7 @@ type TaskEntry = EditableTaskEntry & {
   updatedAt: string
   completedAt: string | null
   linkedDocumentCount: number
+  noteCount: number
 }
 
 type TaskLinkedDocument = {
@@ -157,6 +158,18 @@ type TaskLinkedDocument = {
   lastModifiedDateTime: string | null
   size: number | null
   existsInSharePoint: boolean
+}
+
+type TaskNoteEntry = {
+  id: string
+  body: string
+  source: "CONCILIO" | "MONDAY" | "SYSTEM"
+  createdAt: string
+  author: {
+    id: string
+    fullName: string
+    email: string
+  } | null
 }
 
 type PropertyFormState = {
@@ -581,6 +594,107 @@ function formatTimelineTimestamp(value: string) {
   }).format(new Date(value))
 }
 
+function formatExactDateTime(value: string) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return "Unknown time"
+  }
+
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed)
+}
+
+function formatRelativeDateTime(value: string) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return "Unknown time"
+  }
+
+  const nowMs = Date.now()
+  const diffMs = parsed.getTime() - nowMs
+  const diffAbsMs = Math.abs(diffMs)
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" })
+
+  if (diffAbsMs < 60_000) {
+    return rtf.format(Math.round(diffMs / 1000), "second")
+  }
+
+  if (diffAbsMs < 3_600_000) {
+    return rtf.format(Math.round(diffMs / 60_000), "minute")
+  }
+
+  if (diffAbsMs < 86_400_000) {
+    return rtf.format(Math.round(diffMs / 3_600_000), "hour")
+  }
+
+  if (diffAbsMs < 2_592_000_000) {
+    return rtf.format(Math.round(diffMs / 86_400_000), "day")
+  }
+
+  return formatExactDateTime(value)
+}
+
+function getTaskNoteSourceLabel(source: TaskNoteEntry["source"]) {
+  if (source === "MONDAY") {
+    return "Monday"
+  }
+
+  if (source === "SYSTEM") {
+    return "System"
+  }
+
+  return "Concilio"
+}
+
+function getTaskNoteSourceClasses(source: TaskNoteEntry["source"]) {
+  if (source === "MONDAY") {
+    return "bg-[#E6F1FB] text-[#185FA5]"
+  }
+
+  if (source === "SYSTEM") {
+    return "bg-[#F3F4F6] text-[#6B7280]"
+  }
+
+  return "bg-[#E6F0EC] text-[#0F5C3A]"
+}
+
+function getTaskNoteAuthorLabel(note: TaskNoteEntry) {
+  if (note.source === "SYSTEM") {
+    return "System"
+  }
+
+  if (note.author?.fullName?.trim()) {
+    return note.author.fullName
+  }
+
+  if (note.source === "MONDAY") {
+    return "Monday"
+  }
+
+  return "Unknown"
+}
+
+function renderTaskNoteBody(body: string) {
+  const parts = body.split(/(@[A-Za-z0-9._-]+)/g)
+
+  return parts.map((part, index) => {
+    if (/^@[A-Za-z0-9._-]+$/.test(part)) {
+      return (
+        <span key={`mention-${index}`} className="font-medium text-[#185FA5]">
+          {part}
+        </span>
+      )
+    }
+
+    return <span key={`text-${index}`}>{part}</span>
+  })
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-AU", {
     style: "currency",
@@ -953,6 +1067,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const [isLoadingTaskDocumentsForId, setIsLoadingTaskDocumentsForId] = useState<string | null>(null)
   const [taskDocumentsByTaskId, setTaskDocumentsByTaskId] = useState<Record<string, TaskLinkedDocument[]>>({})
+  const [isLoadingTaskNotesForId, setIsLoadingTaskNotesForId] = useState<string | null>(null)
+  const [taskNotesByTaskId, setTaskNotesByTaskId] = useState<Record<string, TaskNoteEntry[]>>({})
   const [taskTypeOptions, setTaskTypeOptions] = useState<TaskTypeGroup[]>([])
   const [ownerOptions, setOwnerOptions] = useState<TaskOwnerOption[]>([])
   const [emailToast, setEmailToast] = useState<EmailToastState | null>(null)
@@ -1071,6 +1187,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       const rawTasks = Array.isArray(payload.tasks) ? payload.tasks : []
       setTaskDocumentsByTaskId({})
       setIsLoadingTaskDocumentsForId(null)
+      setTaskNotesByTaskId({})
+      setIsLoadingTaskNotesForId(null)
 
       setTasks(
         rawTasks
@@ -1179,6 +1297,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 typeof value.linkedDocumentCount === "number"
                   ? value.linkedDocumentCount
                   : documentLinks.length,
+              noteCount: typeof value.noteCount === "number" ? value.noteCount : 0,
             } satisfies TaskEntry
           })
           .filter((item): item is TaskEntry => Boolean(item)),
@@ -2655,11 +2774,85 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     }
   }, [taskDocumentsByTaskId])
 
+  const loadTaskNotes = useCallback(async (taskId: string) => {
+    if (taskNotesByTaskId[taskId]) {
+      return
+    }
+
+    setIsLoadingTaskNotesForId(taskId)
+
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/notes`)
+      if (!response.ok) {
+        throw new Error("Failed to load task notes")
+      }
+
+      const payload = (await response.json()) as { notes?: unknown[] }
+      const rawNotes = Array.isArray(payload.notes) ? payload.notes : []
+
+      const notes = rawNotes
+        .map((item): TaskNoteEntry | null => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return null
+          }
+
+          const value = item as Record<string, unknown>
+          if (
+            typeof value.id !== "string" ||
+            typeof value.body !== "string" ||
+            typeof value.createdAt !== "string" ||
+            typeof value.source !== "string" ||
+            !["CONCILIO", "MONDAY", "SYSTEM"].includes(value.source)
+          ) {
+            return null
+          }
+
+          const author =
+            value.author && typeof value.author === "object" && !Array.isArray(value.author)
+              ? (value.author as Record<string, unknown>)
+              : null
+
+          return {
+            id: value.id,
+            body: value.body,
+            source: value.source as TaskNoteEntry["source"],
+            createdAt: value.createdAt,
+            author:
+              author &&
+              typeof author.id === "string" &&
+              typeof author.fullName === "string" &&
+              typeof author.email === "string"
+                ? {
+                    id: author.id,
+                    fullName: author.fullName,
+                    email: author.email,
+                  }
+                : null,
+          }
+        })
+        .filter((item): item is TaskNoteEntry => Boolean(item))
+
+      setTaskNotesByTaskId((current) => ({
+        ...current,
+        [taskId]: notes,
+      }))
+    } catch (error) {
+      console.error(error)
+      setEmailToast({
+        kind: "error",
+        message: "Failed to load task notes",
+      })
+    } finally {
+      setIsLoadingTaskNotesForId((current) => (current === taskId ? null : current))
+    }
+  }, [taskNotesByTaskId])
+
   function toggleTaskExpand(taskId: string) {
     setExpandedTaskId((current) => {
       const next = current === taskId ? null : taskId
       if (next) {
         void loadTaskDocuments(next)
+        void loadTaskNotes(next)
       }
       return next
     })
@@ -3766,8 +3959,11 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                   const dueDateLabel = formatTaskDueDateLabel(item.task.dueDateStart, item.task.dueDateEnd)
                   const recurrenceLabel = item.task.isRecurring ? formatRecurrenceCadence(item.task.recurrenceCadence) : null
                   const linkedDocumentCount = item.task.linkedDocumentCount ?? item.task.documentLinks.length
+                  const noteCount = item.task.noteCount ?? 0
                   const linkedDocuments = taskDocumentsByTaskId[item.task.id] ?? []
                   const isLoadingLinkedDocuments = isLoadingTaskDocumentsForId === item.task.id
+                  const taskNotes = taskNotesByTaskId[item.task.id] ?? []
+                  const isLoadingTaskNotes = isLoadingTaskNotesForId === item.task.id
 
                   return (
                     <div
@@ -3826,6 +4022,11 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                                 <span className="inline-flex rounded-[999px] bg-[#F3F4F6] px-[8px] py-[2px] text-[10px] text-[#6b7280]">
                                   📎 {linkedDocumentCount}
                                 </span>
+                                {noteCount > 0 ? (
+                                  <span className="inline-flex rounded-[999px] bg-[#F3F4F6] px-[8px] py-[2px] text-[10px] text-[#6b7280]">
+                                    💬 {noteCount}
+                                  </span>
+                                ) : null}
                               </div>
                             </div>
                           </div>
@@ -3866,6 +4067,47 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                               </div>
                             ) : (
                               <p className="mt-2 text-[12px] text-[#9ca3af]">No linked documents</p>
+                            )}
+                          </div>
+                          <div className="mt-3 rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white p-2">
+                            <p className="text-[11px] font-medium uppercase tracking-[0.5px] text-[#9ca3af]">
+                              Task notes
+                            </p>
+                            {isLoadingTaskNotes ? (
+                              <p className="mt-2 text-[12px] text-[#9ca3af]">Loading task notes...</p>
+                            ) : taskNotes.length > 0 ? (
+                              <div className="mt-2 space-y-2">
+                                {taskNotes.map((note) => (
+                                  <div
+                                    key={note.id}
+                                    className="rounded-[7px] border-[0.5px] border-[#eef2f7] bg-[#FAFBFC] p-2"
+                                  >
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="flex min-w-0 items-center gap-2">
+                                        <span className="truncate text-[12px] font-medium text-[#113238]">
+                                          {getTaskNoteAuthorLabel(note)}
+                                        </span>
+                                        <span
+                                          className={`inline-flex rounded-[999px] px-[6px] py-[1px] text-[10px] ${getTaskNoteSourceClasses(note.source)}`}
+                                        >
+                                          {getTaskNoteSourceLabel(note.source)}
+                                        </span>
+                                      </div>
+                                      <span
+                                        className="text-[10px] text-[#9ca3af]"
+                                        title={formatExactDateTime(note.createdAt)}
+                                      >
+                                        {formatRelativeDateTime(note.createdAt)}
+                                      </span>
+                                    </div>
+                                    <p className="mt-1 whitespace-pre-wrap text-[12px] leading-[1.5] text-[#374151]">
+                                      {renderTaskNoteBody(note.body)}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-2 text-[12px] text-[#9ca3af]">No task notes yet</p>
                             )}
                           </div>
                           <div className="mt-3 flex flex-wrap items-center gap-2">

@@ -17,6 +17,7 @@ type MondayGraphQLResponse<T> = {
 let boardColumnsCache: Record<string, string> | null = null
 let boardColumnsCacheBoardId: string | null = null
 const mondayUserIdByEmailCache = new Map<string, number | null>()
+const mondayUserEmailByIdCache = new Map<number, string | null>()
 let clientBoardCache: Map<string, string> | null = null
 let clientBoardCacheLoadedAt = 0
 
@@ -214,7 +215,48 @@ export async function getMondayUserIdByEmail(email: string): Promise<number | nu
   }
 
   mondayUserIdByEmailCache.set(normalizedEmail, userId)
+  mondayUserEmailByIdCache.set(userId, normalizedEmail)
   return userId
+}
+
+export async function getMondayUserEmailById(userId: number): Promise<string | null> {
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return null
+  }
+
+  if (mondayUserEmailByIdCache.has(userId)) {
+    return mondayUserEmailByIdCache.get(userId) ?? null
+  }
+
+  const data = await mondayRequest<{
+    users?: Array<{
+      id?: string | number
+      email?: string | null
+    }>
+  }>({
+    operation: "getMondayUserEmailById",
+    query: `
+      query GetMondayUserEmailById($ids: [ID!]) {
+        users(ids: $ids) {
+          id
+          email
+        }
+      }
+    `,
+    variables: {
+      ids: [String(userId)],
+    },
+  })
+
+  const user = (data.users ?? []).find((candidate) => Number(candidate.id) === userId)
+  const email = user?.email?.trim().toLowerCase() ?? null
+
+  mondayUserEmailByIdCache.set(userId, email)
+  if (email) {
+    mondayUserIdByEmailCache.set(email, userId)
+  }
+
+  return email
 }
 
 async function loadClientBoardItems(): Promise<Map<string, string>> {

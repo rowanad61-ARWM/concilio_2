@@ -34,6 +34,11 @@ const taskInclude = {
       createdAt: "desc" as const,
     },
   },
+  _count: {
+    select: {
+      notes: true,
+    },
+  },
 }
 
 function uniqueStrings(values: string[]) {
@@ -104,6 +109,9 @@ function serializeTask(
       folder: string
       createdAt: Date
     }[]
+    _count: {
+      notes: number
+    }
   },
   ownerMap: Map<string, OwnerSummary>,
 ) {
@@ -138,6 +146,7 @@ function serializeTask(
       createdAt: link.createdAt.toISOString(),
     })),
     linkedDocumentCount: task.documentLinks.length,
+    noteCount: task._count.notes,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   }
