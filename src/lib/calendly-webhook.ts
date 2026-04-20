@@ -150,9 +150,6 @@ async function findClientByEmail(inviteeEmail: string): Promise<ResolvedClient> 
 
   const matchedParty = await db.party.findFirst({
     where: {
-      client_classification: {
-        isNot: null,
-      },
       OR: [
         {
           person: {
@@ -215,9 +212,6 @@ async function findClientByDisplayName(inviteeName: string): Promise<ResolvedCli
 
   const matchedParty = await db.party.findFirst({
     where: {
-      client_classification: {
-        isNot: null,
-      },
       display_name: {
         equals: normalizedName,
         mode: "insensitive",
