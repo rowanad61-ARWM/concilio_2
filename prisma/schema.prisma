@@ -243,29 +243,43 @@ model employment_profile {
   @@index([party_id], map: "idx_emp_party")
 }
 
+enum EngagementSource {
+  MANUAL
+  CALENDLY
+  XPLAN_IMPORT
+}
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model engagement {
-  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  household_id       String?              @db.Uuid
-  party_id           String?              @db.Uuid
-  engagement_type    String
-  status             String               @default("open")
-  primary_adviser_id String?              @db.Uuid
-  opened_at          DateTime             @default(now()) @db.Timestamptz(6)
-  completed_at       DateTime?            @db.Timestamptz(6)
-  notes              String?
-  created_at         DateTime             @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime             @default(now()) @db.Timestamptz(6)
-  advice_scope_item  advice_scope_item[]
-  client_instruction client_instruction[]
-  document           document[]
-  household_group    household_group?     @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  party              party?               @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  user_account       user_account?        @relation(fields: [primary_adviser_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  file_note          file_note[]
-  goal               goal[]
-  review_cycle       review_cycle[]
-  workflow_instance  workflow_instance[]
+  id                        String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  household_id              String?              @db.Uuid
+  party_id                  String?              @db.Uuid
+  engagement_type           String
+  status                    String               @default("open")
+  source                    EngagementSource     @default(MANUAL)
+  calendly_event_uuid       String?              @unique
+  calendly_invitee_uuid     String?
+  calendly_event_type_uri   String?
+  calendly_cancel_url       String?
+  calendly_reschedule_url   String?
+  calendly_rescheduled_from String?
+  meeting_type_key          String?
+  primary_adviser_id        String?              @db.Uuid
+  opened_at                 DateTime             @default(now()) @db.Timestamptz(6)
+  completed_at              DateTime?            @db.Timestamptz(6)
+  notes                     String?
+  created_at                DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime             @default(now()) @db.Timestamptz(6)
+  advice_scope_item         advice_scope_item[]
+  client_instruction        client_instruction[]
+  document                  document[]
+  household_group           household_group?     @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party                     party?               @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user_account              user_account?        @relation(fields: [primary_adviser_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  file_note                 file_note[]
+  goal                      goal[]
+  review_cycle              review_cycle[]
+  workflow_instance         workflow_instance[]
 
   @@index([household_id], map: "idx_engagement_household")
   @@index([status], map: "idx_engagement_status")
@@ -882,31 +896,43 @@ model workflow_template {
 }
 
 model EmailTemplate {
-  id        String    @id @default(cuid())
+  id        String     @id @default(cuid())
   name      String
   subject   String
-  body      String    @db.Text
+  body      String     @db.Text
   category  String
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
   emailLogs EmailLog[]
 }
 
 model EmailLog {
-  id             String        @id @default(cuid())
+  id             String         @id @default(cuid())
   clientId       String
   templateId     String?
   subject        String
-  body           String        @db.Text
-  sentAt         DateTime      @default(now())
+  body           String         @db.Text
+  sentAt         DateTime       @default(now())
   sentBy         String
-  status         String        @default("sent")
+  status         String         @default("sent")
   graphMessageId String?
   template       EmailTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([clientId])
   @@index([templateId])
+}
+
+model calendly_event_type_map {
+  id                      String   @id @default(cuid())
+  meeting_type_key        String
+  display_name            String
+  calendly_event_type_uri String?  @unique
+  auto_create_prospect    Boolean
+  unresolved_log_level    String   @default("warn")
+  active                  Boolean  @default(true)
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
 }
 
 enum TaskStatus {

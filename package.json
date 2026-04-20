@@ -13,6 +13,9 @@
     "seed:templates": "ts-node src/lib/seedTemplates.ts",
     "seed:task-types": "npx tsx src/lib/seedTaskTypes.ts"
   },
+  "prisma": {
+    "seed": "npx tsx prisma/seed.ts"
+  },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
     "@azure/identity": "^4.13.1",
