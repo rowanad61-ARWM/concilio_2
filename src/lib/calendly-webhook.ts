@@ -469,7 +469,7 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
   const now = new Date()
   const engagementData = {
     engagement_type: "other",
-    status: "SCHEDULED",
+    status: "open",
     source: "CALENDLY" as const,
     meeting_type_key: meetingTypeRow.meeting_type_key,
     calendly_event_uuid: eventUuid,
@@ -557,7 +557,7 @@ export async function handleInviteeCanceled(payload: CalendlyInviteeCanceledWebh
       id: engagement.id,
     },
     data: {
-      status: "CANCELLED",
+      status: "cancelled",
       completed_at: new Date(),
       notes: appendSystemNote(engagement.notes, systemNote),
       updated_at: new Date(),
