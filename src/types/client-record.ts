@@ -41,6 +41,9 @@ export type ClientDetail = {
   partyType: string
   status: string
   updatedAt: string
+  resolvedEmail: string | null
+  resolvedMobile: string | null
+  resolvedPreferredContactMethod: string | null
   household: {
     id: string
     name: string

@@ -330,8 +330,8 @@ function buildEditForm(client: ClientDetail): EditFormState {
     lastName: client.person?.legalFamilyName ?? "",
     preferredName: client.person?.preferredName ?? "",
     dateOfBirth: client.person?.dateOfBirth ? client.person.dateOfBirth.slice(0, 10) : "",
-    email: client.person?.emailPrimary ?? "",
-    mobile: client.person?.mobilePhone ?? "",
+    email: client.resolvedEmail ?? "",
+    mobile: client.resolvedMobile ?? "",
     relationshipStatus: client.person?.relationshipStatus ?? "",
     countryOfResidence: client.person?.countryOfResidence ?? "",
     addressLine1: residentialAddress?.line1 ?? "",
@@ -1975,6 +1975,19 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       const nextClientData: ClientDetail = {
         ...clientData,
         displayName: updated.displayName,
+        resolvedEmail:
+          typeof updated.person?.email_primary === "string" && updated.person.email_primary.trim()
+            ? updated.person.email_primary
+            : null,
+        resolvedMobile:
+          typeof updated.person?.mobile_phone === "string" && updated.person.mobile_phone.trim()
+            ? updated.person.mobile_phone
+            : null,
+        resolvedPreferredContactMethod:
+          typeof updated.person?.preferred_contact_method === "string" &&
+          updated.person.preferred_contact_method.trim()
+            ? updated.person.preferred_contact_method
+            : null,
         person: clientData.person
           ? {
               ...clientData.person,
@@ -3047,14 +3060,14 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 </>
               ) : (
                 <>
-                  <DetailField label="Email" value={clientData.person?.emailPrimary ?? null} />
-                  <DetailField label="Mobile" value={clientData.person?.mobilePhone ?? null} />
+                  <DetailField label="Email" value={clientData.resolvedEmail ?? null} />
+                  <DetailField label="Mobile" value={clientData.resolvedMobile ?? null} />
                   <DetailField label="Date of birth" value={formatDate(clientData.person?.dateOfBirth ?? null)} />
                 </>
               )}
               <DetailField
                 label="Preferred contact method"
-                value={clientData.person?.preferredContactMethod ?? null}
+                value={clientData.resolvedPreferredContactMethod ?? null}
               />
             </div>
           </section>
@@ -4149,7 +4162,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 if (item.kind === "email") {
                   const isExpanded = expandedEmailLogId === item.emailLog.id
                   const statusLabel = item.emailLog.status.toLowerCase() === "sent" ? "Sent" : "Failed"
-                  const recipientLabel = fullLegalName || clientData.person?.emailPrimary || "Client"
+                  const recipientLabel = fullLegalName || clientData.resolvedEmail || "Client"
 
                   return (
                     <div

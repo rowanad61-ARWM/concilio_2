@@ -3,6 +3,11 @@ import { notFound } from "next/navigation"
 import ClientRecord from "@/components/clients/ClientRecord"
 import { db } from "@/lib/db"
 import { mapEngagementRow } from "@/lib/engagement"
+import {
+  resolveEmailForParty,
+  resolveMobileForParty,
+  resolvePreferredContactMethodForParty,
+} from "@/lib/party-contact"
 import type { ClientAddress } from "@/types/client-record"
 import type { ClientDetail, TimelineNote } from "@/types/client-record"
 
@@ -158,6 +163,9 @@ export default async function ClientRecordPage({
     partyType: party.party_type,
     status: party.status,
     updatedAt: party.updated_at.toISOString(),
+    resolvedEmail: resolveEmailForParty(party),
+    resolvedMobile: resolveMobileForParty(party),
+    resolvedPreferredContactMethod: resolvePreferredContactMethodForParty(party),
     household: householdMembership
       ? {
           id: householdMembership.household_group.id,
