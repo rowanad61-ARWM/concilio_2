@@ -1,5 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 
+const CALENDLY_MEETING_TYPE_LABELS: Record<string, string> = {
+  INITIAL_MEETING: "Initial Meeting",
+  FIFTEEN_MIN_CALL: "15 Minute Call",
+  GENERAL_MEETING: "General Meeting",
+  ANNUAL_REVIEW: "Annual Review",
+  NINETY_DAY_RECAP: "90 Day Recap",
+}
+
 type CalendlyQuestionAndAnswer = {
   question?: string | null
   answer?: string | null
@@ -252,4 +260,13 @@ export function extractInviteePhone(payload: {
   }
 
   return null
+}
+
+export function getCalendlyMeetingTypeLabel(meetingTypeKey: string | null | undefined) {
+  const normalizedKey = meetingTypeKey?.trim().toUpperCase()
+  if (!normalizedKey) {
+    return "Calendly booking"
+  }
+
+  return CALENDLY_MEETING_TYPE_LABELS[normalizedKey] ?? "Calendly booking"
 }

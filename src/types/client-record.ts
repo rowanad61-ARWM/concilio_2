@@ -9,6 +9,8 @@ export type TimelineEngagement = {
   id: string
   engagementType: string
   title: string
+  source?: string | null
+  meetingTypeKey?: string | null
   status: string
   startedAt: string
   workflowInstance: {

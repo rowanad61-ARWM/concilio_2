@@ -13,6 +13,7 @@ import TaskModal, {
   type TaskStatusValue,
   type TaskTypeGroup,
 } from "@/components/clients/TaskModal"
+import { getCalendlyMeetingTypeLabel } from "@/lib/calendly"
 import { ENGAGEMENT_TYPE_VALUES } from "@/lib/engagement"
 import { scoreToAllocation, type RiskAllocation } from "@/lib/risk"
 import type { ClientAddress, ClientDetail, TimelineEngagement, TimelineNote } from "@/types/client-record"
@@ -4195,68 +4196,86 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                     className="mb-2 rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white px-[14px] py-[10px]"
                   >
                     {item.kind === "engagement" ? (
-                      <>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <EngagementIcon />
-                            <p className="text-[13px] font-medium text-[#113238]">{item.engagement.title}</p>
-                            <p className="text-[11px] text-[#9ca3af]">{formatCategory(item.engagement.engagementType)}</p>
-                          </div>
-                          <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
-                            {formatTimelineTimestamp(item.timestamp)}
-                          </p>
-                        </div>
-                        <div className="mt-[6px] flex items-center gap-2">
-                          <span
-                            className={`inline-flex rounded-[999px] px-[8px] py-[2px] text-[10px] uppercase ${getStatusClasses(item.engagement.status)}`}
-                          >
-                            {formatCategory(item.engagement.status)}
-                          </span>
-                        </div>
-                        {item.engagement.workflowInstance ? (
-                          <div className="mt-2 rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-2">
-                            <div className="flex items-center gap-2">
-                              {item.engagement.workflowInstance.stages.map((stage, index) => {
-                                const currentIndex = item.engagement.workflowInstance
-                                  ? item.engagement.workflowInstance.stages.findIndex(
-                                      (stageItem) => stageItem.key === item.engagement.workflowInstance?.currentStage,
-                                    )
-                                  : -1
-                                const stageState = getWorkflowStageState(
-                                  index,
-                                  currentIndex < 0 ? 0 : currentIndex,
-                                  item.engagement.workflowInstance?.status ?? "active",
-                                )
+                      (() => {
+                        const isCalendlyEngagement = item.engagement.source?.toUpperCase() === "CALENDLY"
+                        const calendlyTitle = getCalendlyMeetingTypeLabel(item.engagement.meetingTypeKey)
+                        const engagementTitle = isCalendlyEngagement ? calendlyTitle : item.engagement.title
+                        const normalizedEngagementType = item.engagement.engagementType.trim()
+                        const showSubtitle = !(
+                          isCalendlyEngagement &&
+                          (!normalizedEngagementType ||
+                            normalizedEngagementType.toUpperCase() === "OTHER")
+                        )
 
-                                return (
-                                  <span
-                                    key={stage.key}
-                                    className={`h-[8px] w-[8px] rounded-full border ${getWorkflowStageClasses(stageState)}`}
-                                    title={stage.label}
-                                  />
-                                )
-                              })}
+                        return (
+                          <>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <EngagementIcon />
+                                <p className="text-[13px] font-medium text-[#113238]">{engagementTitle}</p>
+                                {showSubtitle ? (
+                                  <p className="text-[11px] text-[#9ca3af]">
+                                    {formatCategory(normalizedEngagementType)}
+                                  </p>
+                                ) : null}
+                              </div>
+                              <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
+                                {formatTimelineTimestamp(item.timestamp)}
+                              </p>
                             </div>
-                            <p className="mt-2 text-[11px] text-[#6b7280]">
-                              {item.engagement.workflowInstance.stages.find(
-                                (stage) => stage.key === item.engagement.workflowInstance?.currentStage,
-                              )?.label ?? formatCategory(item.engagement.workflowInstance.currentStage)}
-                            </p>
-                            {item.engagement.workflowInstance.status !== "completed" ? (
-                              <button
-                                type="button"
-                                onClick={() => void handleAdvanceWorkflowStage(item.engagement.workflowInstance!.id)}
-                                disabled={advancingWorkflowId === item.engagement.workflowInstance.id}
-                                className="mt-2 rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-transparent px-[8px] py-[4px] text-[11px] text-[#113238] disabled:opacity-60"
+                            <div className="mt-[6px] flex items-center gap-2">
+                              <span
+                                className={`inline-flex rounded-[999px] px-[8px] py-[2px] text-[10px] uppercase ${getStatusClasses(item.engagement.status)}`}
                               >
-                                {advancingWorkflowId === item.engagement.workflowInstance.id
-                                  ? "Advancing..."
-                                  : "Advance stage"}
-                              </button>
+                                {formatCategory(item.engagement.status)}
+                              </span>
+                            </div>
+                            {item.engagement.workflowInstance ? (
+                              <div className="mt-2 rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-2">
+                                <div className="flex items-center gap-2">
+                                  {item.engagement.workflowInstance.stages.map((stage, index) => {
+                                    const currentIndex = item.engagement.workflowInstance
+                                      ? item.engagement.workflowInstance.stages.findIndex(
+                                          (stageItem) => stageItem.key === item.engagement.workflowInstance?.currentStage,
+                                        )
+                                      : -1
+                                    const stageState = getWorkflowStageState(
+                                      index,
+                                      currentIndex < 0 ? 0 : currentIndex,
+                                      item.engagement.workflowInstance?.status ?? "active",
+                                    )
+
+                                    return (
+                                      <span
+                                        key={stage.key}
+                                        className={`h-[8px] w-[8px] rounded-full border ${getWorkflowStageClasses(stageState)}`}
+                                        title={stage.label}
+                                      />
+                                    )
+                                  })}
+                                </div>
+                                <p className="mt-2 text-[11px] text-[#6b7280]">
+                                  {item.engagement.workflowInstance.stages.find(
+                                    (stage) => stage.key === item.engagement.workflowInstance?.currentStage,
+                                  )?.label ?? formatCategory(item.engagement.workflowInstance.currentStage)}
+                                </p>
+                                {item.engagement.workflowInstance.status !== "completed" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleAdvanceWorkflowStage(item.engagement.workflowInstance!.id)}
+                                    disabled={advancingWorkflowId === item.engagement.workflowInstance.id}
+                                    className="mt-2 rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-transparent px-[8px] py-[4px] text-[11px] text-[#113238] disabled:opacity-60"
+                                  >
+                                    {advancingWorkflowId === item.engagement.workflowInstance.id
+                                      ? "Advancing..."
+                                      : "Advance stage"}
+                                  </button>
+                                ) : null}
+                              </div>
                             ) : null}
-                          </div>
-                        ) : null}
-                      </>
+                          </>
+                        )
+                      })()
                     ) : (
                       <>
                         <div className="flex items-start justify-between gap-3">
@@ -4273,7 +4292,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                         </div>
                         <p className="mt-[6px] text-[13px] leading-[1.6] text-[#374151]">{item.note.text}</p>
                       </>
-                    )}
+                    )
+                    }
                   </div>
                 )
               })}

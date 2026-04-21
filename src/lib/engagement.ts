@@ -1,3 +1,4 @@
+import { getCalendlyMeetingTypeLabel } from "@/lib/calendly"
 import type { TimelineEngagement } from "@/types/client-record"
 
 export const ENGAGEMENT_TYPE_VALUES = [
@@ -88,8 +89,13 @@ function buildFallbackTitle(description: string | null): string {
 }
 
 export function mapEngagementRow(row: Record<string, unknown>): TimelineEngagement {
+  const source = readString(row.source)
+  const meetingTypeKey = readString(row.meeting_type_key)
   const description = readString(row.description) ?? readString(row.notes)
-  const title = readString(row.title) ?? buildFallbackTitle(description)
+  const title =
+    source?.toUpperCase() === "CALENDLY"
+      ? getCalendlyMeetingTypeLabel(meetingTypeKey)
+      : readString(row.title) ?? buildFallbackTitle(description)
   const workflowInstanceId = readString(row.workflow_instance_id)
   const workflowStages = parseWorkflowStages(row.workflow_template_stages)
   const workflowCurrentStage = readString(row.workflow_current_stage)
@@ -98,10 +104,13 @@ export function mapEngagementRow(row: Record<string, unknown>): TimelineEngageme
     id: readString(row.id) ?? "",
     engagementType: readString(row.engagement_type) ?? "other",
     title,
+    source,
+    meetingTypeKey,
     status: readString(row.status) ?? "active",
     startedAt:
-      readString(row.started_at) ??
-      readString(row.opened_at) ??
+      (source?.toUpperCase() === "CALENDLY"
+        ? readString(row.opened_at) ?? readString(row.started_at)
+        : readString(row.started_at) ?? readString(row.opened_at)) ??
       readString(row.created_at) ??
       new Date().toISOString(),
     workflowInstance:
