@@ -3,6 +3,7 @@ import "server-only"
 import { db } from "@/lib/db"
 import { sendMailAsAdviser } from "@/lib/graphMail"
 import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
+import { rescheduleWorkflowForEngagement, spawnWorkflowForEngagement } from "@/lib/workflow"
 import {
   extractInviteePhone,
   formatCalendlyMeetingDate,
@@ -760,6 +761,41 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
     meetingDuration,
     meetingLocation,
   })
+
+  let didRescheduleExistingWorkflow = false
+  if (rescheduledFrom && startAt) {
+    const priorEngagement = await db.engagement.findFirst({
+      where: {
+        calendly_invitee_uuid: rescheduledFrom,
+      },
+      select: {
+        id: true,
+      },
+      orderBy: {
+        created_at: "desc",
+      },
+    })
+
+    if (priorEngagement) {
+      await rescheduleWorkflowForEngagement(priorEngagement.id, startAt)
+        .then(() => {
+          didRescheduleExistingWorkflow = true
+        })
+        .catch((error) => {
+          console.error(`[calendly] workflow reschedule failed ${priorEngagement.id} ${toErrorMessage(error)}`)
+        })
+    } else {
+      console.info(
+        `[calendly] workflow reschedule skipped prior-engagement-not-found ${rescheduledFrom}`,
+      )
+    }
+  }
+
+  if (!didRescheduleExistingWorkflow) {
+    await spawnWorkflowForEngagement(engagement.id).catch((error) => {
+      console.error(`[calendly] workflow spawn failed ${engagement.id} ${toErrorMessage(error)}`)
+    })
+  }
 
   console.info(
     `[calendly webhook] invitee.created upserted ${eventUuid}`,

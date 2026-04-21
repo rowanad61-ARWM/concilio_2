@@ -249,6 +249,16 @@ export async function POST(request: Request) {
         workflowStatusValue,
       ]
 
+      if (workflowInstanceColumns.has("workflow_template_id")) {
+        workflowInsertColumns.push("workflow_template_id")
+        workflowInsertValues.push(template.id)
+      }
+
+      if (workflowInstanceColumns.has("trigger_date")) {
+        workflowInsertColumns.push("trigger_date")
+        workflowInsertValues.push(now)
+      }
+
       if (workflowInstanceColumns.has("started_at")) {
         workflowInsertColumns.push("started_at")
         workflowInsertValues.push(now)
