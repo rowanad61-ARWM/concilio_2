@@ -18,6 +18,24 @@ function readString(value: unknown): string | null {
   return typeof value === "string" ? value : null
 }
 
+function readDateTime(value: unknown): string | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString()
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      return null
+    }
+
+    const parsed = new Date(trimmed)
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+  }
+
+  return null
+}
+
 function readNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value
@@ -106,13 +124,13 @@ export function mapEngagementRow(row: Record<string, unknown>): TimelineEngageme
     title,
     source,
     meetingTypeKey,
-    openedAt: readString(row.opened_at),
+    openedAt: readDateTime(row.opened_at),
     status: readString(row.status) ?? "active",
     startedAt:
       (source?.toUpperCase() === "CALENDLY"
-        ? readString(row.opened_at) ?? readString(row.started_at)
-        : readString(row.started_at) ?? readString(row.opened_at)) ??
-      readString(row.created_at) ??
+        ? readDateTime(row.opened_at) ?? readDateTime(row.started_at)
+        : readDateTime(row.started_at) ?? readDateTime(row.opened_at)) ??
+      readDateTime(row.created_at) ??
       new Date().toISOString(),
     workflowInstance:
       workflowInstanceId && workflowCurrentStage
