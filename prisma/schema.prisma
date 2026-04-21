@@ -260,6 +260,8 @@ model engagement {
   calendly_event_uuid       String?              @unique
   calendly_invitee_uuid     String?
   invitee_email             String?
+  reminder_sms_sent_at      DateTime?            @db.Timestamptz(6)
+  reminder_sms_message_id   String?
   calendly_event_type_uri   String?
   calendly_cancel_url       String?
   calendly_reschedule_url   String?

@@ -1,0 +1,18 @@
+name: Calendly SMS Reminders
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Calendly SMS reminder cron endpoint
+        run: |
+          curl --fail --show-error --silent \
+            -X POST "https://concilio-2.vercel.app/api/cron/calendly-sms-reminders" \
+            -H "x-cron-secret: ${{ secrets.CRON_SHARED_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
