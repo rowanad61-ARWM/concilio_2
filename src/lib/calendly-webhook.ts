@@ -5,6 +5,8 @@ import { sendMailAsAdviser } from "@/lib/graphMail"
 import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
 import {
   extractInviteePhone,
+  formatCalendlyMeetingDate,
+  formatCalendlyMeetingDateTime,
   type CalendlyInviteeCanceledWebhookPayload,
   type CalendlyInviteeCreatedWebhookPayload,
   type CalendlyRoutingFormSubmissionWebhookPayload,
@@ -53,8 +55,6 @@ const CALENDLY_TEMPLATE_ID_BY_MEETING_TYPE: Record<string, string> = {
   ANNUAL_REVIEW: "calendly_annual_review",
   NINETY_DAY_RECAP: "calendly_ninety_day_recap",
 }
-
-const MELBOURNE_TIMEZONE = "Australia/Melbourne"
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -237,34 +237,6 @@ async function findClientByEmail(inviteeEmail: string): Promise<ResolvedClient> 
     display_name: matchedParty.display_name,
     household_id: matchedParty.household_member[0]?.household_id ?? null,
   }
-}
-
-function formatDateInMelbourne(value: Date) {
-  return new Intl.DateTimeFormat("en-AU", {
-    timeZone: MELBOURNE_TIMEZONE,
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(value)
-}
-
-function formatDateTimeInMelbourne(value: Date) {
-  const weekday = new Intl.DateTimeFormat("en-AU", {
-    timeZone: MELBOURNE_TIMEZONE,
-    weekday: "long",
-  }).format(value)
-  const datePart = formatDateInMelbourne(value)
-  const timePart = new Intl.DateTimeFormat("en-AU", {
-    timeZone: MELBOURNE_TIMEZONE,
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  })
-    .format(value)
-    .replace(/\s/g, "")
-    .toLowerCase()
-
-  return `${weekday} ${datePart}, ${timePart}`
 }
 
 function extractFirstNameFromDisplayName(displayName: string | null | undefined) {
@@ -645,8 +617,8 @@ export async function triggerPostBookingSideEffects(context: PostBookingSideEffe
     const mergeOverrides = {
       clientFirstName: firstName,
       adviserName,
-      meetingDate: formatDateInMelbourne(engagement.opened_at),
-      meetingDatetime: formatDateTimeInMelbourne(engagement.opened_at),
+      meetingDate: formatCalendlyMeetingDate(engagement.opened_at) ?? "",
+      meetingDatetime: formatCalendlyMeetingDateTime(engagement.opened_at) ?? "",
       meetingDuration: context.meetingDuration,
       meetingLocation: context.meetingLocation,
       calendlyRescheduleUrl: normalizeString(engagement.calendly_reschedule_url) ?? "",

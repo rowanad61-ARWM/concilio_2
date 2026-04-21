@@ -13,7 +13,7 @@ import TaskModal, {
   type TaskStatusValue,
   type TaskTypeGroup,
 } from "@/components/clients/TaskModal"
-import { getCalendlyMeetingTypeLabel } from "@/lib/calendly"
+import { formatCalendlyMeetingDateTime, getCalendlyMeetingTypeLabel } from "@/lib/calendly"
 import { ENGAGEMENT_TYPE_VALUES } from "@/lib/engagement"
 import { scoreToAllocation, type RiskAllocation } from "@/lib/risk"
 import type { ClientAddress, ClientDetail, TimelineEngagement, TimelineNote } from "@/types/client-record"
@@ -4199,6 +4199,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                       (() => {
                         const isCalendlyEngagement = item.engagement.source?.toUpperCase() === "CALENDLY"
                         const calendlyTitle = getCalendlyMeetingTypeLabel(item.engagement.meetingTypeKey)
+                        const calendlyMeetingDateTime = isCalendlyEngagement
+                          ? formatCalendlyMeetingDateTime(item.engagement.openedAt)
+                          : null
                         const engagementTitle = isCalendlyEngagement ? calendlyTitle : item.engagement.title
                         const normalizedEngagementType = item.engagement.engagementType.trim()
                         const showSubtitle = !(
@@ -4210,14 +4213,23 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                         return (
                           <>
                             <div className="flex items-start justify-between gap-3">
-                              <div className="flex min-w-0 items-center gap-2">
+                              <div className="flex min-w-0 items-start gap-2">
                                 <EngagementIcon />
-                                <p className="text-[13px] font-medium text-[#113238]">{engagementTitle}</p>
-                                {showSubtitle ? (
-                                  <p className="text-[11px] text-[#9ca3af]">
-                                    {formatCategory(normalizedEngagementType)}
-                                  </p>
-                                ) : null}
+                                <div className="min-w-0">
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    <p className="text-[13px] font-medium text-[#113238]">{engagementTitle}</p>
+                                    {showSubtitle ? (
+                                      <p className="text-[11px] text-[#9ca3af]">
+                                        {formatCategory(normalizedEngagementType)}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                  {isCalendlyEngagement && calendlyMeetingDateTime ? (
+                                    <p className="mt-[2px] text-[11px] text-[#6b7280]">
+                                      {calendlyMeetingDateTime}
+                                    </p>
+                                  ) : null}
+                                </div>
                               </div>
                               <p className="shrink-0 text-right text-[12px] text-[#9ca3af]">
                                 {formatTimelineTimestamp(item.timestamp)}

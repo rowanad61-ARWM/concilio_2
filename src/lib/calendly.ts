@@ -8,6 +8,8 @@ const CALENDLY_MEETING_TYPE_LABELS: Record<string, string> = {
   NINETY_DAY_RECAP: "90 Day Recap",
 }
 
+const MELBOURNE_TIMEZONE = "Australia/Melbourne"
+
 type CalendlyQuestionAndAnswer = {
   question?: string | null
   answer?: string | null
@@ -277,4 +279,54 @@ export function getCalendlyMeetingTypeLabel(meetingTypeKey: string | null | unde
   }
 
   return CALENDLY_MEETING_TYPE_LABELS[normalizedKey] ?? "Calendly booking"
+}
+
+export function formatCalendlyMeetingDate(value: Date | string | null | undefined): string | null {
+  if (!value) {
+    return null
+  }
+
+  const parsed = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  return new Intl.DateTimeFormat("en-AU", {
+    timeZone: MELBOURNE_TIMEZONE,
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(parsed)
+}
+
+export function formatCalendlyMeetingDateTime(value: Date | string | null | undefined): string | null {
+  if (!value) {
+    return null
+  }
+
+  const parsed = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  const weekday = new Intl.DateTimeFormat("en-AU", {
+    timeZone: MELBOURNE_TIMEZONE,
+    weekday: "long",
+  }).format(parsed)
+  const datePart = formatCalendlyMeetingDate(parsed)
+  if (!datePart) {
+    return null
+  }
+
+  const timePart = new Intl.DateTimeFormat("en-AU", {
+    timeZone: MELBOURNE_TIMEZONE,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(parsed)
+    .replace(/\s/g, "")
+    .toLowerCase()
+
+  return `${weekday} ${datePart}, ${timePart}`
 }

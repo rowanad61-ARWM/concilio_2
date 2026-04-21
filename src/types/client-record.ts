@@ -11,6 +11,7 @@ export type TimelineEngagement = {
   title: string
   source?: string | null
   meetingTypeKey?: string | null
+  openedAt?: string | null
   status: string
   startedAt: string
   workflowInstance: {

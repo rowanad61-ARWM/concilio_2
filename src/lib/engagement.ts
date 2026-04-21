@@ -106,6 +106,7 @@ export function mapEngagementRow(row: Record<string, unknown>): TimelineEngageme
     title,
     source,
     meetingTypeKey,
+    openedAt: readString(row.opened_at),
     status: readString(row.status) ?? "active",
     startedAt:
       (source?.toUpperCase() === "CALENDLY"
