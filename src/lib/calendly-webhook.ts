@@ -3,6 +3,7 @@ import "server-only"
 import { db } from "@/lib/db"
 import { sendMailAsAdviser } from "@/lib/graphMail"
 import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
+import { resolveEmailForParty } from "@/lib/party-contact"
 import { rescheduleWorkflowForEngagement, spawnWorkflowForEngagement } from "@/lib/workflow"
 import {
   extractInviteePhone,
@@ -541,6 +542,18 @@ export async function triggerPostBookingSideEffects(context: PostBookingSideEffe
                 mobile_phone: true,
               },
             },
+            contact_method: {
+              where: {
+                end_date: null,
+              },
+              select: {
+                channel: true,
+                value: true,
+                preferred_flag: true,
+                do_not_use_flag: true,
+                created_at: true,
+              },
+            },
           },
         },
         user_account: {
@@ -587,7 +600,7 @@ export async function triggerPostBookingSideEffects(context: PostBookingSideEffe
     }
 
     const recipientEmail = engagement.party_id
-      ? normalizeString(engagement.party?.person?.email_primary)
+      ? normalizeString(engagement.party ? resolveEmailForParty(engagement.party) : null)
       : normalizeString(engagement.invitee_email)
 
     if (!recipientEmail) {
