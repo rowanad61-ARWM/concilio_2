@@ -120,9 +120,9 @@ export default async function ClientRecordPage({
     notFound()
   }
 
-  const [householdMembers, engagementRows] = householdMembership
-    ? await Promise.all([
-        db.household_member.findMany({
+  const [householdMembers, engagementRows] = await Promise.all([
+    householdMembership
+      ? db.household_member.findMany({
           where: {
             household_id: householdMembership.household_id,
             end_date: null,
@@ -133,29 +133,41 @@ export default async function ClientRecordPage({
           orderBy: {
             created_at: "asc",
           },
-        }),
-        db.$queryRawUnsafe<Record<string, unknown>[]>(
-          `SELECT
-             e.*,
-             wi.id AS workflow_instance_id,
-             wi.current_stage AS workflow_current_stage,
-             wi.status AS workflow_status,
-             wt.stages AS workflow_template_stages
-           FROM engagement e
-           LEFT JOIN LATERAL (
-             SELECT wi_inner.*
-             FROM workflow_instance wi_inner
-             WHERE wi_inner.engagement_id = e.id
-             ORDER BY wi_inner.created_at DESC
-             LIMIT 1
-           ) wi ON true
-           LEFT JOIN workflow_template wt ON wt.id = wi.template_id
-           WHERE e.household_id = $1
-           ORDER BY e.created_at DESC`,
-          householdMembership.household_id,
-        ),
-      ])
-    : [[], []]
+        })
+      : Promise.resolve([]),
+    db.$queryRawUnsafe<Record<string, unknown>[]>(
+      `SELECT
+         e.*,
+         wi.id AS workflow_instance_id,
+         wi.current_stage AS workflow_current_stage,
+         wi.status AS workflow_status,
+         wt.stages AS workflow_template_stages
+       FROM engagement e
+       LEFT JOIN LATERAL (
+         SELECT wi_inner.*
+         FROM workflow_instance wi_inner
+         WHERE wi_inner.engagement_id = e.id
+         ORDER BY wi_inner.created_at DESC
+         LIMIT 1
+       ) wi ON true
+       LEFT JOIN workflow_template wt ON wt.id = wi.template_id
+       WHERE e.party_id = $1
+          OR ($2::uuid IS NOT NULL AND e.household_id = $2)
+       ORDER BY e.created_at DESC`,
+      id,
+      householdMembership?.household_id ?? null,
+    ),
+  ])
+
+  const seenEngagementIds = new Set<string>()
+  const dedupedEngagementRows = engagementRows.filter((row) => {
+    const rowId = typeof row.id === "string" ? row.id : ""
+    if (!rowId || seenEngagementIds.has(rowId)) {
+      return false
+    }
+    seenEngagementIds.add(rowId)
+    return true
+  })
 
   const client: ClientDetail = {
     id: party.id,
@@ -236,7 +248,7 @@ export default async function ClientRecordPage({
           validUntil: riskProfile.valid_until?.toISOString() ?? null,
         }
       : null,
-    engagements: engagementRows.map((engagement: any) => mapEngagementRow(engagement)),
+    engagements: dedupedEngagementRows.map((engagement: any) => mapEngagementRow(engagement)),
   }
 
   const notes: TimelineNote[] = fileNotes.map((note: any) => ({

@@ -1129,7 +1129,14 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     setIsLoadingEmailLogs(true)
 
     try {
-      const response = await fetch(`/api/email/logs?clientId=${encodeURIComponent(clientData.id)}`)
+      const params = new URLSearchParams({
+        clientId: clientData.id,
+      })
+      if (clientData.household?.id) {
+        params.set("householdId", clientData.household.id)
+      }
+
+      const response = await fetch(`/api/email/logs?${params.toString()}`)
       if (!response.ok) {
         throw new Error("Failed to load email logs")
       }
@@ -1173,7 +1180,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     } finally {
       setIsLoadingEmailLogs(false)
     }
-  }, [clientData.id])
+  }, [clientData.household?.id, clientData.id])
 
   const loadTasks = useCallback(async () => {
     setIsLoadingTasks(true)

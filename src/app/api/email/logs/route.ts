@@ -11,15 +11,25 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url)
   const clientId = url.searchParams.get("clientId")?.trim() ?? ""
+  const householdId = url.searchParams.get("householdId")?.trim() ?? ""
 
   if (!clientId) {
     return NextResponse.json({ error: "clientId is required" }, { status: 400 })
   }
 
   try {
+    const scopedClientIds = householdId
+      ? [...new Set([clientId, householdId].filter((value) => Boolean(value)))]
+      : [clientId]
+
     const logs = await db.emailLog.findMany({
       where: {
-        clientId,
+        clientId:
+          scopedClientIds.length === 1
+            ? scopedClientIds[0]
+            : {
+                in: scopedClientIds,
+              },
       },
       orderBy: {
         sentAt: "desc",
@@ -48,4 +58,3 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "failed to load email logs" }, { status: 500 })
   }
 }
-
