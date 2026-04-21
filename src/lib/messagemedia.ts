@@ -10,6 +10,18 @@ type MessageMediaResponse = {
   }>
 }
 
+class MessageMediaSendError extends Error {
+  httpStatus?: number
+  responseBody?: string
+
+  constructor(message: string, options?: { httpStatus?: number; responseBody?: string }) {
+    super(message)
+    this.name = "MessageMediaSendError"
+    this.httpStatus = options?.httpStatus
+    this.responseBody = options?.responseBody
+  }
+}
+
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
     return error.message
@@ -33,6 +45,10 @@ function maskPhone(value: string) {
 
 function sanitizePhoneInput(value: string) {
   return value.replace(/[\s\-().]/g, "")
+}
+
+function compactRawBody(rawText: string) {
+  return rawText.replace(/\s+/g, " ").trim().slice(0, 2000)
 }
 
 function parseMessageMediaResponse(rawText: string): MessageMediaResponse | null {
@@ -132,12 +148,21 @@ export async function sendSms(to: string, body: string): Promise<{ message_id: s
     rawText = await response.text()
   } catch (error) {
     console.error(`[messagemedia sms] send failed network-error ${toErrorMessage(error)}`)
-    throw new Error(`MessageMedia network failure: ${toErrorMessage(error)}`)
+    throw new MessageMediaSendError(`MessageMedia network failure: ${toErrorMessage(error)}`)
   }
+
+  const responseBodySummary = compactRawBody(rawText)
+  const responseBodyDetail = responseBodySummary || "<empty>"
 
   const parsed = parseMessageMediaResponse(rawText)
   if (!parsed) {
-    throw new Error("MessageMedia returned a non-JSON response")
+    throw new MessageMediaSendError(
+      `MessageMedia returned a non-JSON response; response body: ${responseBodyDetail}`,
+      {
+        httpStatus: response.status,
+        responseBody: responseBodySummary,
+      },
+    )
   }
 
   const message = parsed.messages?.[0]
@@ -149,11 +174,23 @@ export async function sendSms(to: string, body: string): Promise<{ message_id: s
   )
 
   if (response.status !== 202) {
-    throw new Error(`MessageMedia HTTP ${response.status}`)
+    throw new MessageMediaSendError(
+      `MessageMedia HTTP ${response.status}; response body: ${responseBodyDetail}`,
+      {
+        httpStatus: response.status,
+        responseBody: responseBodySummary,
+      },
+    )
   }
 
   if (!messageId) {
-    throw new Error("MessageMedia response missing message_id")
+    throw new MessageMediaSendError(
+      `MessageMedia response missing message_id; response body: ${responseBodyDetail}`,
+      {
+        httpStatus: response.status,
+        responseBody: responseBodySummary,
+      },
+    )
   }
 
   return {
