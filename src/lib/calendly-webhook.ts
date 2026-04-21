@@ -25,6 +25,7 @@ type ResolvedAdvisor = {
 type ResolvedClient = {
   id: string
   display_name: string
+  household_id: string | null
 } | null
 
 const SYNTHETIC_GENERAL_MEETING: MeetingTypeMapRow = {
@@ -191,6 +192,18 @@ async function findClientByEmail(inviteeEmail: string): Promise<ResolvedClient> 
     select: {
       id: true,
       display_name: true,
+      household_member: {
+        where: {
+          end_date: null,
+        },
+        orderBy: {
+          created_at: "desc",
+        },
+        take: 1,
+        select: {
+          household_id: true,
+        },
+      },
     },
   })
 
@@ -201,6 +214,7 @@ async function findClientByEmail(inviteeEmail: string): Promise<ResolvedClient> 
   return {
     id: matchedParty.id,
     display_name: matchedParty.display_name,
+    household_id: matchedParty.household_member[0]?.household_id ?? null,
   }
 }
 
@@ -220,6 +234,18 @@ async function findClientByDisplayName(inviteeName: string): Promise<ResolvedCli
     select: {
       id: true,
       display_name: true,
+      household_member: {
+        where: {
+          end_date: null,
+        },
+        orderBy: {
+          created_at: "desc",
+        },
+        take: 1,
+        select: {
+          household_id: true,
+        },
+      },
     },
   })
 
@@ -230,6 +256,7 @@ async function findClientByDisplayName(inviteeName: string): Promise<ResolvedCli
   return {
     id: matchedParty.id,
     display_name: matchedParty.display_name,
+    household_id: matchedParty.household_member[0]?.household_id ?? null,
   }
 }
 
@@ -237,7 +264,7 @@ async function createProspectPartyFromCalendly(params: {
   inviteeName: string
   inviteeEmail: string
   phone: string | null
-}): Promise<{ id: string; display_name: string }> {
+}): Promise<{ id: string; display_name: string; household_id: string | null }> {
   const displayName = params.inviteeName.trim() || params.inviteeEmail.trim() || "Calendly Prospect"
   const email = params.inviteeEmail.trim().toLowerCase()
   const phone = params.phone?.trim() ?? null
@@ -289,7 +316,10 @@ async function createProspectPartyFromCalendly(params: {
     return party
   })
 
-  return createdParty
+  return {
+    ...createdParty,
+    household_id: null,
+  }
 }
 
 function getInviteeCreatedTimestamp(payload: CalendlyInviteeCreatedWebhookPayload) {
@@ -473,6 +503,7 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
     calendly_reschedule_url: normalizeString(payload.payload.reschedule_url),
     calendly_rescheduled_from: rescheduledFrom,
     party_id: client?.id ?? null,
+    household_id: client?.household_id ?? null,
     primary_adviser_id: advisor?.id ?? null,
     opened_at: startAt ?? existing?.opened_at ?? now,
     notes,
