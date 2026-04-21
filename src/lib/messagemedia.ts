@@ -1,14 +1,9 @@
 import "server-only"
 
-const MESSAGEMEDIA_DEFAULT_BASE_URL = "https://api.messagemedia.com"
-const MESSAGEMEDIA_MESSAGES_PATH = "/v1/messages"
+const MESSAGEMEDIA_DEFAULT_BASE_URL = "https://api.wholesalesms.com.au"
+const MESSAGEMEDIA_SEND_PATH = "/api/v2/send-sms.json"
 
-type MessageMediaResponse = {
-  messages?: Array<{
-    message_id?: string
-    status?: string
-  }>
-}
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 
 class MessageMediaSendError extends Error {
   httpStatus?: number
@@ -51,17 +46,59 @@ function compactRawBody(rawText: string) {
   return rawText.replace(/\s+/g, " ").trim().slice(0, 2000)
 }
 
-function parseMessageMediaResponse(rawText: string): MessageMediaResponse | null {
+function parseJsonValue(rawText: string): JsonValue | null {
   try {
-    const parsed = JSON.parse(rawText) as unknown
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null
-    }
-
-    return parsed as MessageMediaResponse
+    return JSON.parse(rawText) as JsonValue
   } catch {
     return null
   }
+}
+
+function findField(value: JsonValue, candidates: string[]): string | null {
+  const names = new Set(candidates.map((name) => name.toLowerCase()))
+
+  const visit = (node: JsonValue): string | null => {
+    if (node === null) {
+      return null
+    }
+
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const found = visit(child)
+        if (found) {
+          return found
+        }
+      }
+      return null
+    }
+
+    if (typeof node !== "object") {
+      return null
+    }
+
+    for (const [key, raw] of Object.entries(node)) {
+      const lowered = key.toLowerCase()
+      if (names.has(lowered)) {
+        if (typeof raw === "string" && raw.trim()) {
+          return raw.trim()
+        }
+        if (typeof raw === "number" && Number.isFinite(raw)) {
+          return String(raw)
+        }
+      }
+    }
+
+    for (const child of Object.values(node)) {
+      const found = visit(child)
+      if (found) {
+        return found
+      }
+    }
+
+    return null
+  }
+
+  return visit(value)
 }
 
 export function normalizeSmsPhone(input: string): string {
@@ -105,7 +142,7 @@ export async function sendSms(to: string, body: string): Promise<{ message_id: s
   const password = process.env.MESSAGEMEDIA_PASSWORD?.trim()
   const sourceNumber = process.env.MESSAGEMEDIA_SOURCE_NUMBER?.trim()
   const endpointBase = process.env.MESSAGEMEDIA_ENDPOINT?.trim() || MESSAGEMEDIA_DEFAULT_BASE_URL
-  const endpoint = new URL(MESSAGEMEDIA_MESSAGES_PATH, endpointBase).toString()
+  const endpoint = new URL(MESSAGEMEDIA_SEND_PATH, endpointBase).toString()
 
   if (!username || !password || !sourceNumber) {
     throw new Error("MessageMedia credentials are not configured")
@@ -117,17 +154,10 @@ export async function sendSms(to: string, body: string): Promise<{ message_id: s
 
   const destinationNumber = normalizeSmsPhone(to)
   const authorization = Buffer.from(`${username}:${password}`, "utf8").toString("base64")
-
-  const requestBody = {
-    messages: [
-      {
-        content: body,
-        destination_number: destinationNumber,
-        source_number: sourceNumber,
-        delivery_report: false,
-      },
-    ],
-  }
+  const requestBody = new URLSearchParams()
+  requestBody.set("message", body)
+  requestBody.set("to", destinationNumber)
+  requestBody.set("from", sourceNumber)
 
   console.info(
     `[messagemedia sms] send request endpoint=${endpoint} destination=${maskPhone(destinationNumber)} source=${sourceNumber} textLength=${body.length}`,
@@ -140,10 +170,10 @@ export async function sendSms(to: string, body: string): Promise<{ message_id: s
       method: "POST",
       headers: {
         Authorization: `Basic ${authorization}`,
-        "Content-Type": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
         Accept: "application/json",
       },
-      body: JSON.stringify(requestBody),
+      body: requestBody.toString(),
     })
     rawText = await response.text()
   } catch (error) {
@@ -153,8 +183,18 @@ export async function sendSms(to: string, body: string): Promise<{ message_id: s
 
   const responseBodySummary = compactRawBody(rawText)
   const responseBodyDetail = responseBodySummary || "<empty>"
+  const parsed = parseJsonValue(rawText)
 
-  const parsed = parseMessageMediaResponse(rawText)
+  if (!response.ok) {
+    throw new MessageMediaSendError(
+      `MessageMedia HTTP ${response.status}; response body: ${responseBodyDetail}`,
+      {
+        httpStatus: response.status,
+        responseBody: responseBodySummary,
+      },
+    )
+  }
+
   if (!parsed) {
     throw new MessageMediaSendError(
       `MessageMedia returned a non-JSON response; response body: ${responseBodyDetail}`,
@@ -165,27 +205,16 @@ export async function sendSms(to: string, body: string): Promise<{ message_id: s
     )
   }
 
-  const message = parsed.messages?.[0]
-  const messageId = message?.message_id?.trim() ?? ""
-  const status = message?.status?.trim() ?? "unknown"
+  const messageId = findField(parsed, ["message_id", "id"]) ?? ""
+  const status = findField(parsed, ["status"]) ?? "accepted"
 
   console.info(
     `[messagemedia sms] send response http=${response.status} message_id=${messageId || "n/a"} status=${status}`,
   )
 
-  if (response.status !== 202) {
-    throw new MessageMediaSendError(
-      `MessageMedia HTTP ${response.status}; response body: ${responseBodyDetail}`,
-      {
-        httpStatus: response.status,
-        responseBody: responseBodySummary,
-      },
-    )
-  }
-
   if (!messageId) {
     throw new MessageMediaSendError(
-      `MessageMedia response missing message_id; response body: ${responseBodyDetail}`,
+      `MessageMedia response missing message identifier (message_id/id); response body: ${responseBodyDetail}`,
       {
         httpStatus: response.status,
         responseBody: responseBodySummary,

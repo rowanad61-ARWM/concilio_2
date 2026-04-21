@@ -2,19 +2,18 @@
 
 This job sends one SMS reminder for each Calendly engagement starting in the next 24 hours.
 
-## MessageMedia API (Sinch)
+## MessageMedia reseller API (legacy WholesaleSMS endpoint)
 
-- Base URL: `https://api.messagemedia.com` (override with `MESSAGEMEDIA_ENDPOINT`)
-- Endpoint: `POST /v1/messages`
+- Base URL: `https://api.wholesalesms.com.au` (override with `MESSAGEMEDIA_ENDPOINT`)
+- Endpoint: `POST /api/v2/send-sms.json`
 - Auth: `Authorization: Basic <base64(MESSAGEMEDIA_USERNAME:MESSAGEMEDIA_PASSWORD)>`
-- Request body shape:
-  - `messages[0].content` (SMS text)
-  - `messages[0].destination_number` (E.164 with `+`, for example `+61400111222`)
-  - `messages[0].source_number` (configured sender number in `MESSAGEMEDIA_SOURCE_NUMBER`)
-  - `messages[0].delivery_report` (`false`)
+- Request body shape (`application/x-www-form-urlencoded`):
+  - `message` (SMS text)
+  - `to` (E.164 with `+`, for example `+61400111222`)
+  - `from` (configured sender number in `MESSAGEMEDIA_SOURCE_NUMBER`)
 
 Setup notes:
-- Use your MessageNet AU portal username and password as `MESSAGEMEDIA_USERNAME` and `MESSAGEMEDIA_PASSWORD`.
+- Use your MessageNet portal username and password as `MESSAGEMEDIA_USERNAME` and `MESSAGEMEDIA_PASSWORD`.
 - Use your dedicated virtual sender number from Senders / My Numbers as `MESSAGEMEDIA_SOURCE_NUMBER`.
 
 ## What Runs
