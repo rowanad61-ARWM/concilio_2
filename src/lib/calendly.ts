@@ -17,11 +17,18 @@ type CalendlyEventMembership = {
   user_email?: string | null
 }
 
+type CalendlyLocation = {
+  type?: string | null
+  location?: string | null
+  join_url?: string | null
+}
+
 type CalendlyScheduledEvent = {
   uri?: string | null
   event_type?: string | null
   start_time?: string | null
   end_time?: string | null
+  location?: CalendlyLocation | string | null
   event_memberships?: CalendlyEventMembership[] | null
 }
 
@@ -38,6 +45,7 @@ type CalendlyInviteePayload = {
   event_type?: string | null
   start_time?: string | null
   end_time?: string | null
+  location?: CalendlyLocation | string | null
   event_memberships?: CalendlyEventMembership[] | null
   old_invitee?: string | null
   old_invitee_uri?: string | null

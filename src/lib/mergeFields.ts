@@ -6,6 +6,17 @@ export type ClientMergeData = {
   phone: string
 }
 
+export type MergeFieldOverrides = {
+  clientFirstName?: string
+  adviserName?: string
+  meetingDate?: string
+  meetingDatetime?: string
+  meetingDuration?: string
+  meetingLocation?: string
+  calendlyRescheduleUrl?: string
+  calendlyCancelUrl?: string
+}
+
 export const MERGE_FIELD_TOKENS = [
   "{{client.firstName}}",
   "{{client.lastName}}",
@@ -16,6 +27,14 @@ export const MERGE_FIELD_TOKENS = [
   "{{adviser.email}}",
   "{{date.today}}",
   "{{date.year}}",
+  "{{client_first_name}}",
+  "{{adviser_name}}",
+  "{{meeting_date}}",
+  "{{meeting_datetime}}",
+  "{{meeting_duration}}",
+  "{{meeting_location}}",
+  "{{calendly_reschedule_url}}",
+  "{{calendly_cancel_url}}",
 ] as const
 
 function getDateValues(now: Date) {
@@ -31,8 +50,13 @@ function getDateValues(now: Date) {
   }
 }
 
-export function applyMergeFields(template: string, client: ClientMergeData): string {
-  const adviserName = "Andrew Rowan"
+export function applyMergeFields(
+  template: string,
+  client: ClientMergeData,
+  overrides: MergeFieldOverrides = {},
+): string {
+  const adviserName = overrides.adviserName ?? "Andrew Rowan"
+  const clientFirstName = overrides.clientFirstName ?? client.firstName
   const adviserEmail = process.env.ADVISER_EMAIL ?? ""
   const dateValues = getDateValues(new Date())
 
@@ -46,6 +70,14 @@ export function applyMergeFields(template: string, client: ClientMergeData): str
     "adviser.email": adviserEmail,
     "date.today": dateValues.today,
     "date.year": dateValues.year,
+    client_first_name: clientFirstName,
+    adviser_name: adviserName,
+    meeting_date: overrides.meetingDate ?? "",
+    meeting_datetime: overrides.meetingDatetime ?? "",
+    meeting_duration: overrides.meetingDuration ?? "",
+    meeting_location: overrides.meetingLocation ?? "",
+    calendly_reschedule_url: overrides.calendlyRescheduleUrl ?? "",
+    calendly_cancel_url: overrides.calendlyCancelUrl ?? "",
   }
 
   return template.replace(/{{\s*([^}]+?)\s*}}/g, (match, rawToken: string) => {
@@ -54,4 +86,3 @@ export function applyMergeFields(template: string, client: ClientMergeData): str
     return replacement === undefined ? match : replacement
   })
 }
-

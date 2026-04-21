@@ -1,6 +1,8 @@
 import "server-only"
 
 import { db } from "@/lib/db"
+import { sendMailAsAdviser } from "@/lib/graphMail"
+import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
 import {
   extractInviteePhone,
   type CalendlyInviteeCanceledWebhookPayload,
@@ -28,6 +30,13 @@ type ResolvedClient = {
   household_id: string | null
 } | null
 
+type PostBookingSideEffectContext = {
+  id: string
+  inviteeName: string | null
+  meetingDuration: string
+  meetingLocation: string
+}
+
 const SYNTHETIC_GENERAL_MEETING: MeetingTypeMapRow = {
   meeting_type_key: "GENERAL_MEETING",
   display_name: "General Meeting",
@@ -36,6 +45,16 @@ const SYNTHETIC_GENERAL_MEETING: MeetingTypeMapRow = {
   unresolved_log_level: "info",
   active: true,
 }
+
+const CALENDLY_TEMPLATE_ID_BY_MEETING_TYPE: Record<string, string> = {
+  INITIAL_MEETING: "calendly_initial_meeting",
+  FIFTEEN_MIN_CALL: "calendly_fifteen_min_call",
+  GENERAL_MEETING: "calendly_general_meeting",
+  ANNUAL_REVIEW: "calendly_annual_review",
+  NINETY_DAY_RECAP: "calendly_ninety_day_recap",
+}
+
+const MELBOURNE_TIMEZONE = "Australia/Melbourne"
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -111,6 +130,7 @@ function extractScheduledEvent(payload: CalendlyInviteeCreatedWebhookPayload["pa
   const eventTypeUri = normalizeString(scheduledEvent?.event_type ?? payload.event_type)
   const startTime = normalizeString(scheduledEvent?.start_time ?? payload.start_time)
   const endTime = normalizeString(scheduledEvent?.end_time ?? payload.end_time)
+  const location = scheduledEvent?.location ?? payload.location ?? null
   const eventMemberships = Array.isArray(scheduledEvent?.event_memberships)
     ? scheduledEvent?.event_memberships
     : Array.isArray(payload.event_memberships)
@@ -122,6 +142,7 @@ function extractScheduledEvent(payload: CalendlyInviteeCreatedWebhookPayload["pa
     eventTypeUri,
     startTime,
     endTime,
+    location,
     eventMemberships,
   }
 }
@@ -216,6 +237,86 @@ async function findClientByEmail(inviteeEmail: string): Promise<ResolvedClient> 
     display_name: matchedParty.display_name,
     household_id: matchedParty.household_member[0]?.household_id ?? null,
   }
+}
+
+function formatDateInMelbourne(value: Date) {
+  return new Intl.DateTimeFormat("en-AU", {
+    timeZone: MELBOURNE_TIMEZONE,
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(value)
+}
+
+function formatDateTimeInMelbourne(value: Date) {
+  const weekday = new Intl.DateTimeFormat("en-AU", {
+    timeZone: MELBOURNE_TIMEZONE,
+    weekday: "long",
+  }).format(value)
+  const datePart = formatDateInMelbourne(value)
+  const timePart = new Intl.DateTimeFormat("en-AU", {
+    timeZone: MELBOURNE_TIMEZONE,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(value)
+    .replace(/\s/g, "")
+    .toLowerCase()
+
+  return `${weekday} ${datePart}, ${timePart}`
+}
+
+function extractFirstNameFromDisplayName(displayName: string | null | undefined) {
+  const normalized = normalizeString(displayName)
+  if (!normalized) {
+    return ""
+  }
+
+  const firstWord = normalized.split(/\s+/).find(Boolean)
+  return firstWord ?? ""
+}
+
+function formatMeetingDuration(startTime: string | null, endTime: string | null) {
+  const startDate = parseDate(startTime)
+  const endDate = parseDate(endTime)
+  if (!startDate || !endDate) {
+    return ""
+  }
+
+  const totalMinutes = Math.round((endDate.getTime() - startDate.getTime()) / 60000)
+  if (totalMinutes <= 0) {
+    return ""
+  }
+
+  return `${totalMinutes} minute${totalMinutes === 1 ? "" : "s"}`
+}
+
+function parseLocationValue(value: unknown) {
+  if (typeof value === "string") {
+    return normalizeString(value)
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  const locationObject = value as Record<string, unknown>
+  return normalizeString(locationObject.location) ?? normalizeString(locationObject.join_url)
+}
+
+function toHtmlBodyFromPlainText(value: string) {
+  const escaped = value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+
+  return escaped
+    .split(/\r?\n/)
+    .map((line) => (line ? line : "&nbsp;"))
+    .join("<br />")
 }
 
 async function findClientByDisplayName(inviteeName: string): Promise<ResolvedClient> {
@@ -441,7 +542,153 @@ export async function resolveOrCreateClient(
  * - Task 42c: SMS reminders
  * - Task 43: workflow/task auto-creation
  */
-export async function triggerPostBookingSideEffects(_engagement: { id: string }): Promise<void> {}
+export async function triggerPostBookingSideEffects(context: PostBookingSideEffectContext): Promise<void> {
+  try {
+    const engagement = await db.engagement.findUnique({
+      where: {
+        id: context.id,
+      },
+      select: {
+        id: true,
+        party_id: true,
+        meeting_type_key: true,
+        opened_at: true,
+        calendly_reschedule_url: true,
+        calendly_cancel_url: true,
+        invitee_email: true,
+        party: {
+          select: {
+            id: true,
+            display_name: true,
+            person: {
+              select: {
+                legal_given_name: true,
+                legal_family_name: true,
+                email_primary: true,
+                mobile_phone: true,
+              },
+            },
+          },
+        },
+        user_account: {
+          select: {
+            name: true,
+            email: true,
+          },
+        },
+      },
+    })
+
+    if (!engagement) {
+      console.info(`[calendly webhook] invitee.created confirmation-email-skip engagement-not-found ${context.id}`)
+      return
+    }
+
+    const meetingTypeKey = normalizeString(engagement.meeting_type_key)?.toUpperCase() ?? null
+    if (!meetingTypeKey) {
+      console.info(`[calendly webhook] invitee.created confirmation-email-skip missing-meeting-type ${engagement.id}`)
+      return
+    }
+
+    const templateId = CALENDLY_TEMPLATE_ID_BY_MEETING_TYPE[meetingTypeKey]
+    if (!templateId) {
+      console.info(`[calendly webhook] invitee.created confirmation-email-skip unmapped-meeting-type ${meetingTypeKey}`)
+      return
+    }
+
+    const template = await db.emailTemplate.findFirst({
+      where: {
+        id: templateId,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        subject: true,
+        body: true,
+      },
+    })
+
+    if (!template) {
+      console.info(`[calendly webhook] invitee.created confirmation-email-skip template-not-found ${templateId}`)
+      return
+    }
+
+    const recipientEmail = engagement.party_id
+      ? normalizeString(engagement.party?.person?.email_primary)
+      : normalizeString(engagement.invitee_email)
+
+    if (!recipientEmail) {
+      console.warn(`[calendly webhook] invitee.created confirmation-email-skip recipient-missing ${engagement.id}`)
+      return
+    }
+
+    const displayName =
+      normalizeString(engagement.party?.display_name) ??
+      normalizeString(context.inviteeName) ??
+      recipientEmail
+    const firstName =
+      normalizeString(engagement.party?.person?.legal_given_name) ||
+      extractFirstNameFromDisplayName(engagement.party?.display_name) ||
+      extractFirstNameFromDisplayName(context.inviteeName) ||
+      "there"
+    const lastName = normalizeString(engagement.party?.person?.legal_family_name) ?? ""
+    const adviserName = normalizeString(engagement.user_account?.name) ?? "Andrew Rowan"
+
+    const mergeData: ClientMergeData = {
+      firstName,
+      lastName,
+      fullName: displayName,
+      email: recipientEmail,
+      phone: normalizeString(engagement.party?.person?.mobile_phone) ?? "",
+    }
+
+    const mergeOverrides = {
+      clientFirstName: firstName,
+      adviserName,
+      meetingDate: formatDateInMelbourne(engagement.opened_at),
+      meetingDatetime: formatDateTimeInMelbourne(engagement.opened_at),
+      meetingDuration: context.meetingDuration,
+      meetingLocation: context.meetingLocation,
+      calendlyRescheduleUrl: normalizeString(engagement.calendly_reschedule_url) ?? "",
+      calendlyCancelUrl: normalizeString(engagement.calendly_cancel_url) ?? "",
+    }
+
+    const subject = applyMergeFields(template.subject, mergeData, mergeOverrides)
+    const renderedBodyText = applyMergeFields(template.body, mergeData, mergeOverrides)
+    const renderedBodyHtml = toHtmlBodyFromPlainText(renderedBodyText)
+
+    const { messageId } = await sendMailAsAdviser({
+      toEmail: recipientEmail,
+      toName: displayName,
+      subject,
+      htmlBody: renderedBodyHtml,
+    })
+
+    if (engagement.party_id) {
+      await db.emailLog.create({
+        data: {
+          clientId: engagement.party_id,
+          templateId: template.id,
+          subject,
+          body: renderedBodyHtml,
+          sentBy: normalizeString(engagement.user_account?.email) ?? "system@concilio.local",
+          status: "sent",
+          graphMessageId: messageId || null,
+        },
+      })
+    } else {
+      console.info(
+        `[calendly webhook] invitee.created confirmation-email-sent no-client-timeline ${engagement.id}`,
+      )
+    }
+
+    console.info(`[calendly webhook] invitee.created confirmation-email-sent ${engagement.id}`)
+  } catch (error) {
+    console.error(
+      `[calendly webhook] invitee.created confirmation-email-failed ${context.id} ${toErrorMessage(error)}`,
+    )
+  }
+}
 
 export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhookPayload) {
   const scheduled = extractScheduledEvent(payload.payload)
@@ -458,6 +705,8 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
   const phone = extractInviteePhone(payload.payload)
   const client = await resolveOrCreateClient(inviteeEmail, inviteeName, phone, meetingTypeRow)
   const startAt = parseDate(scheduled.startTime)
+  const meetingDuration = formatMeetingDuration(scheduled.startTime, scheduled.endTime)
+  const meetingLocation = parseLocationValue(scheduled.location) ?? "To be confirmed"
   const incomingCreatedAt = getInviteeCreatedTimestamp(payload)
   const rescheduledFrom =
     tailFromUri(normalizeString(payload.payload.old_invitee)) ??
@@ -470,6 +719,8 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
     `Phone: ${phone ?? "not provided"}`,
     `Start: ${scheduled.startTime ?? "unknown"}`,
     `End: ${scheduled.endTime ?? "unknown"}`,
+    `Duration: ${meetingDuration || "unknown"}`,
+    `Location: ${meetingLocation}`,
     `Event type URI: ${scheduled.eventTypeUri ?? "unknown"}`,
     buildQuestionAndAnswerLines(payload.payload.questions_and_answers),
   ].join("\n")
@@ -498,6 +749,7 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
     meeting_type_key: meetingTypeRow.meeting_type_key,
     calendly_event_uuid: eventUuid,
     calendly_invitee_uuid: inviteeUuid,
+    invitee_email: inviteeEmail,
     calendly_event_type_uri: scheduled.eventTypeUri,
     calendly_cancel_url: normalizeString(payload.payload.cancel_url),
     calendly_reschedule_url: normalizeString(payload.payload.reschedule_url),
@@ -530,8 +782,11 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
         },
       })
 
-  void triggerPostBookingSideEffects(engagement).catch((error) => {
-    console.error(`[calendly webhook] invitee.created side-effects-failed ${eventUuid} ${toErrorMessage(error)}`)
+  void triggerPostBookingSideEffects({
+    id: engagement.id,
+    inviteeName,
+    meetingDuration,
+    meetingLocation,
   })
 
   console.info(

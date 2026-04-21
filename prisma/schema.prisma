@@ -259,6 +259,7 @@ model engagement {
   source                    EngagementSource     @default(MANUAL)
   calendly_event_uuid       String?              @unique
   calendly_invitee_uuid     String?
+  invitee_email             String?
   calendly_event_type_uri   String?
   calendly_cancel_url       String?
   calendly_reschedule_url   String?
