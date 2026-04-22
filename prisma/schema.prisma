@@ -89,6 +89,7 @@ model client_classification {
   party_id            String           @unique(map: "idx_class_party", where: raw("(household_id IS NULL)")) @db.Uuid
   household_id        String?          @db.Uuid
   service_tier        String?
+  service_segment     String?
   review_month        Int?
   assigned_adviser_id String?          @db.Uuid
   referral_source     String?
@@ -891,7 +892,7 @@ model workflow_template {
   key                      String                   @unique
   name                     String
   trigger_meeting_type_key String?
-  phase_order              Int
+  phase_order              Int?
   version                  Int                      @default(1)
   description              String?
   stages                   Json
