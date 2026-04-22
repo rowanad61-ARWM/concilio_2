@@ -98,6 +98,24 @@ function formatClassification(value: string) {
     .join(" ");
 }
 
+export function getLifecycleStageClasses(value: string) {
+  switch (value) {
+    case "prospect":
+    case "engagement":
+    case "advice":
+    case "implementation":
+      return "bg-[#F1EDF8] text-[#7B4FA8]";
+    case "client":
+      return "bg-[#E8F5E9] text-[#2E7D32]";
+    case "lost":
+      return "bg-[#FFF7ED] text-[#C45F1A]";
+    case "ceased":
+      return "bg-[#E5E7EB] text-[#374151]";
+    default:
+      return "bg-[#F3F4F6] text-[#6B7280]";
+  }
+}
+
 function getClassificationClasses(value: string) {
   switch (value) {
     case "wealth_plus":
@@ -112,13 +130,10 @@ function getClassificationClasses(value: string) {
     case "engagement":
     case "advice":
     case "implementation":
-      return "bg-[#F1EDF8] text-[#7B4FA8]";
     case "client":
-      return "bg-[#E8F5E9] text-[#2E7D32]";
     case "lost":
-      return "bg-[#FFF7ED] text-[#C45F1A]";
     case "ceased":
-      return "bg-[#E5E7EB] text-[#374151]";
+      return getLifecycleStageClasses(value);
     default:
       return "bg-[#F3F4F6] text-[#6B7280]";
   }

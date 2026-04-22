@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
 
+import ClientJourney from "@/components/clients/ClientJourney"
 import ClientEmailTemplateModal from "@/components/clients/ClientEmailTemplateModal"
 import DocumentsTab from "@/components/clients/DocumentsTab"
 import TaskModal, {
@@ -1114,6 +1115,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     (isLoadingEmailLogs && (activeFilter === "all" || activeFilter === "emails")) ||
     (isLoadingTasks && (activeFilter === "all" || activeFilter === "tasks"))
   const otherHouseholdMembers = clientData.household?.members.filter((member) => member.id !== clientData.id) ?? []
+  const journeyClientScope = clientData.household?.id ? "household" : "party"
+  const journeyClientId = journeyClientScope === "household" ? clientData.household!.id : clientData.id
   const lifecycleStage = clientData.classification?.lifecycleStage ?? null
   const serviceTier = clientData.classification?.serviceTier ?? null
   const residentialAddress = clientData.person?.addressResidential ?? null
@@ -3759,6 +3762,15 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
         </aside>
 
         <section className="flex flex-1 flex-col overflow-y-auto bg-[#F7F9FB] px-[18px] py-[14px]">
+          <ClientJourney
+            clientId={journeyClientId}
+            clientScope={journeyClientScope}
+            clientDisplayName={clientData.displayName}
+            onMutation={() => {
+              window.location.reload()
+            }}
+          />
+
           <div className="mb-3 flex items-center gap-2">
             <button
               type="button"
