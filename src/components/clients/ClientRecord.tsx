@@ -27,8 +27,8 @@ type TimelineFilter = "all" | "emails" | "tasks" | "notes" | "docs"
 type ClientDetailTab = "timeline" | "documents"
 type NoteCategory = "general" | "meeting" | "phone_call" | "email" | "compliance" | "other"
 type EngagementType = (typeof ENGAGEMENT_TYPE_VALUES)[number]
-type LifecycleStage = "prospect" | "engagement" | "advising" | "implementation" | "lapsed"
-type ServiceTier = "transaction" | "cashflow_manager" | "wealth_manager" | "wealth_manager_plus"
+type LifecycleStage = "prospect" | "engagement" | "advice" | "implementation" | "client" | "lost" | "ceased"
+type ServiceTier = "transaction" | "cashflow" | "wealth" | "wealth_plus"
 type VerificationResult = "pass" | "pending" | "fail"
 type VerificationDocumentType = "passport" | "drivers_licence" | "medicare_card" | "birth_certificate" | "other"
 type VerificationCheck = ClientDetail["verificationChecks"][number]
@@ -295,16 +295,18 @@ const incomeFrequencyOptions: { label: string; value: IncomeFrequency }[] = [
 const lifecycleStageOptions: { label: string; value: LifecycleStage }[] = [
   { label: "Prospect", value: "prospect" },
   { label: "Engagement", value: "engagement" },
-  { label: "Advising", value: "advising" },
+  { label: "Advice", value: "advice" },
   { label: "Implementation", value: "implementation" },
-  { label: "Lapsed", value: "lapsed" },
+  { label: "Client", value: "client" },
+  { label: "Lost", value: "lost" },
+  { label: "Ceased", value: "ceased" },
 ]
 const serviceTierOptions: { label: string; value: ServiceTier | null }[] = [
   { label: "None", value: null },
   { label: "Transaction", value: "transaction" },
-  { label: "Cashflow Manager", value: "cashflow_manager" },
-  { label: "Wealth Manager", value: "wealth_manager" },
-  { label: "Wealth Manager+", value: "wealth_manager_plus" },
+  { label: "Cashflow Manager", value: "cashflow" },
+  { label: "Wealth Manager", value: "wealth" },
+  { label: "Wealth Manager+", value: "wealth_plus" },
 ]
 const verificationDocumentTypeOptions: { label: string; value: VerificationDocumentType }[] = [
   { label: "Passport", value: "passport" },
@@ -876,7 +878,7 @@ function formatAddressSummary(address: {
 }
 
 function formatClassificationValue(value: string) {
-  if (value === "wealth_manager_plus") {
+  if (value === "wealth_plus") {
     return "Wealth Manager+"
   }
 
@@ -892,11 +894,11 @@ function formatHouseholdRole(value: string) {
 
 function getClassificationClasses(value: string) {
   switch (value) {
-    case "wealth_manager_plus":
+    case "wealth_plus":
       return "bg-[#FEF0E7] text-[#C45F1A]"
-    case "wealth_manager":
+    case "wealth":
       return "bg-[#EAF0F1] text-[#113238]"
-    case "cashflow_manager":
+    case "cashflow":
       return "bg-[#E6F0EC] text-[#0F5C3A]"
     case "transaction":
       return "bg-[#E6F1FB] text-[#185FA5]"
@@ -2128,7 +2130,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       setClientData((current) => ({
         ...current,
         classification: {
-          serviceTier: updated.service_tier ?? current.classification?.serviceTier ?? null,
+          serviceTier:
+            updated.service_segment ?? updated.service_tier ?? current.classification?.serviceTier ?? null,
           lifecycleStage: updated.lifecycle_stage ?? null,
         },
       }))
@@ -2161,7 +2164,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       setClientData((current) => ({
         ...current,
         classification: {
-          serviceTier: updated.service_tier ?? null,
+          serviceTier: updated.service_segment ?? updated.service_tier ?? null,
           lifecycleStage: updated.lifecycle_stage ?? current.classification?.lifecycleStage ?? null,
         },
       }))

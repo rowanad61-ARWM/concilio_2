@@ -6,7 +6,7 @@ import { useState } from "react";
 
 import type { HouseholdListItem } from "@/types/clients";
 
-type FilterValue = "all" | "active" | "inactive" | "lapsed";
+type FilterValue = "all" | "active" | "inactive" | "lost" | "ceased";
 
 type ClientListProps = {
   householdItems: HouseholdListItem[];
@@ -21,7 +21,8 @@ const filters: { label: string; value: FilterValue }[] = [
   { label: "All", value: "all" },
   { label: "Active", value: "active" },
   { label: "Inactive", value: "inactive" },
-  { label: "Lapsed", value: "lapsed" },
+  { label: "Lost", value: "lost" },
+  { label: "Ceased", value: "ceased" },
 ];
 
 function getInitials(name: string) {
@@ -87,7 +88,7 @@ function formatClassification(value: string) {
     return "person";
   }
 
-  if (value === "wealth_manager_plus") {
+  if (value === "wealth_plus") {
     return "Wealth Manager+";
   }
 
@@ -99,19 +100,25 @@ function formatClassification(value: string) {
 
 function getClassificationClasses(value: string) {
   switch (value) {
-    case "wealth_manager_plus":
+    case "wealth_plus":
       return "bg-[#FEF0E7] text-[#C45F1A]";
-    case "wealth_manager":
+    case "wealth":
       return "bg-[#EAF0F1] text-[#113238]";
-    case "cashflow_manager":
+    case "cashflow":
       return "bg-[#E6F0EC] text-[#0F5C3A]";
     case "transaction":
       return "bg-[#E6F1FB] text-[#185FA5]";
     case "prospect":
     case "engagement":
-    case "advising":
+    case "advice":
     case "implementation":
       return "bg-[#F1EDF8] text-[#7B4FA8]";
+    case "client":
+      return "bg-[#E8F5E9] text-[#2E7D32]";
+    case "lost":
+      return "bg-[#FFF7ED] text-[#C45F1A]";
+    case "ceased":
+      return "bg-[#E5E7EB] text-[#374151]";
     default:
       return "bg-[#F3F4F6] text-[#6B7280]";
   }
@@ -127,12 +134,13 @@ export default function ClientList({
 }: ClientListProps) {
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState<FilterValue>("all");
+  const lifecycleFilterValues = new Set<FilterValue>(["lost", "ceased"]);
 
   const filteredItems =
     activeFilter === "all"
       ? householdItems
-      : activeFilter === "lapsed"
-        ? householdItems.filter((item) => item.classification?.lifecycleStage?.toLowerCase() === "lapsed")
+      : lifecycleFilterValues.has(activeFilter)
+        ? householdItems.filter((item) => item.classification?.lifecycleStage?.toLowerCase() === activeFilter)
         : householdItems.filter((item) => item.status.toLowerCase() === activeFilter);
 
   return (

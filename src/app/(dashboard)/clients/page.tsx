@@ -118,7 +118,7 @@ export default async function ClientsPage({
     const displayName = getDisplayName(party)
     const classification = party.client_classification
       ? {
-          serviceTier: party.client_classification.service_tier,
+          serviceTier: party.client_classification.service_segment ?? party.client_classification.service_tier,
           lifecycleStage: party.client_classification.lifecycle_stage,
         }
       : null
@@ -197,7 +197,7 @@ export default async function ClientsPage({
     a.displayName.localeCompare(b.displayName),
   )
 
-  const prospectStages = new Set(["prospect", "engagement", "advising", "implementation"])
+  const prospectStages = new Set(["prospect", "engagement", "advice", "implementation"])
   const householdAwareTotal = householdItems.length
   const householdAwareActive = householdItems.filter((item: any) => item.status === "active").length
   const prospectCount = householdItems.filter((item: any) =>

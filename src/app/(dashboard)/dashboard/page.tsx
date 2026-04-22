@@ -40,7 +40,7 @@ export default async function DashboardPage() {
     return (
       stage === "prospect" ||
       stage === "engagement" ||
-      stage === "advising" ||
+      stage === "advice" ||
       stage === "implementation"
     )
   }).length

@@ -13,7 +13,7 @@ export async function PATCH(
 
     const updateData: {
       lifecycle_stage?: string | null
-      service_tier?: string | null
+      service_segment?: string | null
     } = {}
 
     if (lifecycleStage !== undefined) {
@@ -21,7 +21,7 @@ export async function PATCH(
     }
 
     if (serviceTier !== undefined) {
-      updateData.service_tier = serviceTier
+      updateData.service_segment = serviceTier
     }
 
     const existing = await db.client_classification.findUnique({
@@ -130,14 +130,14 @@ export async function PATCH(
               await db.client_classification.update({
                 where: { party_id: partyId },
                 data: {
-                  service_tier: classification.service_tier,
+                  service_segment: classification.service_segment,
                 },
               })
             } else {
               await db.client_classification.create({
                 data: {
                   party_id: partyId,
-                  service_tier: classification.service_tier,
+                  service_segment: classification.service_segment,
                 },
               })
             }

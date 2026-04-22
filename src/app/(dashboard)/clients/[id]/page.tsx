@@ -192,7 +192,7 @@ export default async function ClientRecordPage({
       : null,
     classification: party.client_classification
       ? {
-          serviceTier: party.client_classification.service_tier,
+          serviceTier: party.client_classification.service_segment ?? party.client_classification.service_tier,
           lifecycleStage: party.client_classification.lifecycle_stage,
         }
       : null,
