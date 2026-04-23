@@ -4,7 +4,11 @@ import { db } from "@/lib/db"
 import { sendMailAsAdviser } from "@/lib/graphMail"
 import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
 import { resolveEmailForParty } from "@/lib/party-contact"
-import { rescheduleWorkflowForEngagement, spawnWorkflowForEngagement } from "@/lib/workflow"
+import {
+  advanceEngagementToNextPhase,
+  rescheduleWorkflowForEngagement,
+  spawnWorkflowForEngagement,
+} from "@/lib/workflow"
 import {
   extractInviteePhone,
   formatCalendlyMeetingDate,
@@ -57,6 +61,10 @@ const CALENDLY_TEMPLATE_ID_BY_MEETING_TYPE: Record<string, string> = {
   ANNUAL_REVIEW: "calendly_annual_review",
   NINETY_DAY_RECAP: "calendly_ninety_day_recap",
 }
+
+const INITIAL_MEETING_KEY = "INITIAL_MEETING"
+const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
+const LATER_PHASE_TEMPLATE_KEYS = new Set(["engagement", "advice", "implementation"])
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -510,6 +518,203 @@ export async function resolveOrCreateClient(
   return null
 }
 
+async function ensureProspectLifecycleStage(partyId: string | null) {
+  if (!partyId) {
+    return
+  }
+
+  const now = new Date()
+  const existing = await db.client_classification.findUnique({
+    where: {
+      party_id: partyId,
+    },
+    select: {
+      id: true,
+      household_id: true,
+      lifecycle_stage: true,
+    },
+  })
+
+  if (existing) {
+    if (existing.lifecycle_stage !== "prospect") {
+      await db.client_classification.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          lifecycle_stage: "prospect",
+          updated_at: now,
+        },
+      })
+    }
+    return
+  }
+
+  await db.client_classification.create({
+    data: {
+      party_id: partyId,
+      household_id: null,
+      lifecycle_stage: "prospect",
+      created_at: now,
+      updated_at: now,
+    },
+  })
+}
+
+async function resolveTimelineAuthorUserId(primaryAdviserId: string | null) {
+  if (primaryAdviserId) {
+    const adviser = await db.user_account.findUnique({
+      where: {
+        id: primaryAdviserId,
+      },
+      select: {
+        id: true,
+      },
+    })
+
+    if (adviser) {
+      return adviser.id
+    }
+  }
+
+  const fallback = await db.user_account.findFirst({
+    orderBy: {
+      created_at: "asc",
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  return fallback?.id ?? null
+}
+
+async function createEngagementTimelineNote(params: {
+  engagementId: string
+  partyId: string | null
+  householdId: string | null
+  primaryAdviserId: string | null
+  note: string
+}) {
+  const authorId = await resolveTimelineAuthorUserId(params.primaryAdviserId)
+  if (!authorId) {
+    console.warn(`[calendly webhook] timeline-note-skipped missing-author ${params.engagementId}`)
+    return
+  }
+
+  const existing = await db.file_note.findFirst({
+    where: {
+      engagement_id: params.engagementId,
+      text: params.note,
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  if (existing) {
+    return
+  }
+
+  await db.file_note.create({
+    data: {
+      party_id: params.partyId,
+      household_id: params.householdId,
+      engagement_id: params.engagementId,
+      note_type: "general",
+      text: params.note,
+      author_user_id: authorId,
+      created_at: new Date(),
+      updated_at: new Date(),
+    },
+  })
+}
+
+async function handleInitialMeetingWorkflowForCreatedEngagement(params: {
+  engagementId: string
+  partyId: string | null
+  householdId: string | null
+  primaryAdviserId: string | null
+}) {
+  if (!params.partyId) {
+    await spawnWorkflowForEngagement(params.engagementId).catch((error) => {
+      console.error(`[calendly] workflow spawn failed ${params.engagementId} ${toErrorMessage(error)}`)
+    })
+    return
+  }
+
+  const activeChainInstances = await db.workflow_instance.findMany({
+    where: {
+      party_id: params.partyId,
+      status: "active",
+      workflow_template: {
+        phase_order: {
+          not: null,
+        },
+      },
+    },
+    select: {
+      id: true,
+      engagement_id: true,
+      workflow_template: {
+        select: {
+          key: true,
+          name: true,
+        },
+      },
+    },
+    orderBy: {
+      created_at: "desc",
+    },
+  })
+
+  const laterPhaseInstance = activeChainInstances.find((instance) =>
+    LATER_PHASE_TEMPLATE_KEYS.has(instance.workflow_template.key),
+  )
+
+  if (laterPhaseInstance) {
+    console.warn(
+      `[calendly webhook] invitee.created initial-meeting-unexpected-active-phase ${params.partyId} ${laterPhaseInstance.workflow_template.key}`,
+    )
+
+    await createEngagementTimelineNote({
+      engagementId: params.engagementId,
+      partyId: params.partyId,
+      householdId: params.householdId,
+      primaryAdviserId: params.primaryAdviserId,
+      note: `Initial Meeting booked while ${laterPhaseInstance.workflow_template.name} is already active. No workflow state change was applied.`,
+    })
+    return
+  }
+
+  const initialContactInstance = activeChainInstances.find(
+    (instance) => instance.workflow_template.key === INITIAL_CONTACT_TEMPLATE_KEY,
+  )
+  if (initialContactInstance) {
+    await advanceEngagementToNextPhase(initialContactInstance.engagement_id).catch((error) => {
+      console.error(
+        `[calendly] workflow advance failed ${initialContactInstance.engagement_id} ${toErrorMessage(error)}`,
+      )
+    })
+    return
+  }
+
+  const otherActiveChainInstance = activeChainInstances.find(
+    (instance) => instance.workflow_template.key !== INITIAL_CONTACT_TEMPLATE_KEY,
+  )
+  if (otherActiveChainInstance) {
+    console.warn(
+      `[calendly webhook] invitee.created initial-meeting-active-phase-noop ${params.partyId} ${otherActiveChainInstance.workflow_template.key}`,
+    )
+    return
+  }
+
+  await ensureProspectLifecycleStage(params.partyId)
+  await spawnWorkflowForEngagement(params.engagementId).catch((error) => {
+    console.error(`[calendly] workflow spawn failed ${params.engagementId} ${toErrorMessage(error)}`)
+  })
+}
+
 /**
  * Extension point reserved for:
  * - Task 42b: per-meeting-type confirmation emails
@@ -756,6 +961,9 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
         data: engagementData,
         select: {
           id: true,
+          party_id: true,
+          household_id: true,
+          primary_adviser_id: true,
         },
       })
     : await db.engagement.create({
@@ -765,6 +973,9 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
         },
         select: {
           id: true,
+          party_id: true,
+          household_id: true,
+          primary_adviser_id: true,
         },
       })
 
@@ -805,9 +1016,18 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
   }
 
   if (!didRescheduleExistingWorkflow) {
-    await spawnWorkflowForEngagement(engagement.id).catch((error) => {
-      console.error(`[calendly] workflow spawn failed ${engagement.id} ${toErrorMessage(error)}`)
-    })
+    if (meetingTypeRow.meeting_type_key === INITIAL_MEETING_KEY) {
+      await handleInitialMeetingWorkflowForCreatedEngagement({
+        engagementId: engagement.id,
+        partyId: engagement.party_id,
+        householdId: engagement.household_id,
+        primaryAdviserId: engagement.primary_adviser_id,
+      })
+    } else {
+      await spawnWorkflowForEngagement(engagement.id).catch((error) => {
+        console.error(`[calendly] workflow spawn failed ${engagement.id} ${toErrorMessage(error)}`)
+      })
+    }
   }
 
   console.info(
@@ -830,6 +1050,10 @@ export async function handleInviteeCanceled(payload: CalendlyInviteeCanceledWebh
     select: {
       id: true,
       notes: true,
+      party_id: true,
+      household_id: true,
+      primary_adviser_id: true,
+      meeting_type_key: true,
     },
   })
 
@@ -864,6 +1088,16 @@ export async function handleInviteeCanceled(payload: CalendlyInviteeCanceledWebh
       updated_at: new Date(),
     },
   })
+
+  if (normalizeString(engagement.meeting_type_key)?.toUpperCase() === INITIAL_MEETING_KEY) {
+    await createEngagementTimelineNote({
+      engagementId: engagement.id,
+      partyId: engagement.party_id,
+      householdId: engagement.household_id,
+      primaryAdviserId: engagement.primary_adviser_id,
+      note: "Initial Meeting cancelled by client - adviser follow-up required.",
+    })
+  }
 
   console.info(`[calendly webhook] invitee.canceled updated ${eventUuid}`)
 }

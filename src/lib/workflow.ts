@@ -139,6 +139,10 @@ function toStageFromTemplateKey(templateKey: string | null) {
     return "prospect"
   }
 
+  if (templateKey === "initial_meeting") {
+    return "prospect"
+  }
+
   if (templateKey === "engagement") {
     return "engagement"
   }
