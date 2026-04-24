@@ -305,7 +305,7 @@ function buildConditionMap(
   }
 
   addCondition(map, "EmailLog", {
-    toSql: (index) => `${quoteIdentifier("clientId")} = $${index}::uuid`,
+    toSql: (index) => `${quoteIdentifier("clientId")}::uuid = $${index}::uuid`,
     value: context.partyId,
   })
 
