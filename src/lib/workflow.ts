@@ -8,6 +8,7 @@ import { syncTaskToMonday } from "@/lib/task-sync"
 const TERMINAL_TASK_STATUSES: TaskStatus[] = ["DONE", "CANCELLED"]
 const WORKFLOW_ACTIVE_STATUSES = ["active", "paused"] as const
 const WORKFLOW_COMPLETED_OR_STOPPED_STATUSES = ["completed", "cancelled"] as const
+const WORKFLOW_TERMINAL_STATUSES = ["completed", "cancelled"] as const
 const DEFAULT_TASK_CATEGORY = "General"
 const CLOSING_TEMPLATE_KEY = "closing"
 
@@ -130,6 +131,79 @@ export class WorkflowEngagementNotFoundError extends Error {
   }
 }
 
+export class SpawnedTaskNotFoundError extends Error {
+  constructor(message = "Spawned task not found.") {
+    super(message)
+    this.name = "SpawnedTaskNotFoundError"
+  }
+}
+
+export class InvalidOutcomeError extends Error {
+  constructor(message = "Invalid outcome for this task template.") {
+    super(message)
+    this.name = "InvalidOutcomeError"
+  }
+}
+
+export class OutcomeTaskNotEligibleError extends Error {
+  constructor(message = "Task is not eligible for outcome updates.") {
+    super(message)
+    this.name = "OutcomeTaskNotEligibleError"
+  }
+}
+
+export class OutcomeAlreadySetError extends Error {
+  constructor(message = "Outcome already set for this spawned task.") {
+    super(message)
+    this.name = "OutcomeAlreadySetError"
+  }
+}
+
+export type WorkflowTaskOutcomeCatalogEntry = {
+  outcomeKey: string
+  outcomeLabel: string
+  sortOrder: number
+  isTerminalLost: boolean
+  nextPhaseKey: string | null
+  spawnNextTaskTemplateId: string | null
+  setsWorkflowStatus: string | null
+  maxAttempts: number | null
+}
+
+export type TaskOutcomeCatalog = {
+  taskId: string
+  spawnedTaskId: string | null
+  templateTitle: string | null
+  outcomes: WorkflowTaskOutcomeCatalogEntry[]
+}
+
+export type OutcomeResult =
+  | {
+      effect: "stopped"
+      taskId: string
+      spawnedTaskId: string
+    }
+  | {
+      effect: "advanced"
+      taskId: string
+      spawnedTaskId: string
+      targetPhase: string
+    }
+  | {
+      effect: "continued"
+      taskId: string
+      spawnedTaskId: string
+      spawnedTaskIdCreated: string | null
+      workflowStatus: string | null
+    }
+  | {
+      effect: "needs_review"
+      taskId: string
+      spawnedTaskId: string
+      attempts: number
+      maxAttempts: number | null
+    }
+
 function toStageFromTemplateKey(templateKey: string | null) {
   if (!templateKey) {
     return "client"
@@ -226,6 +300,143 @@ async function resolveSpawnTemplate(
   })
 }
 
+type WorkflowTaskOutcomeRow = {
+  workflow_task_template_id: string
+  outcome_key: string
+  outcome_label: string
+  sort_order: number
+  is_terminal_lost: boolean
+  next_phase_key: string | null
+  spawn_next_task_template_id: string | null
+  sets_workflow_status: string | null
+  max_attempts: number | null
+}
+
+function isMissingOutcomeColumnError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false
+  }
+
+  const maybeMessage = "message" in error ? String((error as { message?: unknown }).message ?? "") : ""
+  return maybeMessage.includes("spawn_next_task_template_id")
+}
+
+async function getOutcomeCatalogForTemplateId(
+  client: DbClient,
+  workflowTaskTemplateId: string,
+): Promise<WorkflowTaskOutcomeRow[]> {
+  return client.$queryRaw<WorkflowTaskOutcomeRow[]>`
+    SELECT
+      workflow_task_template_id,
+      outcome_key,
+      outcome_label,
+      sort_order,
+      is_terminal_lost,
+      next_phase_key,
+      spawn_next_task_template_id,
+      sets_workflow_status,
+      max_attempts
+    FROM workflow_task_template_outcome
+    WHERE workflow_task_template_id = ${workflowTaskTemplateId}::uuid
+    ORDER BY sort_order ASC, outcome_key ASC
+  `
+}
+
+async function resolveRootTaskTemplates(
+  client: DbClient,
+  template: WorkflowTemplateWithTasks,
+) {
+  try {
+    const downstreamRows = await client.$queryRaw<{ id: string }[]>`
+      SELECT DISTINCT spawn_next_task_template_id::text AS id
+      FROM workflow_task_template_outcome
+      WHERE spawn_next_task_template_id IS NOT NULL
+        AND workflow_task_template_id IN (
+          SELECT id
+          FROM workflow_task_template
+          WHERE workflow_template_id = ${template.id}::uuid
+        )
+    `
+    const downstreamTemplateIds = new Set(downstreamRows.map((row) => row.id))
+    return template.task_templates.filter((taskTemplate) => !downstreamTemplateIds.has(taskTemplate.id))
+  } catch (error) {
+    if (isMissingOutcomeColumnError(error)) {
+      return template.task_templates
+    }
+
+    throw error
+  }
+}
+
+async function createSpawnedTaskFromTemplate(
+  client: DbClient,
+  params: {
+    workflowInstanceId: string
+    triggerDate: Date
+    engagement: EngagementForWorkflow
+    taskTemplate: {
+      id: string
+      title: string
+      description: string | null
+      category: string | null
+      owner_role: string
+      due_offset_days: number | null
+      due_date_absolute: Date | null
+    }
+  },
+) {
+  const { workflowInstanceId, triggerDate, engagement, taskTemplate } = params
+
+  if (!engagement.party_id) {
+    throw new Error(`workflow-instance ${workflowInstanceId} missing party_id`)
+  }
+
+  const dueDateStart = resolveTaskDueDate(
+    triggerDate,
+    taskTemplate.due_offset_days,
+    taskTemplate.due_date_absolute,
+  )
+  const ownerUserId = taskTemplate.owner_role === "adviser" ? engagement.primary_adviser_id : null
+  const taskType = taskTemplate.category?.trim() || DEFAULT_TASK_CATEGORY
+
+  const task = await client.task.create({
+    data: {
+      clientId: engagement.party_id,
+      title: taskTemplate.title,
+      description: taskTemplate.description,
+      type: taskType,
+      subtype: null,
+      status: "NOT_STARTED",
+      dueDateStart,
+      dueDateEnd: null,
+      completedAt: null,
+      isRecurring: false,
+      recurrenceCadence: null,
+      recurrenceEndDate: null,
+      recurrenceCount: null,
+      parentTaskId: null,
+      owners: ownerUserId
+        ? {
+            create: [{ userId: ownerUserId }],
+          }
+        : undefined,
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  await client.workflow_spawned_task.create({
+    data: {
+      workflow_instance_id: workflowInstanceId,
+      workflow_task_template_id: taskTemplate.id,
+      task_id: task.id,
+    },
+  })
+
+  return task.id
+}
+
 async function spawnWorkflowWithTemplate(
   client: DbClient,
   engagement: EngagementForWorkflow,
@@ -300,47 +511,19 @@ async function spawnWorkflowWithTemplate(
     },
   })
 
-  for (const taskTemplate of template.task_templates) {
-    const dueDateStart = resolveTaskDueDate(triggerDate, taskTemplate.due_offset_days, taskTemplate.due_date_absolute)
-    const ownerUserId = taskTemplate.owner_role === "adviser" ? engagement.primary_adviser_id : null
-    const taskType = taskTemplate.category?.trim() || DEFAULT_TASK_CATEGORY
+  // Only root task templates spawn at workflow start.
+  // Downstream templates are spawned by setOutcomeForSpawnedTask via spawn_next_task_template_id.
+  const rootTaskTemplates = await resolveRootTaskTemplates(client, template)
 
-    const task = await client.task.create({
-      data: {
-        clientId: engagement.party_id,
-        title: taskTemplate.title,
-        description: taskTemplate.description,
-        type: taskType,
-        subtype: null,
-        status: "NOT_STARTED",
-        dueDateStart,
-        dueDateEnd: null,
-        completedAt: null,
-        isRecurring: false,
-        recurrenceCadence: null,
-        recurrenceEndDate: null,
-        recurrenceCount: null,
-        parentTaskId: null,
-        owners: ownerUserId
-          ? {
-              create: [{ userId: ownerUserId }],
-            }
-          : undefined,
-      },
-      select: {
-        id: true,
-      },
+  for (const taskTemplate of rootTaskTemplates) {
+    const createdTaskId = await createSpawnedTaskFromTemplate(client, {
+      workflowInstanceId: createdInstance.id,
+      triggerDate,
+      engagement,
+      taskTemplate,
     })
 
-    createdTaskIds.push(task.id)
-
-    await client.workflow_spawned_task.create({
-      data: {
-        workflow_instance_id: createdInstance.id,
-        workflow_task_template_id: taskTemplate.id,
-        task_id: task.id,
-      },
-    })
+    createdTaskIds.push(createdTaskId)
   }
 
   return {
@@ -639,6 +822,376 @@ export async function spawnWorkflowForEngagement(
 
   await syncTaskIdsToMonday(result.createdTaskIds)
   return result.instance
+}
+
+export async function getTaskOutcomeCatalog(taskId: string): Promise<TaskOutcomeCatalog> {
+  const spawnedTask = await db.workflow_spawned_task.findFirst({
+    where: {
+      task_id: taskId,
+    },
+    select: {
+      id: true,
+      workflow_task_template_id: true,
+      workflow_task_template: {
+        select: {
+          title: true,
+        },
+      },
+    },
+  })
+
+  if (!spawnedTask) {
+    return {
+      taskId,
+      spawnedTaskId: null,
+      templateTitle: null,
+      outcomes: [],
+    }
+  }
+
+  const outcomes = await getOutcomeCatalogForTemplateId(db, spawnedTask.workflow_task_template_id)
+
+  return {
+    taskId,
+    spawnedTaskId: spawnedTask.id,
+    templateTitle: spawnedTask.workflow_task_template.title,
+    outcomes: outcomes.map((row) => ({
+      outcomeKey: row.outcome_key,
+      outcomeLabel: row.outcome_label,
+      sortOrder: row.sort_order,
+      isTerminalLost: row.is_terminal_lost,
+      nextPhaseKey: row.next_phase_key,
+      spawnNextTaskTemplateId: row.spawn_next_task_template_id,
+      setsWorkflowStatus: row.sets_workflow_status,
+      maxAttempts: row.max_attempts,
+    })),
+  }
+}
+
+export async function setOutcomeForSpawnedTask(
+  spawnedTaskId: string,
+  outcomeKey: string,
+  userId: string,
+): Promise<OutcomeResult> {
+  const normalizedOutcomeKey = outcomeKey.trim()
+  if (!normalizedOutcomeKey) {
+    throw new InvalidOutcomeError("Outcome key is required.")
+  }
+
+  const spawnedTask = await db.workflow_spawned_task.findUnique({
+    where: {
+      id: spawnedTaskId,
+    },
+    include: {
+      task: {
+        select: {
+          id: true,
+          status: true,
+          completedAt: true,
+        },
+      },
+      workflow_task_template: {
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          category: true,
+          owner_role: true,
+          due_offset_days: true,
+          due_date_absolute: true,
+        },
+      },
+      workflow_instance: {
+        select: {
+          id: true,
+          status: true,
+          trigger_date: true,
+          engagement_id: true,
+          party_id: true,
+          household_id: true,
+          engagement: {
+            select: {
+              id: true,
+              source: true,
+              meeting_type_key: true,
+              party_id: true,
+              household_id: true,
+              primary_adviser_id: true,
+              opened_at: true,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  if (!spawnedTask || !spawnedTask.task || !spawnedTask.workflow_instance) {
+    throw new SpawnedTaskNotFoundError()
+  }
+
+  if (spawnedTask.outcome_key) {
+    throw new OutcomeAlreadySetError()
+  }
+
+  if (TERMINAL_TASK_STATUSES.includes(spawnedTask.task.status)) {
+    throw new OutcomeTaskNotEligibleError("Task is already terminal.")
+  }
+
+  if (
+    WORKFLOW_TERMINAL_STATUSES.includes(
+      spawnedTask.workflow_instance.status as (typeof WORKFLOW_TERMINAL_STATUSES)[number],
+    )
+  ) {
+    throw new OutcomeTaskNotEligibleError("Workflow instance is terminal.")
+  }
+
+  const outcomeRows = await getOutcomeCatalogForTemplateId(db, spawnedTask.workflow_task_template_id)
+  const selectedOutcome = outcomeRows.find((row) => row.outcome_key === normalizedOutcomeKey)
+  if (!selectedOutcome) {
+    throw new InvalidOutcomeError()
+  }
+
+  const engagement = spawnedTask.workflow_instance.engagement
+  if (!engagement) {
+    throw new WorkflowEngagementNotFoundError()
+  }
+
+  const now = new Date()
+
+  if (selectedOutcome.is_terminal_lost) {
+    await db.$transaction(async (tx) => {
+      await tx.workflow_spawned_task.update({
+        where: {
+          id: spawnedTask.id,
+        },
+        data: {
+          outcome_key: normalizedOutcomeKey,
+          outcome_set_at: now,
+          outcome_set_by: userId,
+        },
+      })
+
+      await tx.task.update({
+        where: {
+          id: spawnedTask.task.id,
+        },
+        data: {
+          status: "DONE",
+          completedAt: now,
+        },
+      })
+
+      await createJourneyTimelineEvent(tx, {
+        engagementId: engagement.id,
+        partyId: engagement.party_id,
+        householdId: engagement.household_id,
+        primaryAdviserId: engagement.primary_adviser_id,
+        note: "Initial Contact closed - Not Suitable",
+        at: now,
+      })
+    })
+
+    await stopEngagementWorkflow(engagement.id)
+    await syncTaskIdsToMonday([spawnedTask.task.id])
+
+    return {
+      effect: "stopped",
+      taskId: spawnedTask.task.id,
+      spawnedTaskId: spawnedTask.id,
+    }
+  }
+
+  if (selectedOutcome.next_phase_key) {
+    await db.$transaction(async (tx) => {
+      await tx.workflow_spawned_task.update({
+        where: {
+          id: spawnedTask.id,
+        },
+        data: {
+          outcome_key: normalizedOutcomeKey,
+          outcome_set_at: now,
+          outcome_set_by: userId,
+        },
+      })
+
+      await tx.task.update({
+        where: {
+          id: spawnedTask.task.id,
+        },
+        data: {
+          status: "DONE",
+          completedAt: now,
+        },
+      })
+    })
+
+    await advanceEngagementToNextPhase(engagement.id, {
+      targetPhaseKey: selectedOutcome.next_phase_key,
+      advanceDate: now,
+    })
+
+    await syncTaskIdsToMonday([spawnedTask.task.id])
+
+    return {
+      effect: "advanced",
+      taskId: spawnedTask.task.id,
+      spawnedTaskId: spawnedTask.id,
+      targetPhase: selectedOutcome.next_phase_key,
+    }
+  }
+
+  const touchedTaskIds = new Set<string>([spawnedTask.task.id])
+
+  const result = await db.$transaction(async (tx) => {
+    await tx.workflow_spawned_task.update({
+      where: {
+        id: spawnedTask.id,
+      },
+      data: {
+        outcome_key: normalizedOutcomeKey,
+        outcome_set_at: now,
+        outcome_set_by: userId,
+      },
+    })
+
+    let spawnedTaskIdCreated: string | null = null
+    let workflowStatus: string | null = null
+
+    if (selectedOutcome.spawn_next_task_template_id) {
+      const existingAttempts = await tx.workflow_spawned_task.count({
+        where: {
+          workflow_instance_id: spawnedTask.workflow_instance_id,
+          workflow_task_template_id: selectedOutcome.spawn_next_task_template_id,
+        },
+      })
+
+      const maxAttempts = selectedOutcome.max_attempts
+      if (maxAttempts !== null && existingAttempts >= maxAttempts) {
+        await tx.task.update({
+          where: {
+            id: spawnedTask.task.id,
+          },
+          data: {
+            status: "NEEDS_REVIEW",
+            completedAt: null,
+          },
+        })
+
+        await createJourneyTimelineEvent(tx, {
+          engagementId: engagement.id,
+          partyId: engagement.party_id,
+          householdId: engagement.household_id,
+          primaryAdviserId: engagement.primary_adviser_id,
+          note: `Retries exhausted for "${spawnedTask.workflow_task_template.title}" (${existingAttempts}/${maxAttempts}). Marked as Needs Review.`,
+          at: now,
+        })
+
+        return {
+          effect: "needs_review" as const,
+          spawnedTaskIdCreated: null,
+          workflowStatus: null,
+          attempts: existingAttempts,
+          maxAttempts,
+        }
+      }
+
+      await tx.task.update({
+        where: {
+          id: spawnedTask.task.id,
+        },
+        data: {
+          status: "DONE",
+          completedAt: now,
+        },
+      })
+
+      const nextTaskTemplate = await tx.workflow_task_template.findUnique({
+        where: {
+          id: selectedOutcome.spawn_next_task_template_id,
+        },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          category: true,
+          owner_role: true,
+          due_offset_days: true,
+          due_date_absolute: true,
+        },
+      })
+
+      if (nextTaskTemplate) {
+        spawnedTaskIdCreated = await createSpawnedTaskFromTemplate(tx, {
+          workflowInstanceId: spawnedTask.workflow_instance_id,
+          triggerDate: spawnedTask.workflow_instance.trigger_date,
+          engagement,
+          taskTemplate: nextTaskTemplate,
+        })
+        touchedTaskIds.add(spawnedTaskIdCreated)
+      }
+    } else {
+      await tx.task.update({
+        where: {
+          id: spawnedTask.task.id,
+        },
+        data: {
+          status: "DONE",
+          completedAt: now,
+        },
+      })
+    }
+
+    if (selectedOutcome.sets_workflow_status) {
+      workflowStatus = selectedOutcome.sets_workflow_status
+      await tx.workflow_instance.update({
+        where: {
+          id: spawnedTask.workflow_instance_id,
+        },
+        data: {
+          status: selectedOutcome.sets_workflow_status,
+          last_event_at: now,
+          updated_at: now,
+        },
+      })
+
+      if (selectedOutcome.sets_workflow_status === "paused") {
+        await createJourneyTimelineEvent(tx, {
+          engagementId: engagement.id,
+          partyId: engagement.party_id,
+          householdId: engagement.household_id,
+          primaryAdviserId: engagement.primary_adviser_id,
+          note: "Initial Contact paused - on hold",
+          at: now,
+        })
+      }
+    }
+
+    return {
+      effect: "continued" as const,
+      spawnedTaskIdCreated,
+      workflowStatus,
+    }
+  })
+
+  await syncTaskIdsToMonday(touchedTaskIds)
+
+  if (result.effect === "needs_review") {
+    return {
+      effect: "needs_review",
+      taskId: spawnedTask.task.id,
+      spawnedTaskId: spawnedTask.id,
+      attempts: result.attempts,
+      maxAttempts: result.maxAttempts,
+    }
+  }
+
+  return {
+    effect: "continued",
+    taskId: spawnedTask.task.id,
+    spawnedTaskId: spawnedTask.id,
+    spawnedTaskIdCreated: result.spawnedTaskIdCreated,
+    workflowStatus: result.workflowStatus,
+  }
 }
 
 export async function rescheduleWorkflowForEngagement(engagementId: string, newTriggerDate: Date) {

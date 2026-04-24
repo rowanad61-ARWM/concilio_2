@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 
 import { CLIENT_DOCUMENT_FOLDERS, type ClientDocumentFolder, normalizeClientDocumentFolder } from "@/lib/documents"
+import TaskOutcomePicker from "@/components/tasks/TaskOutcomePicker"
 
 export const TASK_STATUS_OPTIONS = [
   { value: "NOT_STARTED", label: "Not Started" },
@@ -63,6 +64,9 @@ export type EditableTaskEntry = {
   recurrenceCount: number | null
   parentTaskId: string | null
   documentLinks: TaskDocumentLinkEntry[]
+  workflowSpawnedTaskId?: string | null
+  workflowTaskTemplateId?: string | null
+  workflowTaskTemplateTitle?: string | null
   ownerUserId?: string | null
 }
 
@@ -91,6 +95,8 @@ type LinkedDocumentDraft = {
   folder: ClientDocumentFolder
   createdAt: string
 }
+
+const DRIVE_INITIAL_MEETING_TASK_TITLE = "Drive Initial Meeting booking"
 
 function toDateInputValue(value: string | null) {
   if (!value) {
@@ -178,6 +184,8 @@ export default function TaskModal({
   const [linkedDocuments, setLinkedDocuments] = useState<LinkedDocumentDraft[]>([])
   const [isLoadingFolderFiles, setIsLoadingFolderFiles] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isDriveActionPending, setIsDriveActionPending] = useState(false)
+  const [driveActionMessage, setDriveActionMessage] = useState<string | null>(null)
 
   const availableTypes = useMemo(
     () => taskTypeOptions.map((option) => option.type),
@@ -459,6 +467,38 @@ export default function TaskModal({
       onError(message)
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  async function handleDriveAction(action: "send_link" | "self_book") {
+    if (!task?.id) {
+      return
+    }
+
+    setIsDriveActionPending(true)
+    setDriveActionMessage(null)
+
+    try {
+      const response = await fetch(`/api/tasks/${task.id}/drive-actions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action }),
+      })
+
+      const payload = (await response.json()) as { error?: string; message?: string }
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to run drive action")
+      }
+
+      setDriveActionMessage(payload.message ?? "Action completed.")
+      onSaved()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to run drive action"
+      onError(message)
+    } finally {
+      setIsDriveActionPending(false)
     }
   }
 
@@ -859,6 +899,48 @@ export default function TaskModal({
             )}
           </div>
         </section>
+
+        {mode === "edit" &&
+        task?.workflowSpawnedTaskId &&
+        status !== "DONE" &&
+        status !== "CANCELLED" ? (
+          <section className="mt-4 rounded-[10px] border-[0.5px] border-[#e5e7eb] p-3">
+            <TaskOutcomePicker
+              spawnedTaskId={task.workflowSpawnedTaskId}
+              taskId={task.id}
+              onComplete={() => {
+                onSaved()
+                onClose()
+              }}
+              onError={onError}
+            />
+
+            {task.workflowTaskTemplateTitle === DRIVE_INITIAL_MEETING_TASK_TITLE ? (
+              <div className="mt-3 space-y-2 border-t border-[#eef2f7] pt-3">
+                <p className="text-[11px] text-[#6b7280]">Drive Initial Meeting actions</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleDriveAction("send_link")}
+                    disabled={isDriveActionPending}
+                    className="rounded-[8px] border-[0.5px] border-[#113238] bg-[#113238] px-3 py-2 text-[12px] text-white disabled:opacity-60"
+                  >
+                    Send booking link to client
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDriveAction("self_book")}
+                    disabled={isDriveActionPending}
+                    className="rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white px-3 py-2 text-[12px] text-[#113238] disabled:opacity-60"
+                  >
+                    I&apos;ll book in Calendly myself
+                  </button>
+                </div>
+                {driveActionMessage ? <p className="text-[11px] text-[#113238]">{driveActionMessage}</p> : null}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         <div className="mt-4 flex items-center justify-end gap-2">
           <button

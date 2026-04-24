@@ -34,6 +34,18 @@ const taskInclude = {
       createdAt: "desc" as const,
     },
   },
+  workflow_spawned_task: {
+    select: {
+      id: true,
+      workflow_task_template: {
+        select: {
+          id: true,
+          title: true,
+        },
+      },
+    },
+    take: 1,
+  },
   _count: {
     select: {
       notes: true,
@@ -109,12 +121,20 @@ function serializeTask(
       folder: string
       createdAt: Date
     }[]
+    workflow_spawned_task: {
+      id: string
+      workflow_task_template: {
+        id: string
+        title: string
+      }
+    }[]
     _count: {
       notes: number
     }
   },
   ownerMap: Map<string, OwnerSummary>,
 ) {
+  const workflowSpawnedTask = task.workflow_spawned_task[0] ?? null
   const owners = task.owners
     .map((owner) => ownerMap.get(owner.userId) ?? null)
     .filter((owner): owner is OwnerSummary => Boolean(owner))
@@ -147,6 +167,9 @@ function serializeTask(
     })),
     linkedDocumentCount: task.documentLinks.length,
     noteCount: task._count.notes,
+    workflowSpawnedTaskId: workflowSpawnedTask?.id ?? null,
+    workflowTaskTemplateId: workflowSpawnedTask?.workflow_task_template.id ?? null,
+    workflowTaskTemplateTitle: workflowSpawnedTask?.workflow_task_template.title ?? null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
   }

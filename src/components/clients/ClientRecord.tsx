@@ -1203,9 +1203,8 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       setTaskNotesByTaskId({})
       setIsLoadingTaskNotesForId(null)
 
-      setTasks(
-        rawTasks
-          .map((item) => {
+      const parsedTasks = rawTasks
+        .map((item) => {
             if (!item || typeof item !== "object" || Array.isArray(item)) {
               return null
             }
@@ -1285,7 +1284,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 ? (value.recurrenceCadence as EditableTaskEntry["recurrenceCadence"])
                 : null
 
-            return {
+            const parsedTask: TaskEntry = {
               id: value.id,
               clientId: value.clientId,
               title: value.title,
@@ -1311,10 +1310,21 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                   ? value.linkedDocumentCount
                   : documentLinks.length,
               noteCount: typeof value.noteCount === "number" ? value.noteCount : 0,
-            } satisfies TaskEntry
+              workflowSpawnedTaskId:
+                typeof value.workflowSpawnedTaskId === "string" ? value.workflowSpawnedTaskId : null,
+              workflowTaskTemplateId:
+                typeof value.workflowTaskTemplateId === "string" ? value.workflowTaskTemplateId : null,
+              workflowTaskTemplateTitle:
+                typeof value.workflowTaskTemplateTitle === "string"
+                  ? value.workflowTaskTemplateTitle
+                  : null,
+            }
+
+            return parsedTask
           })
-          .filter((item): item is TaskEntry => Boolean(item)),
-      )
+          .filter((item): item is TaskEntry => item !== null)
+
+      setTasks(parsedTasks)
     } catch (error) {
       console.error(error)
       setEmailToast({ kind: "error", message: "Failed to load tasks" })
