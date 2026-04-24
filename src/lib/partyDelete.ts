@@ -488,27 +488,33 @@ export async function hardDeleteParty(partyId: string, userId: string): Promise<
 
   const deletedCounts: DeleteCountMap = {}
 
-  await db.$transaction(async (tx) => {
-    for (const tableName of deleteOrder) {
-      if (tableName === "party") {
-        continue
+  await db.$transaction(
+    async (tx) => {
+      for (const tableName of deleteOrder) {
+        if (tableName === "party") {
+          continue
+        }
+
+        const conditions = conditionMap.get(tableName) ?? []
+        deletedCounts[tableName] = await deleteScopedRows(tx, tableName, conditions)
       }
 
-      const conditions = conditionMap.get(tableName) ?? []
-      deletedCounts[tableName] = await deleteScopedRows(tx, tableName, conditions)
-    }
+      const deletedParty = await tx.$executeRawUnsafe(
+        `DELETE FROM "party" WHERE "id" = $1::uuid`,
+        context.partyId,
+      )
 
-    const deletedParty = await tx.$executeRawUnsafe(
-      `DELETE FROM "party" WHERE "id" = $1::uuid`,
-      context.partyId,
-    )
+      if (deletedParty !== 1) {
+        throw new PartyNotFoundError()
+      }
 
-    if (deletedParty !== 1) {
-      throw new PartyNotFoundError()
-    }
-
-    deletedCounts.party = deletedParty
-  })
+      deletedCounts.party = deletedParty
+    },
+    {
+      timeout: 60_000,
+      maxWait: 10_000,
+    },
+  )
 
   const counts = toSummaryCounts(deletedCounts)
   console.info(`[partyDelete] partyId=${context.partyId} userId=${userId} counts=${JSON.stringify(counts)}`)
