@@ -347,10 +347,13 @@ async function resolveRootTaskTemplates(
   template: WorkflowTemplateWithTasks,
 ) {
   try {
+    // Exclude self-loop outcomes (for retry semantics like no_answer -> same template)
+    // so retryable root tasks are not incorrectly filtered out during initial spawn.
     const downstreamRows = await client.$queryRaw<{ id: string }[]>`
       SELECT DISTINCT spawn_next_task_template_id::text AS id
       FROM workflow_task_template_outcome
       WHERE spawn_next_task_template_id IS NOT NULL
+        AND spawn_next_task_template_id <> workflow_task_template_id
         AND workflow_task_template_id IN (
           SELECT id
           FROM workflow_task_template
