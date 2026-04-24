@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
 
 import ClientJourney from "@/components/clients/ClientJourney"
+import DeleteClientButton from "@/components/clients/DeleteClientButton"
 import ClientEmailTemplateModal from "@/components/clients/ClientEmailTemplateModal"
 import DocumentsTab from "@/components/clients/DocumentsTab"
 import TaskModal, {
@@ -3007,6 +3008,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
           >
             Edit
           </button>
+          <DeleteClientButton clientId={clientData.id} clientName={clientData.displayName} />
           <button
             type="button"
             onClick={() => setIsEmailTemplateModalOpen(true)}

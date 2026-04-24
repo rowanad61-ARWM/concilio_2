@@ -1,6 +1,8 @@
-﻿import { NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
+import { auth } from "@/auth"
 import { db } from "@/lib/db"
+import { hardDeleteParty, PartyDeleteBlockedError, PartyNotFoundError } from "@/lib/partyDelete"
 
 type ColumnRow = {
   column_name: string
@@ -282,5 +284,51 @@ export async function PATCH(
   } catch (error) {
     console.error("[client update error]", error)
     return NextResponse.json({ error: "failed to update client" }, { status: 500 })
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await auth()
+  if (!session) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  }
+
+  const sessionEmail = session.user?.email?.trim().toLowerCase() ?? ""
+  if (!sessionEmail) {
+    return NextResponse.json({ error: "session email missing" }, { status: 401 })
+  }
+
+  const actor = await db.user_account.findUnique({
+    where: {
+      email: sessionEmail,
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  if (!actor) {
+    return NextResponse.json({ error: "signed-in user is not mapped to user_account" }, { status: 403 })
+  }
+
+  const { id } = await params
+
+  try {
+    const result = await hardDeleteParty(id, actor.id)
+    return NextResponse.json(result)
+  } catch (error) {
+    if (error instanceof PartyDeleteBlockedError) {
+      return NextResponse.json({ error: error.message }, { status: 403 })
+    }
+
+    if (error instanceof PartyNotFoundError) {
+      return NextResponse.json({ error: "client not found" }, { status: 404 })
+    }
+
+    console.error("[client delete error]", error)
+    return NextResponse.json({ error: "failed to delete client" }, { status: 500 })
   }
 }
