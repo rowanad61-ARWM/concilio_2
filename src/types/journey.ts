@@ -15,6 +15,8 @@ export type JourneyTaskSummary = {
   allComplete: boolean
 }
 
+export type JourneyDecisionState = "awaiting_event" | "ready_for_outcome" | "driving_booking" | "paused"
+
 export type JourneyTemplateSummary = {
   id: string
   key: string
@@ -75,4 +77,10 @@ export type EngagementJourneyResponse = {
   availableSkipTargets: JourneyPhaseTarget[]
   lifecycleStage: LifecycleStage | null
   currentPhaseTaskSummary: JourneyTaskSummary | null
+  decisionState: JourneyDecisionState
+  awaitingEventEndsAt: string | null
+  currentOutcomeKey: string | null
+  noAnswerAttempts: number
+  lastDriverActionKey: string | null
+  lastDriverActionAt: string | null
 }

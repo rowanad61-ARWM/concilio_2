@@ -3,6 +3,9 @@ import "server-only"
 import type { Prisma, TaskStatus } from "@prisma/client"
 
 import { db } from "@/lib/db"
+import { sendMailAsAdviser } from "@/lib/graphMail"
+import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
+import { resolveEmailForParty, resolveMobileForParty } from "@/lib/party-contact"
 import { syncTaskToMonday } from "@/lib/task-sync"
 
 const TERMINAL_TASK_STATUSES: TaskStatus[] = ["DONE", "CANCELLED"]
@@ -11,6 +14,16 @@ const WORKFLOW_COMPLETED_OR_STOPPED_STATUSES = ["completed", "cancelled"] as con
 const WORKFLOW_TERMINAL_STATUSES = ["completed", "cancelled"] as const
 const DEFAULT_TASK_CATEGORY = "General"
 const CLOSING_TEMPLATE_KEY = "closing"
+const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
+const NO_ANSWER_OUTCOME_KEY = "no_answer"
+const SUITABLE_OUTCOME_KEY = "suitable"
+const ON_HOLD_OUTCOME_KEY = "on_hold"
+const NO_ANSWER_EMAIL_TEMPLATE_ID = "no_answer_followup_email"
+const NO_ANSWER_SMS_TEMPLATE_ID = "no_answer_followup_sms"
+const BOOKING_LINK_TEMPLATE_ID = "calendly_initial_meeting_booking_link"
+const DEFAULT_INITIAL_MEETING_URL = "https://calendly.com/arwm/initial-meeting"
+const INITIAL_CONTACT_MEETING_DURATION_MS = 15 * 60 * 1000
+const OUTCOME_READY_BUFFER_MS = 60 * 60 * 1000
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -40,6 +53,41 @@ function isValidDate(value: Date | null | undefined): value is Date {
   }
 
   return !Number.isNaN(value.getTime())
+}
+
+function toHtmlBodyFromPlainText(value: string) {
+  const escaped = value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+
+  return escaped
+    .split(/\r?\n/)
+    .map((line) => (line ? line : "&nbsp;"))
+    .join("<br />")
+}
+
+function firstWord(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return ""
+  }
+
+  const normalized = value.trim()
+  if (!normalized) {
+    return ""
+  }
+
+  return normalized.split(/\s+/).find(Boolean) ?? ""
+}
+
+function getInitialMeetingBookingUrl() {
+  return process.env.CALENDLY_INITIAL_MEETING_URL?.trim() || DEFAULT_INITIAL_MEETING_URL
+}
+
+function isWorkflowDriverActionKey(value: string): value is WorkflowDriverActionKey {
+  return value === "send_booking_link" || value === "book_in_calendly"
 }
 
 function resolveTaskDueDate(triggerDate: Date, dueOffsetDays: number | null, dueDateAbsolute: Date | null) {
@@ -138,10 +186,31 @@ export class SpawnedTaskNotFoundError extends Error {
   }
 }
 
+export class WorkflowInstanceNotFoundError extends Error {
+  constructor(message = "Workflow instance not found.") {
+    super(message)
+    this.name = "WorkflowInstanceNotFoundError"
+  }
+}
+
 export class InvalidOutcomeError extends Error {
   constructor(message = "Invalid outcome for this task template.") {
     super(message)
     this.name = "InvalidOutcomeError"
+  }
+}
+
+export class InvalidDriverActionError extends Error {
+  constructor(message = "Invalid workflow driver action.") {
+    super(message)
+    this.name = "InvalidDriverActionError"
+  }
+}
+
+export class WorkflowCommunicationError extends Error {
+  constructor(message = "Workflow communication could not be sent.") {
+    super(message)
+    this.name = "WorkflowCommunicationError"
   }
 }
 
@@ -203,6 +272,43 @@ export type OutcomeResult =
       attempts: number
       maxAttempts: number | null
     }
+
+export type WorkflowInstanceOutcomeResult =
+  | {
+      effect: "no_answer"
+      instanceId: string
+      engagementId: string
+      attempts: number
+    }
+  | {
+      effect: "stopped"
+      instanceId: string
+      engagementId: string
+    }
+  | {
+      effect: "advanced"
+      instanceId: string
+      engagementId: string
+      targetPhase: string
+    }
+  | {
+      effect: "continued"
+      instanceId: string
+      engagementId: string
+      spawnedTaskIdCreated: string | null
+      workflowStatus: string | null
+    }
+
+export type WorkflowDriverActionKey = "send_booking_link" | "book_in_calendly"
+
+export type WorkflowDriverActionResult = {
+  instanceId: string
+  engagementId: string
+  actionKey: WorkflowDriverActionKey
+  emailSent: boolean
+}
+
+export type JourneyDecisionState = "awaiting_event" | "ready_for_outcome" | "driving_booking" | "paused"
 
 function toStageFromTemplateKey(templateKey: string | null) {
   if (!templateKey) {
@@ -339,6 +445,28 @@ async function getOutcomeCatalogForTemplateId(
     FROM workflow_task_template_outcome
     WHERE workflow_task_template_id = ${workflowTaskTemplateId}::uuid
     ORDER BY sort_order ASC, outcome_key ASC
+  `
+}
+
+async function getOutcomeCatalogForWorkflowTemplateId(
+  client: DbClient,
+  workflowTemplateId: string,
+): Promise<WorkflowTaskOutcomeRow[]> {
+  return client.$queryRaw<WorkflowTaskOutcomeRow[]>`
+    SELECT
+      wtto.workflow_task_template_id,
+      wtto.outcome_key,
+      wtto.outcome_label,
+      wtto.sort_order,
+      wtto.is_terminal_lost,
+      wtto.next_phase_key,
+      wtto.spawn_next_task_template_id,
+      wtto.sets_workflow_status,
+      wtto.max_attempts
+    FROM workflow_task_template_outcome wtto
+    JOIN workflow_task_template wtt ON wtt.id = wtto.workflow_task_template_id
+    WHERE wtt.workflow_template_id = ${workflowTemplateId}::uuid
+    ORDER BY wtt.sort_order ASC, wtto.sort_order ASC, wtto.outcome_key ASC
   `
 }
 
@@ -516,7 +644,10 @@ async function spawnWorkflowWithTemplate(
 
   // Only root task templates spawn at workflow start.
   // Downstream templates are spawned by setOutcomeForSpawnedTask via spawn_next_task_template_id.
-  const rootTaskTemplates = await resolveRootTaskTemplates(client, template)
+  const rootTaskTemplates =
+    template.key === INITIAL_CONTACT_TEMPLATE_KEY
+      ? []
+      : await resolveRootTaskTemplates(client, template)
 
   for (const taskTemplate of rootTaskTemplates) {
     const createdTaskId = await createSpawnedTaskFromTemplate(client, {
@@ -724,6 +855,153 @@ async function createJourneyTimelineEvent(
       updated_at: params.at,
     },
   })
+}
+
+async function sendWorkflowTemplateToClient(
+  client: DbClient,
+  params: {
+    templateId: string
+    engagement: {
+      party_id: string | null
+    }
+    actorUserId: string
+  },
+) {
+  if (!params.engagement.party_id) {
+    throw new WorkflowCommunicationError("Engagement has no linked party.")
+  }
+
+  const [actor, party, template] = await Promise.all([
+    client.user_account.findUnique({
+      where: {
+        id: params.actorUserId,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+    }),
+    client.party.findUnique({
+      where: {
+        id: params.engagement.party_id,
+      },
+      select: {
+        id: true,
+        display_name: true,
+        person: {
+          select: {
+            legal_given_name: true,
+            legal_family_name: true,
+            email_primary: true,
+            mobile_phone: true,
+          },
+        },
+        contact_method: {
+          where: {
+            end_date: null,
+          },
+          select: {
+            channel: true,
+            value: true,
+            preferred_flag: true,
+            do_not_use_flag: true,
+            created_at: true,
+          },
+        },
+      },
+    }),
+    client.emailTemplate.findUnique({
+      where: {
+        id: params.templateId,
+      },
+      select: {
+        id: true,
+        subject: true,
+        body: true,
+        channel: true,
+        isActive: true,
+      },
+    }),
+  ])
+
+  if (!actor) {
+    throw new WorkflowCommunicationError("Signed-in user is not mapped to user_account.")
+  }
+
+  if (!party) {
+    throw new WorkflowCommunicationError("Party not found.")
+  }
+
+  if (!template || !template.isActive) {
+    throw new WorkflowCommunicationError(`Template "${params.templateId}" is missing or inactive.`)
+  }
+
+  const recipientEmail = resolveEmailForParty(party)
+  if (!recipientEmail) {
+    throw new WorkflowCommunicationError("Party does not have an email address.")
+  }
+
+  const clientFirstName = party.person?.legal_given_name || firstWord(party.display_name) || "there"
+  const clientLastName = party.person?.legal_family_name ?? ""
+  const adviserName = actor.name || "Andrew Rowan"
+  const mergeData: ClientMergeData = {
+    firstName: clientFirstName,
+    lastName: clientLastName,
+    fullName: party.display_name,
+    email: recipientEmail,
+    phone: resolveMobileForParty(party) ?? "",
+  }
+  const mergeOverrides = {
+    clientFirstName,
+    adviserName,
+    calendlyInitialMeetingUrl: getInitialMeetingBookingUrl(),
+  }
+  const subject = applyMergeFields(template.subject, mergeData, mergeOverrides)
+  const bodyText = applyMergeFields(template.body, mergeData, mergeOverrides)
+  const bodyHtml = toHtmlBodyFromPlainText(bodyText)
+
+  try {
+    const { messageId } = await sendMailAsAdviser({
+      toEmail: recipientEmail,
+      toName: party.display_name,
+      subject,
+      htmlBody: bodyHtml,
+    })
+
+    await client.emailLog.create({
+      data: {
+        clientId: party.id,
+        templateId: template.id,
+        subject,
+        body: bodyHtml,
+        sentBy: actor.email,
+        status: "sent",
+        graphMessageId: messageId || null,
+      },
+    })
+
+    return {
+      templateId: template.id,
+      channel: template.channel,
+      messageId,
+    }
+  } catch (error) {
+    const errorMessage = toErrorMessage(error)
+    await client.emailLog.create({
+      data: {
+        clientId: party.id,
+        templateId: template.id,
+        subject,
+        body: `${bodyHtml}\n\n<!-- send-error: ${errorMessage} -->`,
+        sentBy: actor.email,
+        status: "failed",
+        graphMessageId: null,
+      },
+    })
+
+    throw new WorkflowCommunicationError(errorMessage)
+  }
 }
 
 export async function cancelIncompleteSpawnedTasks(
@@ -1197,6 +1475,350 @@ export async function setOutcomeForSpawnedTask(
   }
 }
 
+export async function setOutcomeForWorkflowInstance(
+  instanceId: string,
+  outcomeKey: string,
+  userId: string,
+): Promise<WorkflowInstanceOutcomeResult> {
+  const normalizedOutcomeKey = outcomeKey.trim()
+  if (!normalizedOutcomeKey) {
+    throw new InvalidOutcomeError("Outcome key is required.")
+  }
+
+  const instance = await db.workflow_instance.findUnique({
+    where: {
+      id: instanceId,
+    },
+    include: {
+      workflow_template: {
+        select: {
+          id: true,
+          key: true,
+          name: true,
+          phase_order: true,
+        },
+      },
+      engagement: {
+        select: {
+          id: true,
+          source: true,
+          meeting_type_key: true,
+          party_id: true,
+          household_id: true,
+          primary_adviser_id: true,
+          opened_at: true,
+        },
+      },
+    },
+  })
+
+  if (!instance) {
+    throw new WorkflowInstanceNotFoundError()
+  }
+
+  if (!instance.engagement) {
+    throw new WorkflowEngagementNotFoundError()
+  }
+
+  if (WORKFLOW_TERMINAL_STATUSES.includes(instance.status as (typeof WORKFLOW_TERMINAL_STATUSES)[number])) {
+    throw new OutcomeTaskNotEligibleError("Workflow instance is terminal.")
+  }
+
+  const outcomeRows = await getOutcomeCatalogForWorkflowTemplateId(db, instance.workflow_template_id)
+  const selectedOutcome = outcomeRows.find((row) => row.outcome_key === normalizedOutcomeKey)
+  if (!selectedOutcome) {
+    throw new InvalidOutcomeError()
+  }
+
+  const engagement = instance.engagement
+  const now = new Date()
+  const hasNoAnswerLoopEffect =
+    normalizedOutcomeKey === NO_ANSWER_OUTCOME_KEY &&
+    !selectedOutcome.is_terminal_lost &&
+    !selectedOutcome.next_phase_key &&
+    !selectedOutcome.sets_workflow_status &&
+    !selectedOutcome.spawn_next_task_template_id
+
+  if (hasNoAnswerLoopEffect) {
+    const updated = await db.$transaction(async (tx) => {
+      const updatedInstance = await tx.workflow_instance.update({
+        where: {
+          id: instance.id,
+        },
+        data: {
+          no_answer_attempts: {
+            increment: 1,
+          },
+          current_outcome_key: null,
+          current_outcome_set_at: now,
+          last_event_at: now,
+          updated_at: now,
+        },
+        select: {
+          no_answer_attempts: true,
+        },
+      })
+
+      await createJourneyTimelineEvent(tx, {
+        engagementId: engagement.id,
+        partyId: engagement.party_id,
+        householdId: engagement.household_id,
+        primaryAdviserId: engagement.primary_adviser_id,
+        note: "Initial Contact outcome recorded - no answer follow-up sent",
+        at: now,
+      })
+
+      return updatedInstance
+    })
+
+    await sendWorkflowTemplateToClient(db, {
+      templateId: NO_ANSWER_EMAIL_TEMPLATE_ID,
+      engagement,
+      actorUserId: userId,
+    })
+    await sendWorkflowTemplateToClient(db, {
+      templateId: NO_ANSWER_SMS_TEMPLATE_ID,
+      engagement,
+      actorUserId: userId,
+    })
+
+    return {
+      effect: "no_answer",
+      instanceId: instance.id,
+      engagementId: engagement.id,
+      attempts: updated.no_answer_attempts,
+    }
+  }
+
+  if (selectedOutcome.is_terminal_lost) {
+    await db.$transaction(async (tx) => {
+      await tx.workflow_instance.update({
+        where: {
+          id: instance.id,
+        },
+        data: {
+          current_outcome_key: normalizedOutcomeKey,
+          current_outcome_set_at: now,
+          last_event_at: now,
+          updated_at: now,
+        },
+      })
+
+      await createJourneyTimelineEvent(tx, {
+        engagementId: engagement.id,
+        partyId: engagement.party_id,
+        householdId: engagement.household_id,
+        primaryAdviserId: engagement.primary_adviser_id,
+        note: "Initial Contact closed - Not Suitable",
+        at: now,
+      })
+    })
+
+    await stopEngagementWorkflow(engagement.id, now)
+
+    return {
+      effect: "stopped",
+      instanceId: instance.id,
+      engagementId: engagement.id,
+    }
+  }
+
+  if (selectedOutcome.next_phase_key) {
+    await db.workflow_instance.update({
+      where: {
+        id: instance.id,
+      },
+      data: {
+        current_outcome_key: normalizedOutcomeKey,
+        current_outcome_set_at: now,
+        last_event_at: now,
+        updated_at: now,
+      },
+    })
+
+    await advanceEngagementToNextPhase(engagement.id, {
+      targetPhaseKey: selectedOutcome.next_phase_key,
+      advanceDate: now,
+    })
+
+    return {
+      effect: "advanced",
+      instanceId: instance.id,
+      engagementId: engagement.id,
+      targetPhase: selectedOutcome.next_phase_key,
+    }
+  }
+
+  let spawnedTaskIdCreated: string | null = null
+  let workflowStatus: string | null = null
+  const touchedTaskIds = new Set<string>()
+
+  await db.$transaction(async (tx) => {
+    if (selectedOutcome.spawn_next_task_template_id) {
+      const nextTaskTemplate = await tx.workflow_task_template.findUnique({
+        where: {
+          id: selectedOutcome.spawn_next_task_template_id,
+        },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          category: true,
+          owner_role: true,
+          due_offset_days: true,
+          due_date_absolute: true,
+        },
+      })
+
+      if (nextTaskTemplate) {
+        spawnedTaskIdCreated = await createSpawnedTaskFromTemplate(tx, {
+          workflowInstanceId: instance.id,
+          triggerDate: instance.trigger_date,
+          engagement,
+          taskTemplate: nextTaskTemplate,
+        })
+        touchedTaskIds.add(spawnedTaskIdCreated)
+      }
+    }
+
+    if (selectedOutcome.sets_workflow_status) {
+      workflowStatus = selectedOutcome.sets_workflow_status
+    }
+
+    await tx.workflow_instance.update({
+      where: {
+        id: instance.id,
+      },
+      data: {
+        current_outcome_key: normalizedOutcomeKey,
+        current_outcome_set_at: now,
+        status: selectedOutcome.sets_workflow_status ?? instance.status,
+        last_event_at: now,
+        updated_at: now,
+      },
+    })
+
+    if (selectedOutcome.sets_workflow_status === "paused") {
+      await createJourneyTimelineEvent(tx, {
+        engagementId: engagement.id,
+        partyId: engagement.party_id,
+        householdId: engagement.household_id,
+        primaryAdviserId: engagement.primary_adviser_id,
+        note: "Initial Contact paused - on hold",
+        at: now,
+      })
+    }
+  })
+
+  await syncTaskIdsToMonday(touchedTaskIds)
+
+  return {
+    effect: "continued",
+    instanceId: instance.id,
+    engagementId: engagement.id,
+    spawnedTaskIdCreated,
+    workflowStatus,
+  }
+}
+
+/*
+ * Driver action keys for the Initial Contact booking driver:
+ * - send_booking_link: adviser sends the Initial Meeting Calendly link to the client.
+ * - book_in_calendly: adviser records that they will book the meeting directly in Calendly.
+ */
+export async function recordDriverAction(
+  instanceId: string,
+  actionKey: string,
+  userId: string,
+): Promise<WorkflowDriverActionResult> {
+  const normalizedActionKey = actionKey.trim()
+  if (!isWorkflowDriverActionKey(normalizedActionKey)) {
+    throw new InvalidDriverActionError("actionKey must be send_booking_link or book_in_calendly.")
+  }
+
+  const instance = await db.workflow_instance.findUnique({
+    where: {
+      id: instanceId,
+    },
+    include: {
+      workflow_template: {
+        select: {
+          key: true,
+        },
+      },
+      engagement: {
+        select: {
+          id: true,
+          party_id: true,
+          household_id: true,
+          primary_adviser_id: true,
+        },
+      },
+    },
+  })
+
+  if (!instance) {
+    throw new WorkflowInstanceNotFoundError()
+  }
+
+  if (!instance.engagement) {
+    throw new WorkflowEngagementNotFoundError()
+  }
+
+  if (WORKFLOW_TERMINAL_STATUSES.includes(instance.status as (typeof WORKFLOW_TERMINAL_STATUSES)[number])) {
+    throw new OutcomeTaskNotEligibleError("Workflow instance is terminal.")
+  }
+
+  if (instance.workflow_template.key !== INITIAL_CONTACT_TEMPLATE_KEY || instance.current_outcome_key !== SUITABLE_OUTCOME_KEY) {
+    throw new InvalidDriverActionError("Booking driver actions require a suitable Initial Contact outcome.")
+  }
+
+  const now = new Date()
+  let emailSent = false
+
+  if (normalizedActionKey === "send_booking_link") {
+    await sendWorkflowTemplateToClient(db, {
+      templateId: BOOKING_LINK_TEMPLATE_ID,
+      engagement: instance.engagement,
+      actorUserId: userId,
+    })
+    emailSent = true
+  }
+
+  await db.$transaction(async (tx) => {
+    await tx.workflow_instance.update({
+      where: {
+        id: instance.id,
+      },
+      data: {
+        last_driver_action_key: normalizedActionKey,
+        last_driver_action_at: now,
+        last_event_at: now,
+        updated_at: now,
+      },
+    })
+
+    await createJourneyTimelineEvent(tx, {
+      engagementId: instance.engagement.id,
+      partyId: instance.engagement.party_id,
+      householdId: instance.engagement.household_id,
+      primaryAdviserId: instance.engagement.primary_adviser_id,
+      note:
+        normalizedActionKey === "send_booking_link"
+          ? "Initial Meeting booking link sent to client."
+          : "Adviser will book Initial Meeting in Calendly directly.",
+      at: now,
+    })
+  })
+
+  return {
+    instanceId: instance.id,
+    engagementId: instance.engagement.id,
+    actionKey: normalizedActionKey,
+    emailSent,
+  }
+}
+
 export async function rescheduleWorkflowForEngagement(engagementId: string, newTriggerDate: Date) {
   if (Number.isNaN(newTriggerDate.getTime())) {
     console.warn(`[workflow] reschedule skipped invalid-date ${engagementId}`)
@@ -1280,7 +1902,9 @@ export async function getCurrentAdvanceChainInstance(engagementId: string): Prom
   const activeInstances = await db.workflow_instance.findMany({
     where: {
       engagement_id: engagementId,
-      status: "active",
+      status: {
+        in: [...WORKFLOW_ACTIVE_STATUSES],
+      },
       workflow_template: {
         phase_order: {
           not: null,
@@ -1303,6 +1927,71 @@ export async function getCurrentAdvanceChainInstance(engagementId: string): Prom
   }
 
   return activeInstances[0] ?? null
+}
+
+function deriveDecisionSnapshot(instance: {
+  status: string
+  trigger_date: Date
+  current_outcome_key: string | null
+  last_driver_action_key: string | null
+  workflow_template: {
+    key: string
+  }
+} | null): {
+  decisionState: JourneyDecisionState
+  awaitingEventEndsAt: Date | null
+} {
+  if (!instance) {
+    return {
+      decisionState: "awaiting_event",
+      awaitingEventEndsAt: null,
+    }
+  }
+
+  if (instance.status === "paused" || instance.current_outcome_key === ON_HOLD_OUTCOME_KEY) {
+    return {
+      decisionState: "paused",
+      awaitingEventEndsAt: null,
+    }
+  }
+
+  if (instance.workflow_template.key !== INITIAL_CONTACT_TEMPLATE_KEY) {
+    return {
+      decisionState: "ready_for_outcome",
+      awaitingEventEndsAt: null,
+    }
+  }
+
+  if (!instance.current_outcome_key) {
+    const awaitingEventEndsAt = addMilliseconds(
+      instance.trigger_date,
+      INITIAL_CONTACT_MEETING_DURATION_MS + OUTCOME_READY_BUFFER_MS,
+    )
+
+    if (awaitingEventEndsAt.getTime() > Date.now()) {
+      return {
+        decisionState: "awaiting_event",
+        awaitingEventEndsAt,
+      }
+    }
+
+    return {
+      decisionState: "ready_for_outcome",
+      awaitingEventEndsAt: null,
+    }
+  }
+
+  if (instance.current_outcome_key === SUITABLE_OUTCOME_KEY) {
+    return {
+      decisionState: "driving_booking",
+      awaitingEventEndsAt: null,
+    }
+  }
+
+  return {
+    decisionState: "ready_for_outcome",
+    awaitingEventEndsAt: null,
+  }
 }
 
 export async function getJourneyState(engagementId: string) {
@@ -1334,7 +2023,11 @@ export async function getJourneyState(engagementId: string) {
   })
 
   const activeChain = allInstances
-    .filter((instance) => instance.status === "active" && instance.workflow_template.phase_order !== null)
+    .filter(
+      (instance) =>
+        WORKFLOW_ACTIVE_STATUSES.includes(instance.status as (typeof WORKFLOW_ACTIVE_STATUSES)[number]) &&
+        instance.workflow_template.phase_order !== null,
+    )
     .sort((left, right) => right.created_at.getTime() - left.created_at.getTime())
 
   if (activeChain.length > 1) {
@@ -1385,6 +2078,7 @@ export async function getJourneyState(engagementId: string) {
   })
 
   const classification = await getClassificationForEngagement(db, engagement)
+  const decisionSnapshot = deriveDecisionSnapshot(currentInstance)
 
   return {
     current: currentInstance
@@ -1405,6 +2099,12 @@ export async function getJourneyState(engagementId: string) {
     availableSkipTargets,
     lifecycleStage: classification?.lifecycle_stage ?? null,
     serviceSegment: classification?.service_segment ?? null,
+    decisionState: decisionSnapshot.decisionState,
+    awaitingEventEndsAt: decisionSnapshot.awaitingEventEndsAt,
+    currentOutcomeKey: currentInstance?.current_outcome_key ?? null,
+    noAnswerAttempts: currentInstance?.no_answer_attempts ?? 0,
+    lastDriverActionKey: currentInstance?.last_driver_action_key ?? null,
+    lastDriverActionAt: currentInstance?.last_driver_action_at ?? null,
   }
 }
 

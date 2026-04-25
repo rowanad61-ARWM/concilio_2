@@ -168,6 +168,12 @@ export async function GET(
         })),
       lifecycleStage: state.lifecycleStage as EngagementJourneyResponse["lifecycleStage"],
       currentPhaseTaskSummary,
+      decisionState: state.decisionState,
+      awaitingEventEndsAt: toIsoString(state.awaitingEventEndsAt),
+      currentOutcomeKey: state.currentOutcomeKey,
+      noAnswerAttempts: state.noAnswerAttempts,
+      lastDriverActionKey: state.lastDriverActionKey,
+      lastDriverActionAt: toIsoString(state.lastDriverActionAt),
     }
 
     return NextResponse.json(payload)

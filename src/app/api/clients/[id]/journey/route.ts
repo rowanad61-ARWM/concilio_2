@@ -244,7 +244,11 @@ export async function GET(
         : []
 
     const activeChainInstances = workflowInstances
-      .filter((instance) => instance.status === "active" && instance.workflow_template.phase_order !== null)
+      .filter(
+        (instance) =>
+          (instance.status === "active" || instance.status === "paused") &&
+          instance.workflow_template.phase_order !== null,
+      )
       .sort((left, right) => right.created_at.getTime() - left.created_at.getTime())
 
     const current = activeChainInstances[0] ?? null
