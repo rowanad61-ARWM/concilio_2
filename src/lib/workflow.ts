@@ -1262,14 +1262,6 @@ export async function setOutcomeForSpawnedTask(
         },
       })
 
-      await createJourneyTimelineEvent(tx, {
-        engagementId: engagement.id,
-        partyId: engagement.party_id,
-        householdId: engagement.household_id,
-        primaryAdviserId: engagement.primary_adviser_id,
-        note: "Initial Contact closed - Not Suitable",
-        at: now,
-      })
     })
 
     await stopEngagementWorkflow(engagement.id)
@@ -1358,15 +1350,6 @@ export async function setOutcomeForSpawnedTask(
           },
         })
 
-        await createJourneyTimelineEvent(tx, {
-          engagementId: engagement.id,
-          partyId: engagement.party_id,
-          householdId: engagement.household_id,
-          primaryAdviserId: engagement.primary_adviser_id,
-          note: `Retries exhausted for "${spawnedTask.workflow_task_template.title}" (${existingAttempts}/${maxAttempts}). Marked as Needs Review.`,
-          at: now,
-        })
-
         return {
           effect: "needs_review" as const,
           spawnedTaskIdCreated: null,
@@ -1435,16 +1418,6 @@ export async function setOutcomeForSpawnedTask(
         },
       })
 
-      if (selectedOutcome.sets_workflow_status === "paused") {
-        await createJourneyTimelineEvent(tx, {
-          engagementId: engagement.id,
-          partyId: engagement.party_id,
-          householdId: engagement.household_id,
-          primaryAdviserId: engagement.primary_adviser_id,
-          note: "Initial Contact paused - on hold",
-          at: now,
-        })
-      }
     }
 
     return {
@@ -1559,15 +1532,6 @@ export async function setOutcomeForWorkflowInstance(
         },
       })
 
-      await createJourneyTimelineEvent(tx, {
-        engagementId: engagement.id,
-        partyId: engagement.party_id,
-        householdId: engagement.household_id,
-        primaryAdviserId: engagement.primary_adviser_id,
-        note: "Initial Contact outcome recorded - no answer follow-up sent",
-        at: now,
-      })
-
       return updatedInstance
     })
 
@@ -1604,14 +1568,6 @@ export async function setOutcomeForWorkflowInstance(
         },
       })
 
-      await createJourneyTimelineEvent(tx, {
-        engagementId: engagement.id,
-        partyId: engagement.party_id,
-        householdId: engagement.household_id,
-        primaryAdviserId: engagement.primary_adviser_id,
-        note: "Initial Contact closed - Not Suitable",
-        at: now,
-      })
     })
 
     await stopEngagementWorkflow(engagement.id, now)
@@ -1698,16 +1654,6 @@ export async function setOutcomeForWorkflowInstance(
       },
     })
 
-    if (selectedOutcome.sets_workflow_status === "paused") {
-      await createJourneyTimelineEvent(tx, {
-        engagementId: engagement.id,
-        partyId: engagement.party_id,
-        householdId: engagement.household_id,
-        primaryAdviserId: engagement.primary_adviser_id,
-        note: "Initial Contact paused - on hold",
-        at: now,
-      })
-    }
   })
 
   await syncTaskIdsToMonday(touchedTaskIds)
@@ -2252,22 +2198,6 @@ export async function advanceEngagementToNextPhase(
 
     await upsertLifecycleStageForEngagement(tx, engagement, targetLifecycleStage)
 
-    const timelineMessage =
-      targetTemplate && current
-        ? `Advanced from ${current.workflow_template.name} to ${targetTemplate.name}`
-        : targetTemplate && !current
-          ? `Started client journey at ${targetTemplate.name}`
-          : "Completed final phase - now active client"
-
-    await createJourneyTimelineEvent(tx, {
-      engagementId: engagement.id,
-      partyId: engagement.party_id,
-      householdId: engagement.household_id,
-      primaryAdviserId: engagement.primary_adviser_id,
-      note: timelineMessage,
-      at: advanceDate,
-    })
-
     return {
       closedInstance,
       newInstance,
@@ -2372,15 +2302,6 @@ export async function stopEngagementWorkflow(engagementId: string, stopDate?: Da
     }
 
     await upsertLifecycleStageForEngagement(tx, engagement, terminalStage)
-
-    await createJourneyTimelineEvent(tx, {
-      engagementId: engagement.id,
-      partyId: engagement.party_id,
-      householdId: engagement.household_id,
-      primaryAdviserId: engagement.primary_adviser_id,
-      note: `Client journey stopped (marked ${terminalStage})`,
-      at: effectiveStopDate,
-    })
 
     return {
       closedInstance,

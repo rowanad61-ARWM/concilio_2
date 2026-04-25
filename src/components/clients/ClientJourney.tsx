@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import type {
   ClientJourneyResponse,
+  JourneyCurrentInstance,
+  JourneyOutcomeCatalogEntry,
   JourneyPhaseTarget,
   LifecycleStage,
   ServiceSegment,
@@ -51,6 +53,15 @@ const PHASE_KEY_TO_STAGE: Record<string, LifecycleStage> = {
   advice: "advice",
   implementation: "implementation",
   closing: "lost",
+}
+
+const NOT_PROCEEDING_OUTCOME: JourneyOutcomeCatalogEntry = {
+  outcomeKey: "not_proceeding",
+  outcomeLabel: "Not Proceeding - prospect declined to proceed",
+  sortOrder: 5,
+  isTerminalLost: true,
+  nextPhaseKey: null,
+  setsWorkflowStatus: null,
 }
 
 function formatStageLabel(stage: LifecycleStage | null) {
@@ -93,12 +104,71 @@ function formatDate(value: string | null) {
   }).format(parsed)
 }
 
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "Unknown time"
+  }
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return "Unknown time"
+  }
+
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed)
+}
+
 function getTargetStageFromPhase(target: JourneyPhaseTarget | null, fallback: LifecycleStage): LifecycleStage {
   if (!target) {
     return fallback
   }
 
   return PHASE_KEY_TO_STAGE[target.key] ?? fallback
+}
+
+function getOutcomeEffectSummary(
+  outcome: JourneyOutcomeCatalogEntry | null,
+  phaseTargets: JourneyPhaseTarget[],
+) {
+  if (!outcome) {
+    return "record this outcome"
+  }
+
+  if (outcome.outcomeKey === "no_answer") {
+    return "send the no-answer email + SMS templates and increment the retry counter"
+  }
+
+  if (outcome.isTerminalLost) {
+    return "close this prospect's workflow"
+  }
+
+  if (outcome.setsWorkflowStatus === "paused") {
+    return "pause the workflow until you resume"
+  }
+
+  if (outcome.nextPhaseKey) {
+    const target = phaseTargets.find((entry) => entry.key === outcome.nextPhaseKey)
+    return `advance to ${target?.name ?? outcome.nextPhaseKey}`
+  }
+
+  return "record this outcome"
+}
+
+function formatDriverActionLabel(value: string | null) {
+  if (value === "send_booking_link") {
+    return "Booking link sent to client"
+  }
+
+  if (value === "book_in_calendly") {
+    return "Adviser will book in Calendly"
+  }
+
+  return "Driver action recorded"
 }
 
 function JourneyPastPhases({
@@ -145,6 +215,8 @@ export default function ClientJourney({
   const [skipTarget, setSkipTarget] = useState<JourneyPhaseTarget | null>(null)
   const [isSkipDialogOpen, setIsSkipDialogOpen] = useState(false)
   const [isStopDialogOpen, setIsStopDialogOpen] = useState(false)
+  const [selectedOutcomeKey, setSelectedOutcomeKey] = useState("")
+  const [outcomeConfirmKey, setOutcomeConfirmKey] = useState<string | null>(null)
   const [segmentStatus, setSegmentStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
 
   const loadJourney = useCallback(async () => {
@@ -196,6 +268,13 @@ export default function ClientJourney({
     (journey?.pastInstances.length ?? 0) === 0 &&
     (journey?.triggerInstances.length ?? 0) === 0
   const showServiceSegmentEditor = lifecycleStage === "client" && !isTerminal
+  const usesDecisionCard = current?.template.key === "initial_contact" && current.decisionState !== null
+  const outcomeCatalog = useMemo(() => current?.outcomeCatalog ?? [], [current])
+  const selectedOutcome = outcomeCatalog.find((outcome) => outcome.outcomeKey === selectedOutcomeKey) ?? null
+  const outcomeToConfirm =
+    outcomeConfirmKey === "not_proceeding"
+      ? outcomeCatalog.find((outcome) => outcome.outcomeKey === outcomeConfirmKey) ?? NOT_PROCEEDING_OUTCOME
+      : outcomeCatalog.find((outcome) => outcome.outcomeKey === outcomeConfirmKey) ?? null
 
   const incompleteCount = current ? Math.max(current.taskSummary.total - current.taskSummary.done, 0) : 0
   const readyToAdvance = current?.taskSummary.allComplete ?? false
@@ -236,6 +315,19 @@ export default function ClientJourney({
 
     return closing?.completedAt ?? closing?.createdAt ?? journey.lifecycleStageUpdatedAt
   }, [isTerminal, journey])
+
+  useEffect(() => {
+    if (!current || current.decisionState !== "ready_for_outcome" || outcomeCatalog.length === 0) {
+      setSelectedOutcomeKey("")
+      return
+    }
+
+    setSelectedOutcomeKey((currentKey) =>
+      currentKey && outcomeCatalog.some((outcome) => outcome.outcomeKey === currentKey)
+        ? currentKey
+        : outcomeCatalog[0]?.outcomeKey ?? "",
+    )
+  }, [current, outcomeCatalog])
 
   async function runAdvance(target: JourneyPhaseTarget | null) {
     if (!current) {
@@ -300,6 +392,99 @@ export default function ClientJourney({
     }
   }
 
+  async function runWorkflowInstanceOutcome(outcomeKey: string) {
+    if (!current) {
+      return
+    }
+
+    setIsMutating(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`/api/workflow-instances/${current.id}/outcome`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ outcomeKey }),
+      })
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Failed to record outcome")
+      }
+
+      await loadJourney()
+      onMutation?.()
+    } catch (mutationError) {
+      console.error(mutationError)
+      setError(mutationError instanceof Error ? mutationError.message : "Unable to record outcome.")
+    } finally {
+      setIsMutating(false)
+      setOutcomeConfirmKey(null)
+    }
+  }
+
+  async function runDriverAction(actionKey: "send_booking_link" | "book_in_calendly") {
+    if (!current) {
+      return
+    }
+
+    setIsMutating(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`/api/workflow-instances/${current.id}/driver-action`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ actionKey }),
+      })
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Failed to record driver action")
+      }
+
+      await loadJourney()
+      onMutation?.()
+    } catch (mutationError) {
+      console.error(mutationError)
+      setError(mutationError instanceof Error ? mutationError.message : "Unable to record driver action.")
+    } finally {
+      setIsMutating(false)
+    }
+  }
+
+  async function runResumeWorkflowInstance() {
+    if (!current) {
+      return
+    }
+
+    setIsMutating(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`/api/workflow-instances/${current.id}/resume`, {
+        method: "POST",
+      })
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Failed to resume workflow")
+      }
+
+      await loadJourney()
+      onMutation?.()
+    } catch (mutationError) {
+      console.error(mutationError)
+      setError(mutationError instanceof Error ? mutationError.message : "Unable to resume workflow.")
+    } finally {
+      setIsMutating(false)
+    }
+  }
+
   async function handleServiceSegmentChange(nextValue: ServiceSegment | null) {
     setSegmentStatus("saving")
 
@@ -329,6 +514,151 @@ export default function ClientJourney({
       console.error(segmentError)
       setSegmentStatus("error")
     }
+  }
+
+  function renderDecisionCard(currentInstance: JourneyCurrentInstance) {
+    if (currentInstance.decisionState === "awaiting_event") {
+      return (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[18px] font-semibold text-[#113238]">{currentInstance.template.name}</p>
+            <span className="inline-flex rounded-[999px] border border-[#dbe3ea] bg-[#F6F9FC] px-2 py-0.5 text-[10px] font-medium text-[#4b5563]">
+              Awaiting event
+            </span>
+          </div>
+          <p className="mt-2 text-[13px] text-[#4b5563]">
+            Awaiting 15 min call on {formatDateTime(currentInstance.awaitingEventEndsAt)}
+          </p>
+        </>
+      )
+    }
+
+    if (currentInstance.decisionState === "ready_for_outcome") {
+      return (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[18px] font-semibold text-[#113238]">{currentInstance.template.name}</p>
+            <span className="inline-flex rounded-[999px] border border-amber-500 bg-white px-2 py-0.5 text-[10px] font-medium text-[#92400e]">
+              What happened?
+            </span>
+          </div>
+
+          <div className="rounded-[8px] border-[0.5px] border-[#e5e7eb] border-l-4 border-l-amber-500 bg-[#FFFBEB] p-3">
+            <p className="text-[12px] font-semibold uppercase tracking-[0.5px] text-[#113238]">
+              Record outcome
+            </p>
+            <p className="mt-1 text-[11px] text-[#6b7280]">Choose the outcome from the Initial Contact.</p>
+
+            {outcomeCatalog.length > 0 ? (
+              <>
+                <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+                  <select
+                    value={selectedOutcomeKey}
+                    onChange={(event) => setSelectedOutcomeKey(event.target.value)}
+                    disabled={isMutating}
+                    className="w-full rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white px-3 py-2 text-[13px] text-[#113238] disabled:opacity-60"
+                  >
+                    {outcomeCatalog.map((outcome) => (
+                      <option key={outcome.outcomeKey} value={outcome.outcomeKey}>
+                        {outcome.outcomeLabel}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setOutcomeConfirmKey(selectedOutcome?.outcomeKey ?? null)}
+                    disabled={isMutating || !selectedOutcome}
+                    className="rounded-[8px] border-[0.5px] border-[#113238] bg-[#113238] px-3 py-2 text-[12px] text-white disabled:opacity-60"
+                  >
+                    Set outcome
+                  </button>
+                </div>
+
+                {selectedOutcome ? (
+                  <p className="mt-2 text-[11px] text-[#6b7280]">
+                    Effect: {getOutcomeEffectSummary(selectedOutcome, journey?.availableSkipTargets ?? [])}.
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="mt-3 text-[12px] text-[#9ca3af]">No outcomes available.</p>
+            )}
+          </div>
+        </div>
+      )
+    }
+
+    if (currentInstance.decisionState === "driving_booking") {
+      return (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[18px] font-semibold text-[#113238]">{currentInstance.template.name}</p>
+            <span className="inline-flex rounded-[999px] border border-[#A7E3B5] bg-[#E8F5E9] px-2 py-0.5 text-[10px] font-medium text-[#2E7D32]">
+              Driving booking
+            </span>
+          </div>
+          <p className="text-[12px] text-[#6b7280]">Suitable outcome recorded. Drive the Initial Meeting booking.</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void runDriverAction("send_booking_link")}
+              disabled={isMutating}
+              className="rounded-[8px] border-[0.5px] border-[#113238] bg-[#113238] px-3 py-2 text-[12px] text-white disabled:opacity-60"
+            >
+              Send booking link to client
+            </button>
+            <button
+              type="button"
+              onClick={() => void runDriverAction("book_in_calendly")}
+              disabled={isMutating}
+              className="rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white px-3 py-2 text-[12px] text-[#113238] disabled:opacity-60"
+            >
+              I&apos;ll book in Calendly myself
+            </button>
+          </div>
+          {currentInstance.lastDriverActionKey ? (
+            <p className="text-[11px] text-[#6b7280]">
+              {formatDriverActionLabel(currentInstance.lastDriverActionKey)}
+              {currentInstance.lastDriverActionAt ? ` - ${formatDateTime(currentInstance.lastDriverActionAt)}` : ""}
+            </p>
+          ) : null}
+        </div>
+      )
+    }
+
+    if (currentInstance.decisionState === "paused") {
+      return (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[18px] font-semibold text-[#113238]">{currentInstance.template.name}</p>
+            <span className="inline-flex rounded-[999px] border border-[#fbbf24] bg-[#FEF3C7] px-2 py-0.5 text-[10px] font-medium text-[#92400e]">
+              On Hold
+            </span>
+          </div>
+          <p className="text-[12px] text-[#6b7280]">Workflow is paused until the adviser resumes or closes it.</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void runResumeWorkflowInstance()}
+              disabled={isMutating}
+              className="rounded-[8px] border-[0.5px] border-[#113238] bg-[#113238] px-3 py-2 text-[12px] text-white disabled:opacity-60"
+            >
+              Resume
+            </button>
+            <button
+              type="button"
+              onClick={() => setOutcomeConfirmKey("not_proceeding")}
+              disabled={isMutating}
+              className="rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white px-3 py-2 text-[12px] text-[#7f1d1d] disabled:opacity-60"
+            >
+              Not Proceeding
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    return null
   }
 
   if (isLoading) {
@@ -375,6 +705,9 @@ export default function ClientJourney({
         </div>
 
         {hasCurrent && current ? (
+          usesDecisionCard ? (
+            renderDecisionCard(current)
+          ) : (
           <>
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-[18px] font-semibold text-[#113238]">{current.template.name}</p>
@@ -447,6 +780,7 @@ export default function ClientJourney({
               </button>
             </div>
           </>
+          )
         ) : isTerminal ? (
           <p className="text-[13px] text-[#6b7280]">
             Journey ended on {formatDate(terminalEventDate)} - marked as {formatStageLabel(lifecycleStage)}.
@@ -586,6 +920,40 @@ export default function ClientJourney({
               }}
             >
               Mark not proceeding
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={Boolean(outcomeToConfirm)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setOutcomeConfirmKey(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm outcome</AlertDialogTitle>
+            <AlertDialogDescription>
+              You&apos;re recording: {outcomeToConfirm?.outcomeLabel ?? "selected outcome"}. This will{" "}
+              {getOutcomeEffectSummary(outcomeToConfirm, journey.availableSkipTargets)}. Confirm?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isMutating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isMutating || !outcomeToConfirm}
+              className="border-[#113238] bg-[#113238]"
+              onClick={(event) => {
+                event.preventDefault()
+                if (outcomeToConfirm) {
+                  void runWorkflowInstanceOutcome(outcomeToConfirm.outcomeKey)
+                }
+              }}
+            >
+              Confirm
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -4,7 +4,9 @@ import { auth } from "@/auth"
 import { db } from "@/lib/db"
 import type {
   ClientJourneyResponse,
+  JourneyDecisionState,
   JourneyCurrentInstance,
+  JourneyOutcomeCatalogEntry,
   JourneyPhaseTarget,
   JourneyScopedInstance,
   JourneyTaskSummary,
@@ -12,6 +14,12 @@ import type {
   LifecycleStage,
   ServiceSegment,
 } from "@/types/journey"
+
+const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
+const SUITABLE_OUTCOME_KEY = "suitable"
+const ON_HOLD_OUTCOME_KEY = "on_hold"
+const INITIAL_CONTACT_MEETING_DURATION_MS = 15 * 60 * 1000
+const OUTCOME_READY_BUFFER_MS = 60 * 60 * 1000
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -23,6 +31,14 @@ function toErrorMessage(error: unknown) {
   }
 
   return "unknown error"
+}
+
+function toIsoString(value: Date | null | undefined) {
+  return value ? value.toISOString() : null
+}
+
+function addMilliseconds(value: Date, milliseconds: number) {
+  return new Date(value.getTime() + milliseconds)
 }
 
 function toTemplateSummary(template: {
@@ -53,6 +69,97 @@ function toPhaseTarget(template: {
     name: template.name,
     phaseOrder: template.phase_order,
   }
+}
+
+function deriveDecisionSnapshot(instance: {
+  status: string
+  trigger_date: Date
+  current_outcome_key: string | null
+  workflow_template: {
+    key: string
+  }
+} | null): {
+  decisionState: JourneyDecisionState | null
+  awaitingEventEndsAt: Date | null
+} {
+  if (!instance || instance.workflow_template.key !== INITIAL_CONTACT_TEMPLATE_KEY) {
+    return {
+      decisionState: null,
+      awaitingEventEndsAt: null,
+    }
+  }
+
+  if (instance.status === "paused" || instance.current_outcome_key === ON_HOLD_OUTCOME_KEY) {
+    return {
+      decisionState: "paused",
+      awaitingEventEndsAt: null,
+    }
+  }
+
+  if (!instance.current_outcome_key) {
+    const awaitingEventEndsAt = addMilliseconds(
+      instance.trigger_date,
+      INITIAL_CONTACT_MEETING_DURATION_MS + OUTCOME_READY_BUFFER_MS,
+    )
+
+    if (awaitingEventEndsAt.getTime() > Date.now()) {
+      return {
+        decisionState: "awaiting_event",
+        awaitingEventEndsAt,
+      }
+    }
+
+    return {
+      decisionState: "ready_for_outcome",
+      awaitingEventEndsAt: null,
+    }
+  }
+
+  if (instance.current_outcome_key === SUITABLE_OUTCOME_KEY) {
+    return {
+      decisionState: "driving_booking",
+      awaitingEventEndsAt: null,
+    }
+  }
+
+  return {
+    decisionState: "ready_for_outcome",
+    awaitingEventEndsAt: null,
+  }
+}
+
+async function getOutcomeCatalogForWorkflowTemplate(workflowTemplateId: string): Promise<JourneyOutcomeCatalogEntry[]> {
+  const rows = await db.$queryRaw<
+    Array<{
+      outcome_key: string
+      outcome_label: string
+      sort_order: number
+      is_terminal_lost: boolean
+      next_phase_key: string | null
+      sets_workflow_status: string | null
+    }>
+  >`
+    SELECT
+      wtto.outcome_key,
+      wtto.outcome_label,
+      wtto.sort_order,
+      wtto.is_terminal_lost,
+      wtto.next_phase_key,
+      wtto.sets_workflow_status
+    FROM workflow_task_template_outcome wtto
+    JOIN workflow_task_template wtt ON wtt.id = wtto.workflow_task_template_id
+    WHERE wtt.workflow_template_id = ${workflowTemplateId}::uuid
+    ORDER BY wtt.sort_order ASC, wtto.sort_order ASC, wtto.outcome_key ASC
+  `
+
+  return rows.map((row) => ({
+    outcomeKey: row.outcome_key,
+    outcomeLabel: row.outcome_label,
+    sortOrder: row.sort_order,
+    isTerminalLost: row.is_terminal_lost,
+    nextPhaseKey: row.next_phase_key,
+    setsWorkflowStatus: row.sets_workflow_status,
+  }))
 }
 
 async function getTaskSummaryForInstance(workflowInstanceId: string): Promise<JourneyTaskSummary> {
@@ -253,12 +360,24 @@ export async function GET(
 
     const current = activeChainInstances[0] ?? null
     const currentTaskSummary = current ? await getTaskSummaryForInstance(current.id) : null
+    const decisionSnapshot = deriveDecisionSnapshot(current)
+    const currentOutcomeCatalog =
+      current && current.workflow_template.key === INITIAL_CONTACT_TEMPLATE_KEY
+        ? await getOutcomeCatalogForWorkflowTemplate(current.workflow_template.id)
+        : []
 
     const currentInstance: JourneyCurrentInstance | null =
       current && currentTaskSummary
         ? {
             ...toScopedInstance(current),
             taskSummary: currentTaskSummary,
+            decisionState: decisionSnapshot.decisionState,
+            awaitingEventEndsAt: toIsoString(decisionSnapshot.awaitingEventEndsAt),
+            currentOutcomeKey: current.current_outcome_key,
+            noAnswerAttempts: current.no_answer_attempts,
+            lastDriverActionKey: current.last_driver_action_key,
+            lastDriverActionAt: toIsoString(current.last_driver_action_at),
+            outcomeCatalog: currentOutcomeCatalog,
           }
         : null
 

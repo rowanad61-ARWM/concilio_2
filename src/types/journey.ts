@@ -17,6 +17,15 @@ export type JourneyTaskSummary = {
 
 export type JourneyDecisionState = "awaiting_event" | "ready_for_outcome" | "driving_booking" | "paused"
 
+export type JourneyOutcomeCatalogEntry = {
+  outcomeKey: string
+  outcomeLabel: string
+  sortOrder: number
+  isTerminalLost: boolean
+  nextPhaseKey: string | null
+  setsWorkflowStatus: string | null
+}
+
 export type JourneyTemplateSummary = {
   id: string
   key: string
@@ -42,6 +51,13 @@ export type JourneyScopedInstance = {
 
 export type JourneyCurrentInstance = JourneyScopedInstance & {
   taskSummary: JourneyTaskSummary
+  decisionState: JourneyDecisionState | null
+  awaitingEventEndsAt: string | null
+  currentOutcomeKey: string | null
+  noAnswerAttempts: number
+  lastDriverActionKey: string | null
+  lastDriverActionAt: string | null
+  outcomeCatalog: JourneyOutcomeCatalogEntry[]
 }
 
 export type JourneyPastInstance = JourneyScopedInstance & {

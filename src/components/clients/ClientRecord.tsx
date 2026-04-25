@@ -1050,7 +1050,6 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   const [engagementForm, setEngagementForm] = useState<EngagementFormState>(() => buildEngagementForm())
   const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplateOption[]>([])
   const [isLoadingWorkflowTemplates, setIsLoadingWorkflowTemplates] = useState(false)
-  const [advancingWorkflowId, setAdvancingWorkflowId] = useState<string | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [isSavingChanges, setIsSavingChanges] = useState(false)
   const [editForm, setEditForm] = useState<EditFormState>(() => buildEditForm(client))
@@ -1903,55 +1902,6 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       console.error(error)
     } finally {
       setIsSavingEngagement(false)
-    }
-  }
-
-  async function handleAdvanceWorkflowStage(workflowInstanceId: string) {
-    setAdvancingWorkflowId(workflowInstanceId)
-
-    try {
-      const response = await fetch(`/api/workflow-instances/${workflowInstanceId}`, {
-        method: "PATCH",
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to advance workflow stage")
-      }
-
-      const updatedWorkflow = await response.json()
-      if (!updatedWorkflow || typeof updatedWorkflow !== "object" || Array.isArray(updatedWorkflow)) {
-        return
-      }
-
-      const workflowValue = updatedWorkflow as Record<string, unknown>
-      const nextCurrentStage =
-        typeof workflowValue.currentStage === "string" ? workflowValue.currentStage : null
-      const nextStatus = typeof workflowValue.status === "string" ? workflowValue.status : null
-
-      if (!nextCurrentStage || !nextStatus) {
-        return
-      }
-
-      setLocalEngagements((current) =>
-        current.map((engagement) => {
-          if (engagement.workflowInstance?.id !== workflowInstanceId) {
-            return engagement
-          }
-
-          return {
-            ...engagement,
-            workflowInstance: {
-              ...engagement.workflowInstance,
-              currentStage: nextCurrentStage,
-              status: nextStatus,
-            },
-          }
-        }),
-      )
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setAdvancingWorkflowId(null)
     }
   }
 
@@ -4318,18 +4268,6 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                                     (stage) => stage.key === item.engagement.workflowInstance?.currentStage,
                                   )?.label ?? formatCategory(item.engagement.workflowInstance.currentStage)}
                                 </p>
-                                {item.engagement.workflowInstance.status !== "completed" ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleAdvanceWorkflowStage(item.engagement.workflowInstance!.id)}
-                                    disabled={advancingWorkflowId === item.engagement.workflowInstance.id}
-                                    className="mt-2 rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-transparent px-[8px] py-[4px] text-[11px] text-[#113238] disabled:opacity-60"
-                                  >
-                                    {advancingWorkflowId === item.engagement.workflowInstance.id
-                                      ? "Advancing..."
-                                      : "Advance stage"}
-                                  </button>
-                                ) : null}
                               </div>
                             ) : null}
                           </>
