@@ -826,7 +826,7 @@ async function resolveTimelineAuthorId(
   return fallback?.id ?? null
 }
 
-async function createJourneyTimelineEvent(
+export async function createJourneyTimelineEvent(
   tx: Prisma.TransactionClient,
   params: {
     engagementId: string
@@ -857,7 +857,7 @@ async function createJourneyTimelineEvent(
   })
 }
 
-async function sendWorkflowTemplateToClient(
+export async function sendWorkflowTemplateToClient(
   client: DbClient,
   params: {
     templateId: string
