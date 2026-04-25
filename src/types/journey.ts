@@ -57,6 +57,7 @@ export type JourneyCurrentInstance = JourneyScopedInstance & {
   noAnswerAttempts: number
   lastDriverActionKey: string | null
   lastDriverActionAt: string | null
+  nudgesMuted: boolean
   outcomeCatalog: JourneyOutcomeCatalogEntry[]
 }
 

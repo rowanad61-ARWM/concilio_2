@@ -18,6 +18,30 @@ function secureEquals(left: string, right: string) {
   return timingSafeEqual(leftBuffer, rightBuffer)
 }
 
+function authenticateCronRequest(request: Request) {
+  const configuredSecret = process.env.CRON_SHARED_SECRET?.trim() || process.env.CRON_SECRET?.trim()
+  const providedSecret = request.headers.get("x-cron-secret")?.trim() ?? ""
+  const authHeader = request.headers.get("authorization")?.trim() ?? ""
+
+  if (!configuredSecret) {
+    console.error("[nudges cron] missing CRON_SHARED_SECRET or CRON_SECRET")
+    return NextResponse.json({ error: "cron secret not configured" }, { status: 500 })
+  }
+
+  const bearerToken = authHeader.toLowerCase().startsWith("bearer ")
+    ? authHeader.slice("bearer ".length).trim()
+    : ""
+  const isAuthorized =
+    (providedSecret && secureEquals(providedSecret, configuredSecret)) ||
+    (bearerToken && secureEquals(bearerToken, configuredSecret))
+
+  if (!isAuthorized) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  }
+
+  return null
+}
+
 async function parseDryRunFlag(request: Request) {
   const rawBody = await request.text()
   if (!rawBody.trim()) {
@@ -39,16 +63,9 @@ async function parseDryRunFlag(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const configuredSecret = process.env.CRON_SHARED_SECRET?.trim()
-  const providedSecret = request.headers.get("x-cron-secret")?.trim() ?? ""
-
-  if (!configuredSecret) {
-    console.error("[nudges cron] missing CRON_SHARED_SECRET")
-    return NextResponse.json({ error: "cron secret not configured" }, { status: 500 })
-  }
-
-  if (!providedSecret || !secureEquals(providedSecret, configuredSecret)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+  const authError = authenticateCronRequest(request)
+  if (authError) {
+    return authError
   }
 
   let dryRun = false
@@ -60,6 +77,21 @@ export async function POST(request: Request) {
 
   try {
     const result = await runWorkflowNudges({ dryRun })
+    return NextResponse.json(result)
+  } catch (error) {
+    console.error("[nudges cron] run failed", error)
+    return NextResponse.json({ error: "failed to run nudges" }, { status: 500 })
+  }
+}
+
+export async function GET(request: Request) {
+  const authError = authenticateCronRequest(request)
+  if (authError) {
+    return authError
+  }
+
+  try {
+    const result = await runWorkflowNudges()
     return NextResponse.json(result)
   } catch (error) {
     console.error("[nudges cron] run failed", error)

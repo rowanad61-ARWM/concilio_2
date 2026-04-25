@@ -377,6 +377,7 @@ export async function GET(
             noAnswerAttempts: current.no_answer_attempts,
             lastDriverActionKey: current.last_driver_action_key,
             lastDriverActionAt: toIsoString(current.last_driver_action_at),
+            nudgesMuted: current.nudges_muted,
             outcomeCatalog: currentOutcomeCatalog,
           }
         : null

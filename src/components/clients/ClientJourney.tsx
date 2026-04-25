@@ -457,6 +457,54 @@ export default function ClientJourney({
     }
   }
 
+  async function runNudgeMute(muted: boolean) {
+    if (!current) {
+      return
+    }
+
+    setIsMutating(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`/api/workflow-instances/${current.id}/mute-nudges`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ muted }),
+      })
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string
+        instance?: {
+          nudgesMuted?: boolean
+        }
+      } | null
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Failed to update nudge setting")
+      }
+
+      const nudgesMuted = payload?.instance?.nudgesMuted ?? muted
+      setJourney((currentJourney) =>
+        currentJourney?.currentInstance
+          ? {
+              ...currentJourney,
+              currentInstance: {
+                ...currentJourney.currentInstance,
+                nudgesMuted,
+              },
+            }
+          : currentJourney,
+      )
+      onMutation?.()
+    } catch (mutationError) {
+      console.error(mutationError)
+      setError(mutationError instanceof Error ? mutationError.message : "Unable to update nudge setting.")
+    } finally {
+      setIsMutating(false)
+    }
+  }
+
   async function runResumeWorkflowInstance() {
     if (!current) {
       return
@@ -614,6 +662,14 @@ export default function ClientJourney({
               className="rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white px-3 py-2 text-[12px] text-[#113238] disabled:opacity-60"
             >
               I&apos;ll book in Calendly myself
+            </button>
+            <button
+              type="button"
+              onClick={() => void runNudgeMute(!currentInstance.nudgesMuted)}
+              disabled={isMutating}
+              className="rounded-[8px] border-[0.5px] border-transparent bg-transparent px-2 py-2 text-[12px] text-[#6b7280] underline-offset-2 hover:text-[#113238] hover:underline disabled:opacity-60"
+            >
+              {currentInstance.nudgesMuted ? "🔕 Nudges muted — Unmute" : "🔔 Mute nudges"}
             </button>
           </div>
           {currentInstance.lastDriverActionKey ? (
