@@ -9,6 +9,7 @@ import type {
   JourneyCurrentInstance,
   JourneyOutcomeCatalogEntry,
   JourneyPhaseTarget,
+  JourneyUrgency,
   JourneyScopedInstance,
   JourneyTaskSummary,
   JourneyTemplateSummary,
@@ -89,11 +90,13 @@ function deriveDecisionSnapshot(instance: {
 } | null): {
   decisionState: JourneyDecisionState | null
   awaitingEventEndsAt: Date | null
+  urgency: JourneyUrgency | null
 } {
   if (!instance || !usesDecisionStateTemplate(instance.workflow_template.key)) {
     return {
       decisionState: null,
       awaitingEventEndsAt: null,
+      urgency: null,
     }
   }
 
@@ -101,6 +104,7 @@ function deriveDecisionSnapshot(instance: {
   return {
     decisionState: derived?.state ?? null,
     awaitingEventEndsAt: derived?.awaitingEventEndsAt ?? null,
+    urgency: derived?.urgency ?? null,
   }
 }
 
@@ -383,6 +387,7 @@ export async function GET(
             taskSummary: currentTaskSummary,
             decisionState: decisionSnapshot.decisionState,
             awaitingEventEndsAt: toIsoString(decisionSnapshot.awaitingEventEndsAt),
+            urgency: decisionSnapshot.urgency,
             currentOutcomeKey: current.current_outcome_key,
             noAnswerAttempts: current.no_answer_attempts,
             lastDriverActionKey: current.last_driver_action_key,

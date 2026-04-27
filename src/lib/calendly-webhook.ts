@@ -11,6 +11,7 @@ import {
   spawnOffChainWorkflowInstance,
   spawnWorkflowForEngagement,
 } from "@/lib/workflow"
+import { ADVICE_TEMPLATE_KEY, deriveDecisionState } from "@/lib/workflowState"
 import {
   extractInviteePhone,
   formatCalendlyMeetingDate,
@@ -60,6 +61,7 @@ const CALENDLY_TEMPLATE_ID_BY_MEETING_TYPE: Record<string, string> = {
   INITIAL_MEETING: "calendly_initial_meeting",
   FIFTEEN_MIN_CALL: "calendly_fifteen_min_call",
   GENERAL_MEETING: "calendly_general_meeting",
+  ADVICE: "calendly_general_meeting",
   ANNUAL_REVIEW: "calendly_annual_review",
   NINETY_DAY_RECAP: "calendly_ninety_day_recap",
 }
@@ -69,6 +71,7 @@ const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
 const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
 const DISCOVERY_MEETING_KEY = "DISCOVERY"
 const DISCOVERY_TEMPLATE_KEY = "discovery"
+const ADVICE_MEETING_KEY = "ADVICE"
 const PROCEEDING_TO_DISCOVERY_OUTCOME_KEY = "proceeding_to_discovery"
 const SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY = "send_discovery_booking_link"
 const DISCOVERY_BOOKING_CONFIRMATION_TEMPLATE_ID = "discovery_booking_confirmation"
@@ -820,6 +823,91 @@ async function handleDiscoveryWorkflowForCreatedEngagement(params: {
   }
 }
 
+async function handleAdviceWorkflowForCreatedEngagement(params: {
+  engagementId: string
+  partyId: string | null
+  householdId: string | null
+  primaryAdviserId: string | null
+  scheduledStartAt: Date | null
+}) {
+  if (!params.partyId) {
+    console.warn(`[calendly] advice workflow skipped missing-party ${params.engagementId}`)
+    return
+  }
+
+  if (!params.scheduledStartAt) {
+    console.warn(`[calendly] advice workflow skipped missing-start ${params.engagementId}`)
+    return
+  }
+
+  const activeAdviceInstances = await db.workflow_instance.findMany({
+    where: {
+      party_id: params.partyId,
+      status: "active",
+      workflow_template: {
+        key: ADVICE_TEMPLATE_KEY,
+      },
+    },
+    include: {
+      workflow_template: {
+        select: {
+          key: true,
+          name: true,
+        },
+      },
+      engagement: {
+        select: {
+          id: true,
+          party_id: true,
+          household_id: true,
+          primary_adviser_id: true,
+        },
+      },
+    },
+    orderBy: {
+      created_at: "desc",
+    },
+  })
+
+  const adviceInstance = activeAdviceInstances.find(
+    (instance) => deriveDecisionState(instance)?.state === "driving_meeting_booking",
+  )
+
+  if (!adviceInstance) {
+    console.warn(`[calendly] advice workflow skipped active-booking-instance-not-found ${params.partyId}`)
+    await createEngagementTimelineNote({
+      engagementId: params.engagementId,
+      partyId: params.partyId,
+      householdId: params.householdId,
+      primaryAdviserId: params.primaryAdviserId,
+      note: "Advice Meeting booked, but no active Advice phase awaiting booking was found.",
+    })
+    return
+  }
+
+  const now = new Date()
+  await db.workflow_instance.update({
+    where: {
+      id: adviceInstance.id,
+    },
+    data: {
+      scheduled_start_date: params.scheduledStartAt,
+      last_event_at: now,
+      updated_at: now,
+    },
+  })
+
+  await createEngagementTimelineNote({
+    engagementId: adviceInstance.engagement_id,
+    partyId: adviceInstance.engagement?.party_id ?? params.partyId,
+    householdId: adviceInstance.engagement?.household_id ?? params.householdId,
+    primaryAdviserId: adviceInstance.engagement?.primary_adviser_id ?? params.primaryAdviserId,
+    note: "Advice Meeting booked via Calendly.",
+  })
+
+  console.info(`[calendly] advice workflow scheduled ${adviceInstance.id} ${params.scheduledStartAt.toISOString()}`)
+}
+
 /**
  * Extension point reserved for:
  * - Task 42b: per-meeting-type confirmation emails
@@ -1142,6 +1230,14 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
         primaryAdviserId: engagement.primary_adviser_id,
         scheduledStartAt: startAt,
         postBookingContext,
+      })
+    } else if (meetingTypeRow.meeting_type_key === ADVICE_MEETING_KEY) {
+      await handleAdviceWorkflowForCreatedEngagement({
+        engagementId: engagement.id,
+        partyId: engagement.party_id,
+        householdId: engagement.household_id,
+        primaryAdviserId: engagement.primary_adviser_id,
+        scheduledStartAt: startAt,
       })
     } else {
       await spawnWorkflowForEngagement(engagement.id).catch((error) => {

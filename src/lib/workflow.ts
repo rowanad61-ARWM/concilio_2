@@ -8,10 +8,12 @@ import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
 import { resolveEmailForParty, resolveMobileForParty } from "@/lib/party-contact"
 import { syncTaskToMonday } from "@/lib/task-sync"
 import {
+  ADVICE_TEMPLATE_KEY,
   deriveDecisionState,
   ENGAGEMENT_TEMPLATE_KEY,
   usesDecisionStateTemplate,
   type WorkflowDecisionState,
+  type WorkflowUrgency,
 } from "@/lib/workflowState"
 
 const TERMINAL_TASK_STATUSES: TaskStatus[] = ["DONE", "CANCELLED"]
@@ -30,12 +32,17 @@ const SEND_BOOKING_LINK_ACTION_KEY = "send_booking_link"
 const BOOK_IN_CALENDLY_ACTION_KEY = "book_in_calendly"
 const SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY = "send_discovery_booking_link"
 const SEND_ENGAGEMENT_DOC_ACTION_KEY = "send_engagement_doc"
+const SEND_ADVICE_BOOKING_LINK_ACTION_KEY = "send_advice_booking_link"
+const RECORD_SOA_DELIVERED_ACTION_KEY = "record_soa_delivered"
+const MANUALLY_MARK_AUTHORITY_SIGNED_ACTION_KEY = "manually_mark_authority_signed"
 
 const NO_ANSWER_EMAIL_TEMPLATE_ID = "no_answer_followup_email"
 const NO_ANSWER_SMS_TEMPLATE_ID = "no_answer_followup_sms"
 const BOOKING_LINK_TEMPLATE_ID = "calendly_initial_meeting_booking_link"
 const DISCOVERY_BOOKING_LINK_TEMPLATE_ID = "discovery_booking_link"
 const ENGAGEMENT_DOC_TEMPLATE_ID = "engagement_doc"
+const ADVICE_BOOKING_LINK_TEMPLATE_ID = "advice_booking_link"
+const AUTHORITY_TO_PROCEED_TEMPLATE_ID = "authority_to_proceed"
 const DEFAULT_INITIAL_MEETING_URL = "https://calendly.com/arwm/initial-meeting"
 
 function toErrorMessage(error: unknown) {
@@ -99,12 +106,19 @@ function getInitialMeetingBookingUrl() {
   return process.env.CALENDLY_INITIAL_MEETING_URL?.trim() || DEFAULT_INITIAL_MEETING_URL
 }
 
+function getAdviceBookingUrl() {
+  return process.env.CALENDLY_ADVICE_URL?.trim() || ""
+}
+
 function isWorkflowDriverActionKey(value: string): value is WorkflowDriverActionKey {
   return (
     value === SEND_BOOKING_LINK_ACTION_KEY ||
     value === BOOK_IN_CALENDLY_ACTION_KEY ||
     value === SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY ||
-    value === SEND_ENGAGEMENT_DOC_ACTION_KEY
+    value === SEND_ENGAGEMENT_DOC_ACTION_KEY ||
+    value === SEND_ADVICE_BOOKING_LINK_ACTION_KEY ||
+    value === RECORD_SOA_DELIVERED_ACTION_KEY ||
+    value === MANUALLY_MARK_AUTHORITY_SIGNED_ACTION_KEY
   )
 }
 
@@ -322,6 +336,9 @@ export type WorkflowDriverActionKey =
   | typeof BOOK_IN_CALENDLY_ACTION_KEY
   | typeof SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
   | typeof SEND_ENGAGEMENT_DOC_ACTION_KEY
+  | typeof SEND_ADVICE_BOOKING_LINK_ACTION_KEY
+  | typeof RECORD_SOA_DELIVERED_ACTION_KEY
+  | typeof MANUALLY_MARK_AUTHORITY_SIGNED_ACTION_KEY
 
 export type WorkflowDriverActionResult = {
   instanceId: string
@@ -1051,6 +1068,7 @@ export async function sendWorkflowTemplateToClient(
     clientFirstName,
     adviserName,
     calendlyInitialMeetingUrl: getInitialMeetingBookingUrl(),
+    calendlyAdviceUrl: getAdviceBookingUrl(),
   }
   const subject = applyMergeFields(template.subject, mergeData, mergeOverrides)
   const bodyText = applyMergeFields(template.body, mergeData, mergeOverrides)
@@ -1871,6 +1889,9 @@ export async function completeWorkflowInstanceWithOutcome(
  * - book_in_calendly: adviser records that they will book the meeting directly in Calendly.
  * - send_discovery_booking_link: adviser sends the Discovery Meeting Calendly link to the client.
  * - send_engagement_doc: adviser sends or resends the Engagement document to the client.
+ * - send_advice_booking_link: adviser sends the Advice Meeting Calendly link to the client.
+ * - record_soa_delivered: adviser records SoA delivery and sends Authority to Proceed.
+ * - manually_mark_authority_signed: adviser records that Authority to Proceed is signed.
  */
 export async function recordDriverAction(
   instanceId: string,
@@ -1880,7 +1901,7 @@ export async function recordDriverAction(
   const normalizedActionKey = actionKey.trim()
   if (!isWorkflowDriverActionKey(normalizedActionKey)) {
     throw new InvalidDriverActionError(
-      "actionKey must be send_booking_link, book_in_calendly, send_discovery_booking_link, or send_engagement_doc.",
+      "actionKey must be send_booking_link, book_in_calendly, send_discovery_booking_link, send_engagement_doc, send_advice_booking_link, record_soa_delivered, or manually_mark_authority_signed.",
     )
   }
 
@@ -1930,8 +1951,27 @@ export async function recordDriverAction(
     instance.workflow_template.key === ENGAGEMENT_TEMPLATE_KEY &&
     derivedState?.state === "driving_engagement_doc" &&
     normalizedActionKey === SEND_ENGAGEMENT_DOC_ACTION_KEY
+  const isAdviceBookingAction =
+    instance.workflow_template.key === ADVICE_TEMPLATE_KEY &&
+    derivedState?.state === "driving_meeting_booking" &&
+    normalizedActionKey === SEND_ADVICE_BOOKING_LINK_ACTION_KEY
+  const isAdviceSoaDeliveredAction =
+    instance.workflow_template.key === ADVICE_TEMPLATE_KEY &&
+    derivedState?.state === "driving_advice_delivery" &&
+    normalizedActionKey === RECORD_SOA_DELIVERED_ACTION_KEY
+  const isAdviceAuthoritySignedAction =
+    instance.workflow_template.key === ADVICE_TEMPLATE_KEY &&
+    derivedState?.state === "driving_authority_signature" &&
+    normalizedActionKey === MANUALLY_MARK_AUTHORITY_SIGNED_ACTION_KEY
 
-  if (!isInitialContactBookingAction && !isInitialMeetingDiscoveryAction && !isEngagementDocAction) {
+  if (
+    !isInitialContactBookingAction &&
+    !isInitialMeetingDiscoveryAction &&
+    !isEngagementDocAction &&
+    !isAdviceBookingAction &&
+    !isAdviceSoaDeliveredAction &&
+    !isAdviceAuthoritySignedAction
+  ) {
     throw new InvalidDriverActionError("Driver actions require an eligible workflow state.")
   }
 
@@ -1959,6 +1999,20 @@ export async function recordDriverAction(
       actorUserId: userId,
     })
     emailSent = true
+  } else if (normalizedActionKey === SEND_ADVICE_BOOKING_LINK_ACTION_KEY) {
+    await sendWorkflowTemplateToClient(db, {
+      templateId: ADVICE_BOOKING_LINK_TEMPLATE_ID,
+      engagement: instance.engagement,
+      actorUserId: userId,
+    })
+    emailSent = true
+  } else if (normalizedActionKey === RECORD_SOA_DELIVERED_ACTION_KEY) {
+    await sendWorkflowTemplateToClient(db, {
+      templateId: AUTHORITY_TO_PROCEED_TEMPLATE_ID,
+      engagement: instance.engagement,
+      actorUserId: userId,
+    })
+    emailSent = true
   }
 
   await db.$transaction(async (tx) => {
@@ -1973,7 +2027,13 @@ export async function recordDriverAction(
             ? "Discovery Meeting booking link sent to client."
             : normalizedActionKey === SEND_ENGAGEMENT_DOC_ACTION_KEY
               ? "Engagement document sent to client."
-              : "Adviser will book Initial Meeting in Calendly directly.",
+              : normalizedActionKey === SEND_ADVICE_BOOKING_LINK_ACTION_KEY
+                ? "Advice Meeting booking link sent to client."
+                : normalizedActionKey === RECORD_SOA_DELIVERED_ACTION_KEY
+                  ? "SoA delivered and Authority to Proceed sent to client."
+                  : normalizedActionKey === MANUALLY_MARK_AUTHORITY_SIGNED_ACTION_KEY
+                    ? "Authority to Proceed marked signed."
+                    : "Adviser will book Initial Meeting in Calendly directly.",
       at: now,
     })
   })
@@ -2109,11 +2169,13 @@ function deriveDecisionSnapshot(instance: {
 } | null): {
   decisionState: JourneyDecisionState
   awaitingEventEndsAt: Date | null
+  urgency: WorkflowUrgency | null
 } {
   if (!instance) {
     return {
       decisionState: "awaiting_event",
       awaitingEventEndsAt: null,
+      urgency: null,
     }
   }
 
@@ -2122,6 +2184,7 @@ function deriveDecisionSnapshot(instance: {
     return {
       decisionState: derived.state,
       awaitingEventEndsAt: derived.awaitingEventEndsAt,
+      urgency: derived.urgency ?? null,
     }
   }
 
@@ -2129,12 +2192,14 @@ function deriveDecisionSnapshot(instance: {
     return {
       decisionState: "paused",
       awaitingEventEndsAt: null,
+      urgency: null,
     }
   }
 
   return {
     decisionState: "ready_for_outcome",
     awaitingEventEndsAt: null,
+    urgency: null,
   }
 }
 
@@ -2245,6 +2310,7 @@ export async function getJourneyState(engagementId: string) {
     serviceSegment: classification?.service_segment ?? null,
     decisionState: decisionSnapshot.decisionState,
     awaitingEventEndsAt: decisionSnapshot.awaitingEventEndsAt,
+    urgency: decisionSnapshot.urgency,
     currentOutcomeKey: currentInstance?.current_outcome_key ?? null,
     noAnswerAttempts: currentInstance?.no_answer_attempts ?? 0,
     lastDriverActionKey: currentInstance?.last_driver_action_key ?? null,

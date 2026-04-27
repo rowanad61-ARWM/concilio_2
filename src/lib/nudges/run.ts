@@ -93,6 +93,10 @@ function getInitialMeetingBookingUrl() {
   return process.env.CALENDLY_INITIAL_MEETING_URL?.trim() || DEFAULT_INITIAL_MEETING_URL
 }
 
+function getAdviceBookingUrl() {
+  return process.env.CALENDLY_ADVICE_URL?.trim() || ""
+}
+
 function isUniqueConstraintError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
 }
@@ -325,6 +329,7 @@ async function sendResolvedNudge(params: {
       clientFirstName: party.person?.legal_given_name || firstWord(party.display_name) || "there",
       adviserName: params.actor.name || "Andrew Rowan",
       calendlyInitialMeetingUrl: getInitialMeetingBookingUrl(),
+      calendlyAdviceUrl: getAdviceBookingUrl(),
     })
 
     return sendNudgeSms({

@@ -170,6 +170,7 @@ export async function GET(
       currentPhaseTaskSummary,
       decisionState: state.decisionState,
       awaitingEventEndsAt: toIsoString(state.awaitingEventEndsAt),
+      urgency: state.urgency,
       currentOutcomeKey: state.currentOutcomeKey,
       noAnswerAttempts: state.noAnswerAttempts,
       lastDriverActionKey: state.lastDriverActionKey,

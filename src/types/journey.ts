@@ -1,4 +1,4 @@
-import type { WorkflowDecisionState } from "@/lib/workflowState"
+import type { WorkflowDecisionState, WorkflowUrgency } from "@/lib/workflowState"
 
 export type LifecycleStage =
   | "prospect"
@@ -18,6 +18,7 @@ export type JourneyTaskSummary = {
 }
 
 export type JourneyDecisionState = WorkflowDecisionState
+export type JourneyUrgency = WorkflowUrgency
 
 export type JourneyOutcomeCatalogEntry = {
   outcomeKey: string
@@ -55,6 +56,7 @@ export type JourneyCurrentInstance = JourneyScopedInstance & {
   taskSummary: JourneyTaskSummary
   decisionState: JourneyDecisionState | null
   awaitingEventEndsAt: string | null
+  urgency: JourneyUrgency | null
   currentOutcomeKey: string | null
   noAnswerAttempts: number
   lastDriverActionKey: string | null
@@ -98,6 +100,7 @@ export type EngagementJourneyResponse = {
   currentPhaseTaskSummary: JourneyTaskSummary | null
   decisionState: JourneyDecisionState
   awaitingEventEndsAt: string | null
+  urgency: JourneyUrgency | null
   currentOutcomeKey: string | null
   noAnswerAttempts: number
   lastDriverActionKey: string | null
