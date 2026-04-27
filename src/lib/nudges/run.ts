@@ -5,15 +5,12 @@ import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
 import { sendNudgeEmail } from "@/lib/nudges/channels/email"
 import { sendNudgeSms } from "@/lib/nudges/channels/sms"
 import { resolveEmailForParty, resolveMobileForParty } from "@/lib/party-contact"
+import { deriveDecisionState } from "@/lib/workflowState"
 import {
   createJourneyTimelineEvent,
   setOutcomeForWorkflowInstance,
 } from "@/lib/workflow"
 
-const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
-const DRIVING_BOOKING_STATE_KEY = "driving_booking"
-const SUITABLE_OUTCOME_KEY = "suitable"
-const SEND_BOOKING_LINK_ACTION_KEY = "send_booking_link"
 const DEFAULT_INITIAL_MEETING_URL = "https://calendly.com/arwm/initial-meeting"
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -105,16 +102,6 @@ async function loadEligibleInstances() {
     where: {
       status: "active",
       nudges_muted: false,
-      current_outcome_key: SUITABLE_OUTCOME_KEY,
-      last_driver_action_at: {
-        not: null,
-      },
-      last_driver_action_key: {
-        not: null,
-      },
-      workflow_template: {
-        key: INITIAL_CONTACT_TEMPLATE_KEY,
-      },
     },
     include: {
       workflow_template: {
@@ -163,16 +150,16 @@ async function loadEligibleInstances() {
   })
 }
 
-async function loadNudgeTemplatesForInstance(instance: NudgeInstance) {
-  if (!instance.last_driver_action_key) {
-    return []
-  }
-
+async function loadNudgeTemplatesForInstance(
+  instance: NudgeInstance,
+  decisionState: string,
+  driverActionKey: string,
+) {
   return db.workflow_template_nudge.findMany({
     where: {
       workflow_template_key: instance.workflow_template.key,
-      decision_state_key: DRIVING_BOOKING_STATE_KEY,
-      driver_action_key: instance.last_driver_action_key,
+      decision_state_key: decisionState,
+      driver_action_key: driverActionKey,
     },
     orderBy: {
       nudge_sequence_index: "asc",
@@ -436,7 +423,26 @@ export async function runWorkflowNudges(options?: {
 
   for (const instance of instances) {
     const engagementId = instance.engagement.id
-    const templates = await loadNudgeTemplatesForInstance(instance)
+    const decisionState = deriveDecisionState(instance)?.state
+    if (!decisionState) {
+      result.decisions.push({
+        workflowInstanceId: instance.id,
+        engagementId,
+        result: "no_decision_state",
+      })
+      continue
+    }
+
+    if (!instance.last_driver_action_key) {
+      result.decisions.push({
+        workflowInstanceId: instance.id,
+        engagementId,
+        result: "missing_driver_action_key",
+      })
+      continue
+    }
+
+    const templates = await loadNudgeTemplatesForInstance(instance, decisionState, instance.last_driver_action_key)
     if (templates.length === 0) {
       result.decisions.push({
         workflowInstanceId: instance.id,

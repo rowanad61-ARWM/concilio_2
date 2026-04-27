@@ -7,6 +7,12 @@ import { sendMailAsAdviser } from "@/lib/graphMail"
 import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
 import { resolveEmailForParty, resolveMobileForParty } from "@/lib/party-contact"
 import { syncTaskToMonday } from "@/lib/task-sync"
+import {
+  deriveDecisionState,
+  ENGAGEMENT_TEMPLATE_KEY,
+  usesDecisionStateTemplate,
+  type WorkflowDecisionState,
+} from "@/lib/workflowState"
 
 const TERMINAL_TASK_STATUSES: TaskStatus[] = ["DONE", "CANCELLED"]
 const WORKFLOW_ACTIVE_STATUSES = ["active", "paused"] as const
@@ -16,8 +22,6 @@ const DEFAULT_TASK_CATEGORY = "General"
 const CLOSING_TEMPLATE_KEY = "closing"
 const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
 const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
-const DISCOVERY_TEMPLATE_KEY = "discovery"
-const DECISION_STATE_TEMPLATE_KEYS = [INITIAL_CONTACT_TEMPLATE_KEY, INITIAL_MEETING_TEMPLATE_KEY, DISCOVERY_TEMPLATE_KEY] as const
 const NO_ANSWER_OUTCOME_KEY = "no_answer"
 const SUITABLE_OUTCOME_KEY = "suitable"
 const PROCEEDING_TO_DISCOVERY_OUTCOME_KEY = "proceeding_to_discovery"
@@ -25,17 +29,14 @@ const ON_HOLD_OUTCOME_KEY = "on_hold"
 const SEND_BOOKING_LINK_ACTION_KEY = "send_booking_link"
 const BOOK_IN_CALENDLY_ACTION_KEY = "book_in_calendly"
 const SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY = "send_discovery_booking_link"
+const SEND_ENGAGEMENT_DOC_ACTION_KEY = "send_engagement_doc"
 
-function usesDecisionStateTemplate(templateKey: string) {
-  return DECISION_STATE_TEMPLATE_KEYS.includes(templateKey as (typeof DECISION_STATE_TEMPLATE_KEYS)[number])
-}
 const NO_ANSWER_EMAIL_TEMPLATE_ID = "no_answer_followup_email"
 const NO_ANSWER_SMS_TEMPLATE_ID = "no_answer_followup_sms"
 const BOOKING_LINK_TEMPLATE_ID = "calendly_initial_meeting_booking_link"
 const DISCOVERY_BOOKING_LINK_TEMPLATE_ID = "discovery_booking_link"
+const ENGAGEMENT_DOC_TEMPLATE_ID = "engagement_doc"
 const DEFAULT_INITIAL_MEETING_URL = "https://calendly.com/arwm/initial-meeting"
-const INITIAL_CONTACT_MEETING_DURATION_MS = 15 * 60 * 1000
-const OUTCOME_READY_BUFFER_MS = 60 * 60 * 1000
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -102,7 +103,8 @@ function isWorkflowDriverActionKey(value: string): value is WorkflowDriverAction
   return (
     value === SEND_BOOKING_LINK_ACTION_KEY ||
     value === BOOK_IN_CALENDLY_ACTION_KEY ||
-    value === SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
+    value === SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY ||
+    value === SEND_ENGAGEMENT_DOC_ACTION_KEY
   )
 }
 
@@ -319,6 +321,7 @@ export type WorkflowDriverActionKey =
   | typeof SEND_BOOKING_LINK_ACTION_KEY
   | typeof BOOK_IN_CALENDLY_ACTION_KEY
   | typeof SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
+  | typeof SEND_ENGAGEMENT_DOC_ACTION_KEY
 
 export type WorkflowDriverActionResult = {
   instanceId: string
@@ -327,7 +330,7 @@ export type WorkflowDriverActionResult = {
   emailSent: boolean
 }
 
-export type JourneyDecisionState = "awaiting_event" | "ready_for_outcome" | "driving_booking" | "paused"
+export type JourneyDecisionState = WorkflowDecisionState
 
 function toStageFromTemplateKey(templateKey: string | null) {
   if (!templateKey) {
@@ -813,7 +816,7 @@ async function upsertLifecycleStageForEngagement(
 }
 
 async function resolveTimelineAuthorId(
-  tx: Prisma.TransactionClient,
+  tx: DbClient,
   engagement: { primary_adviser_id: string | null },
 ) {
   if (engagement.primary_adviser_id) {
@@ -843,8 +846,17 @@ async function resolveTimelineAuthorId(
   return fallback?.id ?? null
 }
 
+async function resolveWorkflowActorId(client: DbClient, engagement: { primary_adviser_id: string | null }) {
+  const actorId = await resolveTimelineAuthorId(client, engagement)
+  if (!actorId) {
+    throw new WorkflowCommunicationError("No user_account exists for workflow communication.")
+  }
+
+  return actorId
+}
+
 export async function createJourneyTimelineEvent(
-  tx: Prisma.TransactionClient,
+  tx: DbClient,
   params: {
     engagementId: string
     partyId: string | null
@@ -871,6 +883,72 @@ export async function createJourneyTimelineEvent(
       created_at: params.at,
       updated_at: params.at,
     },
+  })
+}
+
+async function markDriverActionAndTimeline(
+  client: DbClient,
+  params: {
+    instanceId: string
+    engagement: {
+      id: string
+      party_id: string | null
+      household_id: string | null
+      primary_adviser_id: string | null
+    }
+    actionKey: WorkflowDriverActionKey
+    note: string
+    at: Date
+  },
+) {
+  await client.workflow_instance.update({
+    where: {
+      id: params.instanceId,
+    },
+    data: {
+      last_driver_action_key: params.actionKey,
+      last_driver_action_at: params.at,
+      last_event_at: params.at,
+      updated_at: params.at,
+    },
+  })
+
+  await createJourneyTimelineEvent(client, {
+    engagementId: params.engagement.id,
+    partyId: params.engagement.party_id,
+    householdId: params.engagement.household_id,
+    primaryAdviserId: params.engagement.primary_adviser_id,
+    note: params.note,
+    at: params.at,
+  })
+}
+
+async function sendEngagementDocumentForWorkflowInstance(params: {
+  instanceId: string
+  engagement: {
+    id: string
+    party_id: string | null
+    household_id: string | null
+    primary_adviser_id: string | null
+  }
+  at: Date
+}) {
+  const actorUserId = await resolveWorkflowActorId(db, params.engagement)
+
+  await sendWorkflowTemplateToClient(db, {
+    templateId: ENGAGEMENT_DOC_TEMPLATE_ID,
+    engagement: params.engagement,
+    actorUserId,
+  })
+
+  await db.$transaction(async (tx) => {
+    await markDriverActionAndTimeline(tx, {
+      instanceId: params.instanceId,
+      engagement: params.engagement,
+      actionKey: SEND_ENGAGEMENT_DOC_ACTION_KEY,
+      note: "Engagement document sent to client.",
+      at: params.at,
+    })
   })
 }
 
@@ -1792,6 +1870,7 @@ export async function completeWorkflowInstanceWithOutcome(
  * - send_booking_link: adviser sends the Initial Meeting Calendly link to the client.
  * - book_in_calendly: adviser records that they will book the meeting directly in Calendly.
  * - send_discovery_booking_link: adviser sends the Discovery Meeting Calendly link to the client.
+ * - send_engagement_doc: adviser sends or resends the Engagement document to the client.
  */
 export async function recordDriverAction(
   instanceId: string,
@@ -1801,7 +1880,7 @@ export async function recordDriverAction(
   const normalizedActionKey = actionKey.trim()
   if (!isWorkflowDriverActionKey(normalizedActionKey)) {
     throw new InvalidDriverActionError(
-      "actionKey must be send_booking_link, book_in_calendly, or send_discovery_booking_link.",
+      "actionKey must be send_booking_link, book_in_calendly, send_discovery_booking_link, or send_engagement_doc.",
     )
   }
 
@@ -1846,9 +1925,14 @@ export async function recordDriverAction(
     instance.workflow_template.key === INITIAL_MEETING_TEMPLATE_KEY &&
     instance.current_outcome_key === PROCEEDING_TO_DISCOVERY_OUTCOME_KEY &&
     normalizedActionKey === SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
+  const derivedState = deriveDecisionState(instance)
+  const isEngagementDocAction =
+    instance.workflow_template.key === ENGAGEMENT_TEMPLATE_KEY &&
+    derivedState?.state === "driving_engagement_doc" &&
+    normalizedActionKey === SEND_ENGAGEMENT_DOC_ACTION_KEY
 
-  if (!isInitialContactBookingAction && !isInitialMeetingDiscoveryAction) {
-    throw new InvalidDriverActionError("Booking driver actions require an eligible workflow outcome.")
+  if (!isInitialContactBookingAction && !isInitialMeetingDiscoveryAction && !isEngagementDocAction) {
+    throw new InvalidDriverActionError("Driver actions require an eligible workflow state.")
   }
 
   const now = new Date()
@@ -1868,32 +1952,28 @@ export async function recordDriverAction(
       actorUserId: userId,
     })
     emailSent = true
+  } else if (normalizedActionKey === SEND_ENGAGEMENT_DOC_ACTION_KEY) {
+    await sendWorkflowTemplateToClient(db, {
+      templateId: ENGAGEMENT_DOC_TEMPLATE_ID,
+      engagement: instance.engagement,
+      actorUserId: userId,
+    })
+    emailSent = true
   }
 
   await db.$transaction(async (tx) => {
-    await tx.workflow_instance.update({
-      where: {
-        id: instance.id,
-      },
-      data: {
-        last_driver_action_key: normalizedActionKey,
-        last_driver_action_at: now,
-        last_event_at: now,
-        updated_at: now,
-      },
-    })
-
-    await createJourneyTimelineEvent(tx, {
-      engagementId: instance.engagement.id,
-      partyId: instance.engagement.party_id,
-      householdId: instance.engagement.household_id,
-      primaryAdviserId: instance.engagement.primary_adviser_id,
+    await markDriverActionAndTimeline(tx, {
+      instanceId: instance.id,
+      engagement: instance.engagement,
+      actionKey: normalizedActionKey,
       note:
         normalizedActionKey === SEND_BOOKING_LINK_ACTION_KEY
           ? "Initial Meeting booking link sent to client."
           : normalizedActionKey === SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
             ? "Discovery Meeting booking link sent to client."
-            : "Adviser will book Initial Meeting in Calendly directly.",
+            : normalizedActionKey === SEND_ENGAGEMENT_DOC_ACTION_KEY
+              ? "Engagement document sent to client."
+              : "Adviser will book Initial Meeting in Calendly directly.",
       at: now,
     })
   })
@@ -2019,8 +2099,10 @@ export async function getCurrentAdvanceChainInstance(engagementId: string): Prom
 function deriveDecisionSnapshot(instance: {
   status: string
   trigger_date: Date
+  scheduled_start_date?: Date | null
   current_outcome_key: string | null
   last_driver_action_key: string | null
+  last_driver_action_at?: Date | null
   workflow_template: {
     key: string
   }
@@ -2035,46 +2117,17 @@ function deriveDecisionSnapshot(instance: {
     }
   }
 
+  const derived = deriveDecisionState(instance)
+  if (derived) {
+    return {
+      decisionState: derived.state,
+      awaitingEventEndsAt: derived.awaitingEventEndsAt,
+    }
+  }
+
   if (instance.status === "paused" || instance.current_outcome_key === ON_HOLD_OUTCOME_KEY) {
     return {
       decisionState: "paused",
-      awaitingEventEndsAt: null,
-    }
-  }
-
-  if (!usesDecisionStateTemplate(instance.workflow_template.key)) {
-    return {
-      decisionState: "ready_for_outcome",
-      awaitingEventEndsAt: null,
-    }
-  }
-
-  if (!instance.current_outcome_key) {
-    const awaitingEventEndsAt = addMilliseconds(
-      instance.trigger_date,
-      INITIAL_CONTACT_MEETING_DURATION_MS + OUTCOME_READY_BUFFER_MS,
-    )
-
-    if (awaitingEventEndsAt.getTime() > Date.now()) {
-      return {
-        decisionState: "awaiting_event",
-        awaitingEventEndsAt,
-      }
-    }
-
-    return {
-      decisionState: "ready_for_outcome",
-      awaitingEventEndsAt: null,
-    }
-  }
-
-  if (
-    instance.current_outcome_key === SUITABLE_OUTCOME_KEY ||
-    (instance.workflow_template.key === INITIAL_MEETING_TEMPLATE_KEY &&
-      instance.current_outcome_key === PROCEEDING_TO_DISCOVERY_OUTCOME_KEY)
-  ) {
-    return {
-      decisionState: "driving_booking",
       awaitingEventEndsAt: null,
     }
   }
@@ -2354,6 +2407,21 @@ export async function advanceEngagementToNextPhase(
   })
 
   await syncTaskIdsToMonday(touchedTaskIds)
+
+  if (targetTemplate?.key === ENGAGEMENT_TEMPLATE_KEY && transactionResult.newInstance) {
+    try {
+      await sendEngagementDocumentForWorkflowInstance({
+        instanceId: transactionResult.newInstance.id,
+        engagement,
+        at: new Date(),
+      })
+    } catch (error) {
+      console.error(
+        `[workflow] engagement-doc-auto-send-failed ${transactionResult.newInstance.id} ${toErrorMessage(error)}`,
+      )
+    }
+  }
+
   return transactionResult
 }
 

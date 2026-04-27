@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
 import { db } from "@/lib/db"
+import { deriveDecisionState, usesDecisionStateTemplate } from "@/lib/workflowState"
 import type {
   ClientJourneyResponse,
   JourneyDecisionState,
@@ -15,25 +16,9 @@ import type {
   ServiceSegment,
 } from "@/types/journey"
 
-const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
-const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
 const DISCOVERY_TEMPLATE_KEY = "discovery"
-const DECISION_STATE_TEMPLATE_KEYS = [
-  INITIAL_CONTACT_TEMPLATE_KEY,
-  INITIAL_MEETING_TEMPLATE_KEY,
-  DISCOVERY_TEMPLATE_KEY,
-] as const
-const SUITABLE_OUTCOME_KEY = "suitable"
-const PROCEEDING_TO_DISCOVERY_OUTCOME_KEY = "proceeding_to_discovery"
-const ON_HOLD_OUTCOME_KEY = "on_hold"
-const INITIAL_CONTACT_MEETING_DURATION_MS = 15 * 60 * 1000
 const WORKFLOW_ACTIVE_STATUSES = ["active", "paused"] as const
 const WORKFLOW_COMPLETED_OR_STOPPED_STATUSES = ["completed", "cancelled"] as const
-
-function usesDecisionStateTemplate(templateKey: string) {
-  return DECISION_STATE_TEMPLATE_KEYS.includes(templateKey as (typeof DECISION_STATE_TEMPLATE_KEYS)[number])
-}
-const OUTCOME_READY_BUFFER_MS = 60 * 60 * 1000
 
 function isActiveWorkflowStatus(status: string) {
   return WORKFLOW_ACTIVE_STATUSES.includes(status as (typeof WORKFLOW_ACTIVE_STATUSES)[number])
@@ -59,10 +44,6 @@ function toErrorMessage(error: unknown) {
 
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null
-}
-
-function addMilliseconds(value: Date, milliseconds: number) {
-  return new Date(value.getTime() + milliseconds)
 }
 
 function toTemplateSummary(template: {
@@ -98,7 +79,10 @@ function toPhaseTarget(template: {
 function deriveDecisionSnapshot(instance: {
   status: string
   trigger_date: Date
+  scheduled_start_date?: Date | null
   current_outcome_key: string | null
+  last_driver_action_key?: string | null
+  last_driver_action_at?: Date | null
   workflow_template: {
     key: string
   }
@@ -113,46 +97,10 @@ function deriveDecisionSnapshot(instance: {
     }
   }
 
-  if (instance.status === "paused" || instance.current_outcome_key === ON_HOLD_OUTCOME_KEY) {
-    return {
-      decisionState: "paused",
-      awaitingEventEndsAt: null,
-    }
-  }
-
-  if (!instance.current_outcome_key) {
-    const awaitingEventEndsAt = addMilliseconds(
-      instance.trigger_date,
-      INITIAL_CONTACT_MEETING_DURATION_MS + OUTCOME_READY_BUFFER_MS,
-    )
-
-    if (awaitingEventEndsAt.getTime() > Date.now()) {
-      return {
-        decisionState: "awaiting_event",
-        awaitingEventEndsAt,
-      }
-    }
-
-    return {
-      decisionState: "ready_for_outcome",
-      awaitingEventEndsAt: null,
-    }
-  }
-
-  if (
-    instance.current_outcome_key === SUITABLE_OUTCOME_KEY ||
-    (instance.workflow_template.key === INITIAL_MEETING_TEMPLATE_KEY &&
-      instance.current_outcome_key === PROCEEDING_TO_DISCOVERY_OUTCOME_KEY)
-  ) {
-    return {
-      decisionState: "driving_booking",
-      awaitingEventEndsAt: null,
-    }
-  }
-
+  const derived = deriveDecisionState(instance)
   return {
-    decisionState: "ready_for_outcome",
-    awaitingEventEndsAt: null,
+    decisionState: derived?.state ?? null,
+    awaitingEventEndsAt: derived?.awaitingEventEndsAt ?? null,
   }
 }
 

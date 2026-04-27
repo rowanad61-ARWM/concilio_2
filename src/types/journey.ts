@@ -1,3 +1,5 @@
+import type { WorkflowDecisionState } from "@/lib/workflowState"
+
 export type LifecycleStage =
   | "prospect"
   | "engagement"
@@ -15,7 +17,7 @@ export type JourneyTaskSummary = {
   allComplete: boolean
 }
 
-export type JourneyDecisionState = "awaiting_event" | "ready_for_outcome" | "driving_booking" | "paused"
+export type JourneyDecisionState = WorkflowDecisionState
 
 export type JourneyOutcomeCatalogEntry = {
   outcomeKey: string
