@@ -16,9 +16,15 @@ import type {
 } from "@/types/journey"
 
 const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
+const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
+const DECISION_STATE_TEMPLATE_KEYS = [INITIAL_CONTACT_TEMPLATE_KEY, INITIAL_MEETING_TEMPLATE_KEY] as const
 const SUITABLE_OUTCOME_KEY = "suitable"
 const ON_HOLD_OUTCOME_KEY = "on_hold"
 const INITIAL_CONTACT_MEETING_DURATION_MS = 15 * 60 * 1000
+
+function usesDecisionStateTemplate(templateKey: string) {
+  return DECISION_STATE_TEMPLATE_KEYS.includes(templateKey as (typeof DECISION_STATE_TEMPLATE_KEYS)[number])
+}
 const OUTCOME_READY_BUFFER_MS = 60 * 60 * 1000
 
 function toErrorMessage(error: unknown) {
@@ -82,7 +88,7 @@ function deriveDecisionSnapshot(instance: {
   decisionState: JourneyDecisionState | null
   awaitingEventEndsAt: Date | null
 } {
-  if (!instance || instance.workflow_template.key !== INITIAL_CONTACT_TEMPLATE_KEY) {
+  if (!instance || !usesDecisionStateTemplate(instance.workflow_template.key)) {
     return {
       decisionState: null,
       awaitingEventEndsAt: null,
@@ -362,7 +368,7 @@ export async function GET(
     const currentTaskSummary = current ? await getTaskSummaryForInstance(current.id) : null
     const decisionSnapshot = deriveDecisionSnapshot(current)
     const currentOutcomeCatalog =
-      current && current.workflow_template.key === INITIAL_CONTACT_TEMPLATE_KEY
+      current && usesDecisionStateTemplate(current.workflow_template.key)
         ? await getOutcomeCatalogForWorkflowTemplate(current.workflow_template.id)
         : []
 

@@ -15,9 +15,15 @@ const WORKFLOW_TERMINAL_STATUSES = ["completed", "cancelled"] as const
 const DEFAULT_TASK_CATEGORY = "General"
 const CLOSING_TEMPLATE_KEY = "closing"
 const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
+const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
+const DECISION_STATE_TEMPLATE_KEYS = [INITIAL_CONTACT_TEMPLATE_KEY, INITIAL_MEETING_TEMPLATE_KEY] as const
 const NO_ANSWER_OUTCOME_KEY = "no_answer"
 const SUITABLE_OUTCOME_KEY = "suitable"
 const ON_HOLD_OUTCOME_KEY = "on_hold"
+
+function usesDecisionStateTemplate(templateKey: string) {
+  return DECISION_STATE_TEMPLATE_KEYS.includes(templateKey as (typeof DECISION_STATE_TEMPLATE_KEYS)[number])
+}
 const NO_ANSWER_EMAIL_TEMPLATE_ID = "no_answer_followup_email"
 const NO_ANSWER_SMS_TEMPLATE_ID = "no_answer_followup_sms"
 const BOOKING_LINK_TEMPLATE_ID = "calendly_initial_meeting_booking_link"
@@ -645,9 +651,7 @@ async function spawnWorkflowWithTemplate(
   // Only root task templates spawn at workflow start.
   // Downstream templates are spawned by setOutcomeForSpawnedTask via spawn_next_task_template_id.
   const rootTaskTemplates =
-    template.key === INITIAL_CONTACT_TEMPLATE_KEY
-      ? []
-      : await resolveRootTaskTemplates(client, template)
+    usesDecisionStateTemplate(template.key) ? [] : await resolveRootTaskTemplates(client, template)
 
   for (const taskTemplate of rootTaskTemplates) {
     const createdTaskId = await createSpawnedTaskFromTemplate(client, {
@@ -1901,7 +1905,7 @@ function deriveDecisionSnapshot(instance: {
     }
   }
 
-  if (instance.workflow_template.key !== INITIAL_CONTACT_TEMPLATE_KEY) {
+  if (!usesDecisionStateTemplate(instance.workflow_template.key)) {
     return {
       decisionState: "ready_for_outcome",
       awaitingEventEndsAt: null,
@@ -2059,9 +2063,11 @@ export async function advanceEngagementToNextPhase(
   options?: {
     targetPhaseKey?: string
     advanceDate?: Date
+    nextTriggerDate?: Date
   },
 ) {
   const advanceDate = isValidDate(options?.advanceDate) ? options!.advanceDate : new Date()
+  const nextTriggerDate = isValidDate(options?.nextTriggerDate) ? options!.nextTriggerDate : advanceDate
 
   const engagement = await db.engagement.findUnique({
     where: {
@@ -2185,7 +2191,7 @@ export async function advanceEngagementToNextPhase(
     }
 
     if (targetTemplate) {
-      const spawnResult = await spawnForEngagementWithOptionalTemplate(tx, engagement, targetTemplate.id, advanceDate)
+      const spawnResult = await spawnForEngagementWithOptionalTemplate(tx, engagement, targetTemplate.id, nextTriggerDate)
       if (!spawnResult) {
         throw new WorkflowTemplateNotFoundError(`Unable to spawn workflow for template "${targetTemplate.key}".`)
       }

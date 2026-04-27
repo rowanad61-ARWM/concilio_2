@@ -635,6 +635,7 @@ async function handleInitialMeetingWorkflowForCreatedEngagement(params: {
   partyId: string | null
   householdId: string | null
   primaryAdviserId: string | null
+  scheduledStartAt: Date | null
 }) {
   if (!params.partyId) {
     await spawnWorkflowForEngagement(params.engagementId).catch((error) => {
@@ -691,7 +692,9 @@ async function handleInitialMeetingWorkflowForCreatedEngagement(params: {
     (instance) => instance.workflow_template.key === INITIAL_CONTACT_TEMPLATE_KEY,
   )
   if (initialContactInstance) {
-    await advanceEngagementToNextPhase(initialContactInstance.engagement_id).catch((error) => {
+    await advanceEngagementToNextPhase(initialContactInstance.engagement_id, {
+      nextTriggerDate: params.scheduledStartAt ?? undefined,
+    }).catch((error) => {
       console.error(
         `[calendly] workflow advance failed ${initialContactInstance.engagement_id} ${toErrorMessage(error)}`,
       )
@@ -1022,6 +1025,7 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
         partyId: engagement.party_id,
         householdId: engagement.household_id,
         primaryAdviserId: engagement.primary_adviser_id,
+        scheduledStartAt: startAt,
       })
     } else {
       await spawnWorkflowForEngagement(engagement.id).catch((error) => {

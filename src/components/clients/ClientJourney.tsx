@@ -268,7 +268,10 @@ export default function ClientJourney({
     (journey?.pastInstances.length ?? 0) === 0 &&
     (journey?.triggerInstances.length ?? 0) === 0
   const showServiceSegmentEditor = lifecycleStage === "client" && !isTerminal
-  const usesDecisionCard = current?.template.key === "initial_contact" && current.decisionState !== null
+  const usesDecisionCard =
+    current !== null &&
+    ["initial_contact", "initial_meeting"].includes(current.template.key) &&
+    current.decisionState !== null
   const outcomeCatalog = useMemo(() => current?.outcomeCatalog ?? [], [current])
   const selectedOutcome = outcomeCatalog.find((outcome) => outcome.outcomeKey === selectedOutcomeKey) ?? null
   const outcomeToConfirm =
