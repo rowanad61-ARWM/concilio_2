@@ -18,6 +18,7 @@ import type {
   JourneyCurrentInstance,
   JourneyOutcomeCatalogEntry,
   JourneyPhaseTarget,
+  JourneyUrgency,
   LifecycleStage,
   ServiceSegment,
 } from "@/types/journey"
@@ -50,14 +51,28 @@ const LIFECYCLE_STAGE_LABELS: Record<LifecycleStage, string> = {
 const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
 const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
 const DISCOVERY_TEMPLATE_KEY = "discovery"
+const ENGAGEMENT_TEMPLATE_KEY = "engagement"
+const ADVICE_TEMPLATE_KEY = "advice"
+const IMPLEMENTATION_TEMPLATE_KEY = "implementation"
 const DECISION_STATE_TEMPLATE_KEYS = [
   INITIAL_CONTACT_TEMPLATE_KEY,
   INITIAL_MEETING_TEMPLATE_KEY,
   DISCOVERY_TEMPLATE_KEY,
+  ENGAGEMENT_TEMPLATE_KEY,
+  ADVICE_TEMPLATE_KEY,
+  IMPLEMENTATION_TEMPLATE_KEY,
 ] as const
 const SEND_BOOKING_LINK_ACTION_KEY = "send_booking_link"
 const BOOK_IN_CALENDLY_ACTION_KEY = "book_in_calendly"
 const SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY = "send_discovery_booking_link"
+const SEND_ENGAGEMENT_DOC_ACTION_KEY = "send_engagement_doc"
+const SEND_ADVICE_BOOKING_LINK_ACTION_KEY = "send_advice_booking_link"
+const RECORD_SOA_DELIVERED_ACTION_KEY = "record_soa_delivered"
+const MANUALLY_MARK_AUTHORITY_SIGNED_ACTION_KEY = "manually_mark_authority_signed"
+const COMPLETED_IMPLEMENTATION_OUTCOME_KEYS = [
+  "completed_with_annual_service",
+  "completed_setup_only",
+] as const
 
 const PHASE_KEY_TO_STAGE: Record<string, LifecycleStage> = {
   initial_contact: "prospect",
@@ -80,9 +95,120 @@ type DriverActionKey =
   | typeof SEND_BOOKING_LINK_ACTION_KEY
   | typeof BOOK_IN_CALENDLY_ACTION_KEY
   | typeof SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
+  | typeof SEND_ENGAGEMENT_DOC_ACTION_KEY
+  | typeof SEND_ADVICE_BOOKING_LINK_ACTION_KEY
+  | typeof RECORD_SOA_DELIVERED_ACTION_KEY
+  | typeof MANUALLY_MARK_AUTHORITY_SIGNED_ACTION_KEY
+
+type DrivingStateConfig = {
+  stateLabel: string
+  description: string
+  actionKey: DriverActionKey | null
+  actionLabel: string | null
+  showUrgency: boolean
+}
+
+const DRIVING_STATE_CONFIG_BY_KEY: Record<string, DrivingStateConfig> = {
+  [`${ENGAGEMENT_TEMPLATE_KEY}:driving_engagement_doc`]: {
+    stateLabel: "Driving engagement document",
+    description: "Engagement document is awaiting client signature.",
+    actionKey: SEND_ENGAGEMENT_DOC_ACTION_KEY,
+    actionLabel: "Send engagement doc",
+    showUrgency: false,
+  },
+  [`${ADVICE_TEMPLATE_KEY}:driving_meeting_booking`]: {
+    stateLabel: "Driving booking",
+    description: "Drive the Advice Meeting booking.",
+    actionKey: SEND_ADVICE_BOOKING_LINK_ACTION_KEY,
+    actionLabel: "Send Advice booking link",
+    showUrgency: false,
+  },
+  [`${ADVICE_TEMPLATE_KEY}:driving_advice_prep`]: {
+    stateLabel: "Advice prep",
+    description: "Advice Meeting is booked. Keep preparation moving before the meeting window closes.",
+    actionKey: null,
+    actionLabel: null,
+    showUrgency: true,
+  },
+  [`${ADVICE_TEMPLATE_KEY}:driving_advice_delivery`]: {
+    stateLabel: "Advice delivery",
+    description: "Advice Meeting has passed. Track SoA delivery.",
+    actionKey: RECORD_SOA_DELIVERED_ACTION_KEY,
+    actionLabel: "Record SoA delivered",
+    showUrgency: true,
+  },
+  [`${ADVICE_TEMPLATE_KEY}:driving_authority_signature`]: {
+    stateLabel: "Authority signature",
+    description: "Authority to Proceed is awaiting client signature.",
+    actionKey: MANUALLY_MARK_AUTHORITY_SIGNED_ACTION_KEY,
+    actionLabel: "Mark Authority signed",
+    showUrgency: false,
+  },
+}
+
+const URGENCY_STYLES: Record<
+  JourneyUrgency,
+  {
+    label: string
+    panelClassName: string
+    badgeClassName: string
+  }
+> = {
+  green: {
+    label: "Green",
+    panelClassName:
+      "border-l-[#2E7D32] bg-[#F6FAF7] dark:border-l-[#7DD87D] dark:bg-[#0F1F18]",
+    badgeClassName:
+      "border-[#A7E3B5] bg-[#E8F5E9] text-[#2E7D32] dark:border-[#315F3B] dark:bg-[#15351F] dark:text-[#9CE6A6]",
+  },
+  orange: {
+    label: "Orange",
+    panelClassName:
+      "border-l-[#B45309] bg-[#FFF7ED] dark:border-l-[#FDBA74] dark:bg-[#2B1A0B]",
+    badgeClassName:
+      "border-[#FDBA74] bg-[#FFEDD5] text-[#9A3412] dark:border-[#9A5A1D] dark:bg-[#3A2411] dark:text-[#FDBA74]",
+  },
+  red: {
+    label: "Red",
+    panelClassName:
+      "border-l-[#DC2626] bg-[#FEF2F2] shadow-[inset_0_0_0_1px_rgba(220,38,38,0.08)] dark:border-l-[#F87171] dark:bg-[#2A1010]",
+    badgeClassName:
+      "border-[#FCA5A5] bg-[#FEE2E2] text-[#B91C1C] dark:border-[#7F1D1D] dark:bg-[#3B1111] dark:text-[#FCA5A5]",
+  },
+}
 
 function usesDecisionStateTemplate(templateKey: string) {
   return DECISION_STATE_TEMPLATE_KEYS.includes(templateKey as (typeof DECISION_STATE_TEMPLATE_KEYS)[number])
+}
+
+function isCompletedImplementationOutcomeKey(value: string) {
+  return COMPLETED_IMPLEMENTATION_OUTCOME_KEYS.includes(
+    value as (typeof COMPLETED_IMPLEMENTATION_OUTCOME_KEYS)[number],
+  )
+}
+
+function getDrivingStateConfig(currentInstance: JourneyCurrentInstance) {
+  if (!currentInstance.decisionState) {
+    return null
+  }
+
+  return DRIVING_STATE_CONFIG_BY_KEY[
+    `${currentInstance.template.key}:${currentInstance.decisionState}`
+  ] ?? null
+}
+
+function getAdviceUrgencyDescription(currentInstance: JourneyCurrentInstance, urgency: JourneyUrgency) {
+  const isDelivery = currentInstance.decisionState === "driving_advice_delivery"
+
+  if (urgency === "green") {
+    return isDelivery ? "SoA delivery is inside the target window." : "Advice prep is inside the target window."
+  }
+
+  if (urgency === "orange") {
+    return isDelivery ? "SoA delivery window is tightening." : "Advice prep window is tightening."
+  }
+
+  return isDelivery ? "SoA delivery needs attention." : "Advice prep needs attention."
 }
 
 function formatStageLabel(stage: LifecycleStage | null) {
@@ -168,6 +294,10 @@ function getOutcomeEffectSummary(
     return "move to Discovery Meeting booking"
   }
 
+  if (isCompletedImplementationOutcomeKey(outcome.outcomeKey)) {
+    return "complete Implementation and move the client stage to Client"
+  }
+
   if (outcome.isTerminalLost) {
     return "close this prospect's workflow"
   }
@@ -195,6 +325,22 @@ function formatDriverActionLabel(value: string | null) {
 
   if (value === SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY) {
     return "Discovery booking link sent to client"
+  }
+
+  if (value === SEND_ENGAGEMENT_DOC_ACTION_KEY) {
+    return "Engagement document sent to client"
+  }
+
+  if (value === SEND_ADVICE_BOOKING_LINK_ACTION_KEY) {
+    return "Advice booking link sent to client"
+  }
+
+  if (value === RECORD_SOA_DELIVERED_ACTION_KEY) {
+    return "SoA delivered and Authority to Proceed sent"
+  }
+
+  if (value === MANUALLY_MARK_AUTHORITY_SIGNED_ACTION_KEY) {
+    return "Authority to Proceed marked signed"
   }
 
   return "Driver action recorded"
@@ -226,6 +372,36 @@ function JourneyPastPhases({
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function AdviceUrgencyIndicator({ currentInstance }: { currentInstance: JourneyCurrentInstance }) {
+  if (!currentInstance.urgency) {
+    return null
+  }
+
+  const urgencyStyle = URGENCY_STYLES[currentInstance.urgency]
+  const label =
+    currentInstance.decisionState === "driving_advice_delivery" ? "SoA delivery" : "Advice prep"
+
+  return (
+    <div
+      className={`rounded-[8px] border-[0.5px] border-[#e5e7eb] border-l-4 p-3 dark:border-[#334155] ${urgencyStyle.panelClassName}`}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[12px] font-semibold uppercase tracking-[0.5px] text-[#113238] dark:text-[#E5EEF0]">
+          {label}
+        </p>
+        <span
+          className={`inline-flex rounded-[999px] border px-2 py-0.5 text-[10px] font-semibold ${urgencyStyle.badgeClassName}`}
+        >
+          {urgencyStyle.label}
+        </span>
+      </div>
+      <p className="mt-1 text-[11px] text-[#6b7280] dark:text-[#CBD5E1]">
+        {getAdviceUrgencyDescription(currentInstance, currentInstance.urgency)}
+      </p>
     </div>
   )
 }
@@ -721,6 +897,40 @@ export default function ClientJourney({
               </>
             )}
           </div>
+          {currentInstance.lastDriverActionKey ? (
+            <p className="text-[11px] text-[#6b7280]">
+              {formatDriverActionLabel(currentInstance.lastDriverActionKey)}
+              {currentInstance.lastDriverActionAt ? ` - ${formatDateTime(currentInstance.lastDriverActionAt)}` : ""}
+            </p>
+          ) : null}
+        </div>
+      )
+    }
+
+    const drivingStateConfig = getDrivingStateConfig(currentInstance)
+    if (drivingStateConfig) {
+      return (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[18px] font-semibold text-[#113238]">{currentInstance.template.name}</p>
+            <span className="inline-flex rounded-[999px] border border-[#A7E3B5] bg-[#E8F5E9] px-2 py-0.5 text-[10px] font-medium text-[#2E7D32]">
+              {drivingStateConfig.stateLabel}
+            </span>
+          </div>
+          <p className="text-[12px] text-[#6b7280]">{drivingStateConfig.description}</p>
+          {drivingStateConfig.showUrgency ? <AdviceUrgencyIndicator currentInstance={currentInstance} /> : null}
+          {drivingStateConfig.actionKey && drivingStateConfig.actionLabel ? (
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void runDriverAction(drivingStateConfig.actionKey as DriverActionKey)}
+                disabled={isMutating}
+                className="rounded-[8px] border-[0.5px] border-[#113238] bg-[#113238] px-3 py-2 text-[12px] text-white disabled:opacity-60"
+              >
+                {drivingStateConfig.actionLabel}
+              </button>
+            </div>
+          ) : null}
           {currentInstance.lastDriverActionKey ? (
             <p className="text-[11px] text-[#6b7280]">
               {formatDriverActionLabel(currentInstance.lastDriverActionKey)}

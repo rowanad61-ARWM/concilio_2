@@ -11,6 +11,7 @@ import {
   ADVICE_TEMPLATE_KEY,
   deriveDecisionState,
   ENGAGEMENT_TEMPLATE_KEY,
+  IMPLEMENTATION_TEMPLATE_KEY,
   usesDecisionStateTemplate,
   type WorkflowDecisionState,
   type WorkflowUrgency,
@@ -324,6 +325,12 @@ export type WorkflowInstanceOutcomeResult =
       targetPhase: string
     }
   | {
+      effect: "completed"
+      instanceId: string
+      engagementId: string
+      lifecycleStage: "client"
+    }
+  | {
       effect: "continued"
       instanceId: string
       engagementId: string
@@ -354,32 +361,36 @@ function toStageFromTemplateKey(templateKey: string | null) {
     return "client"
   }
 
-  if (templateKey === "initial_contact") {
+  if (templateKey === INITIAL_CONTACT_TEMPLATE_KEY) {
     return "prospect"
   }
 
-  if (templateKey === "initial_meeting") {
+  if (templateKey === INITIAL_MEETING_TEMPLATE_KEY) {
     return "prospect"
   }
 
-  if (templateKey === "engagement") {
+  if (templateKey === ENGAGEMENT_TEMPLATE_KEY) {
     return "engagement"
   }
 
-  if (templateKey === "advice") {
+  if (templateKey === ADVICE_TEMPLATE_KEY) {
     return "advice"
   }
 
-  if (templateKey === "implementation") {
+  if (templateKey === IMPLEMENTATION_TEMPLATE_KEY) {
     return "implementation"
   }
 
   return null
 }
 
-function toSystemCancellationNote(reason: "advance" | "stop") {
+function toSystemCancellationNote(reason: "advance" | "complete" | "stop") {
   if (reason === "advance") {
     return "Cancelled: workflow advanced to next phase."
+  }
+
+  if (reason === "complete") {
+    return "Cancelled: workflow completed."
   }
 
   return "Cancelled: client journey stopped."
@@ -1120,7 +1131,7 @@ export async function sendWorkflowTemplateToClient(
 export async function cancelIncompleteSpawnedTasks(
   tx: Prisma.TransactionClient,
   workflowInstanceId: string,
-  reason: "advance" | "stop",
+  reason: "advance" | "complete" | "stop",
 ) {
   const spawnedTasks = await tx.workflow_spawned_task.findMany({
     where: {
@@ -1761,6 +1772,72 @@ export async function setOutcomeForWorkflowInstance(
       instanceId: instance.id,
       engagementId: engagement.id,
       targetPhase: selectedOutcome.next_phase_key,
+    }
+  }
+
+  const instancePhaseOrder = instance.workflow_template.phase_order
+  if (
+    !isOffChainInstance &&
+    instancePhaseOrder !== null &&
+    !selectedOutcome.is_terminal_lost &&
+    !selectedOutcome.next_phase_key &&
+    !selectedOutcome.sets_workflow_status &&
+    !selectedOutcome.spawn_next_task_template_id
+  ) {
+    const nextChainTemplate = await db.workflow_template.findFirst({
+      where: {
+        phase_order: instancePhaseOrder + 1,
+      },
+      select: {
+        id: true,
+      },
+    })
+
+    if (!nextChainTemplate) {
+      const touchedTaskIds = new Set<string>()
+
+      await db.$transaction(async (tx) => {
+        const cancelledTaskIds = await cancelIncompleteSpawnedTasks(tx, instance.id, "complete")
+        for (const taskId of cancelledTaskIds) {
+          touchedTaskIds.add(taskId)
+        }
+
+        await tx.workflow_instance.update({
+          where: {
+            id: instance.id,
+          },
+          data: {
+            current_outcome_key: normalizedOutcomeKey,
+            current_outcome_set_at: now,
+            status: "completed",
+            completed_at: now,
+            last_event_at: now,
+            updated_at: now,
+          },
+        })
+
+        await tx.engagement.update({
+          where: {
+            id: engagement.id,
+          },
+          data: {
+            status: "completed",
+            completed_at: now,
+            updated_at: now,
+          },
+        })
+
+        await upsertLifecycleStageForEngagement(tx, engagement, "client")
+      })
+
+      await syncTaskIdsToMonday(touchedTaskIds)
+
+      return {
+        effect: "completed",
+        instanceId: instance.id,
+        engagementId: engagement.id,
+        lifecycleStage: "client",
+      }
     }
   }
 

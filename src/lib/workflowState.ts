@@ -3,6 +3,7 @@ export const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
 export const DISCOVERY_TEMPLATE_KEY = "discovery"
 export const ENGAGEMENT_TEMPLATE_KEY = "engagement"
 export const ADVICE_TEMPLATE_KEY = "advice"
+export const IMPLEMENTATION_TEMPLATE_KEY = "implementation"
 
 export const DECISION_STATE_TEMPLATE_KEYS = [
   INITIAL_CONTACT_TEMPLATE_KEY,
@@ -10,6 +11,7 @@ export const DECISION_STATE_TEMPLATE_KEYS = [
   DISCOVERY_TEMPLATE_KEY,
   ENGAGEMENT_TEMPLATE_KEY,
   ADVICE_TEMPLATE_KEY,
+  IMPLEMENTATION_TEMPLATE_KEY,
 ] as const
 
 const ON_HOLD_OUTCOME_KEY = "on_hold"
@@ -258,6 +260,17 @@ export function deriveAdviceState(
   }
 }
 
+export function deriveImplementationState(instance: WorkflowStateInstance): WorkflowDecisionStateSnapshot {
+  if (isPaused(instance)) {
+    return {
+      state: "paused",
+      awaitingEventEndsAt: null,
+    }
+  }
+
+  return readyForOutcome()
+}
+
 export function deriveDecisionState(
   instance: WorkflowStateInstance,
   options?: { now?: Date },
@@ -273,6 +286,8 @@ export function deriveDecisionState(
       return deriveEngagementState(instance)
     case ADVICE_TEMPLATE_KEY:
       return deriveAdviceState(instance, options)
+    case IMPLEMENTATION_TEMPLATE_KEY:
+      return deriveImplementationState(instance)
     default:
       return null
   }
