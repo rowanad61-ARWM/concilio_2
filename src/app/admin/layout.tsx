@@ -3,13 +3,13 @@ import Link from "next/link"
 import { requireAdmin } from "@/lib/auth"
 
 const adminNavItems = [
-  { href: "/admin/templates", label: "Templates", enabled: true },
-  { href: "/admin/email-templates", label: "Email templates", enabled: false },
-  { href: "/admin/nudges", label: "Nudges", enabled: false },
-  { href: "/admin/calendly-event-types", label: "Calendly event types", enabled: false },
-  { href: "/admin/driver-actions", label: "Driver actions", enabled: false },
-  { href: "/admin/constants", label: "Constants", enabled: false },
-  { href: "/admin/users", label: "Users", enabled: true },
+  { href: "/admin/templates", label: "Templates" },
+  { href: "/admin/email-templates", label: "Email templates" },
+  { href: "/admin/nudges", label: "Nudges" },
+  { href: "/admin/calendly-event-types", label: "Calendly event types" },
+  { href: "/admin/driver-actions", label: "Driver actions" },
+  { href: "/admin/constants", label: "Constants" },
+  { href: "/admin/users", label: "Users" },
 ] as const
 
 function initialsForName(name: string) {
@@ -45,27 +45,15 @@ export default async function AdminLayout({
         </div>
 
         <nav className="mt-5 flex flex-1 flex-col gap-1.5">
-          {adminNavItems.map((item) =>
-            item.enabled ? (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="flex items-center justify-between rounded-[7px] px-3 py-2 text-[13px] font-medium text-[#113238] hover:bg-[#EAF0F1]"
-              >
-                <span>{item.label}</span>
-              </Link>
-            ) : (
-              <div
-                key={item.href}
-                className="flex items-center justify-between rounded-[7px] px-3 py-2 text-[13px] text-[#9ca3af]"
-              >
-                <span>{item.label}</span>
-                <span className="rounded-[999px] bg-[#F3F4F6] px-2 py-0.5 text-[10px] text-[#6b7280]">
-                  Soon
-                </span>
-              </div>
-            ),
-          )}
+          {adminNavItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="flex items-center justify-between rounded-[7px] px-3 py-2 text-[13px] font-medium text-[#113238] hover:bg-[#EAF0F1]"
+            >
+              <span>{item.label}</span>
+            </Link>
+          ))}
         </nav>
 
         <div className="mt-5 flex items-center gap-3 border-t border-[#e5e7eb] pt-4">
