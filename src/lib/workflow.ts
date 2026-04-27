@@ -16,10 +16,15 @@ const DEFAULT_TASK_CATEGORY = "General"
 const CLOSING_TEMPLATE_KEY = "closing"
 const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
 const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
-const DECISION_STATE_TEMPLATE_KEYS = [INITIAL_CONTACT_TEMPLATE_KEY, INITIAL_MEETING_TEMPLATE_KEY] as const
+const DISCOVERY_TEMPLATE_KEY = "discovery"
+const DECISION_STATE_TEMPLATE_KEYS = [INITIAL_CONTACT_TEMPLATE_KEY, INITIAL_MEETING_TEMPLATE_KEY, DISCOVERY_TEMPLATE_KEY] as const
 const NO_ANSWER_OUTCOME_KEY = "no_answer"
 const SUITABLE_OUTCOME_KEY = "suitable"
+const PROCEEDING_TO_DISCOVERY_OUTCOME_KEY = "proceeding_to_discovery"
 const ON_HOLD_OUTCOME_KEY = "on_hold"
+const SEND_BOOKING_LINK_ACTION_KEY = "send_booking_link"
+const BOOK_IN_CALENDLY_ACTION_KEY = "book_in_calendly"
+const SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY = "send_discovery_booking_link"
 
 function usesDecisionStateTemplate(templateKey: string) {
   return DECISION_STATE_TEMPLATE_KEYS.includes(templateKey as (typeof DECISION_STATE_TEMPLATE_KEYS)[number])
@@ -27,6 +32,7 @@ function usesDecisionStateTemplate(templateKey: string) {
 const NO_ANSWER_EMAIL_TEMPLATE_ID = "no_answer_followup_email"
 const NO_ANSWER_SMS_TEMPLATE_ID = "no_answer_followup_sms"
 const BOOKING_LINK_TEMPLATE_ID = "calendly_initial_meeting_booking_link"
+const DISCOVERY_BOOKING_LINK_TEMPLATE_ID = "discovery_booking_link"
 const DEFAULT_INITIAL_MEETING_URL = "https://calendly.com/arwm/initial-meeting"
 const INITIAL_CONTACT_MEETING_DURATION_MS = 15 * 60 * 1000
 const OUTCOME_READY_BUFFER_MS = 60 * 60 * 1000
@@ -93,7 +99,11 @@ function getInitialMeetingBookingUrl() {
 }
 
 function isWorkflowDriverActionKey(value: string): value is WorkflowDriverActionKey {
-  return value === "send_booking_link" || value === "book_in_calendly"
+  return (
+    value === SEND_BOOKING_LINK_ACTION_KEY ||
+    value === BOOK_IN_CALENDLY_ACTION_KEY ||
+    value === SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
+  )
 }
 
 function resolveTaskDueDate(triggerDate: Date, dueOffsetDays: number | null, dueDateAbsolute: Date | null) {
@@ -110,7 +120,7 @@ function resolveTaskDueDate(triggerDate: Date, dueOffsetDays: number | null, due
 
 type DbClient = Prisma.TransactionClient | typeof db
 
-type EngagementForWorkflow = {
+export type EngagementForWorkflow = {
   id: string
   source: string
   meeting_type_key: string | null
@@ -305,7 +315,10 @@ export type WorkflowInstanceOutcomeResult =
       workflowStatus: string | null
     }
 
-export type WorkflowDriverActionKey = "send_booking_link" | "book_in_calendly"
+export type WorkflowDriverActionKey =
+  | typeof SEND_BOOKING_LINK_ACTION_KEY
+  | typeof BOOK_IN_CALENDLY_ACTION_KEY
+  | typeof SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
 
 export type WorkflowDriverActionResult = {
   instanceId: string
@@ -1076,6 +1089,39 @@ async function spawnForEngagementWithOptionalTemplate(
   return spawnWorkflowWithTemplate(client, engagement, template, triggerDate)
 }
 
+export async function spawnOffChainWorkflowInstance(
+  tx: Prisma.TransactionClient,
+  engagement: EngagementForWorkflow,
+  templateKey: string,
+  triggerDate: Date,
+) {
+  const normalizedTemplateKey = templateKey.trim()
+  if (!normalizedTemplateKey) {
+    throw new WorkflowTemplateNotFoundError("Off-chain workflow template key is required.")
+  }
+
+  const template = await tx.workflow_template.findUnique({
+    where: {
+      key: normalizedTemplateKey,
+    },
+    select: {
+      id: true,
+      key: true,
+    },
+  })
+
+  if (!template) {
+    throw new WorkflowTemplateNotFoundError(`Unable to find off-chain workflow template "${normalizedTemplateKey}".`)
+  }
+
+  const spawnResult = await spawnForEngagementWithOptionalTemplate(tx, engagement, template.id, triggerDate)
+  if (!spawnResult) {
+    throw new WorkflowTemplateNotFoundError(`Unable to spawn off-chain workflow template "${template.key}".`)
+  }
+
+  return spawnResult.instance
+}
+
 export async function spawnWorkflowForEngagement(
   engagementId: string,
   explicitTemplateId?: string | null,
@@ -1509,6 +1555,7 @@ export async function setOutcomeForWorkflowInstance(
 
   const engagement = instance.engagement
   const now = new Date()
+  const isOffChainInstance = instance.workflow_template.phase_order === null
   const hasNoAnswerLoopEffect =
     normalizedOutcomeKey === NO_ANSWER_OUTCOME_KEY &&
     !selectedOutcome.is_terminal_lost &&
@@ -1567,6 +1614,12 @@ export async function setOutcomeForWorkflowInstance(
         data: {
           current_outcome_key: normalizedOutcomeKey,
           current_outcome_set_at: now,
+          ...(isOffChainInstance
+            ? {
+                status: "cancelled",
+                completed_at: now,
+              }
+            : {}),
           last_event_at: now,
           updated_at: now,
         },
@@ -1591,6 +1644,12 @@ export async function setOutcomeForWorkflowInstance(
       data: {
         current_outcome_key: normalizedOutcomeKey,
         current_outcome_set_at: now,
+        ...(isOffChainInstance
+          ? {
+              status: "completed",
+              completed_at: now,
+            }
+          : {}),
         last_event_at: now,
         updated_at: now,
       },
@@ -1671,10 +1730,68 @@ export async function setOutcomeForWorkflowInstance(
   }
 }
 
+export async function completeWorkflowInstanceWithOutcome(
+  tx: Prisma.TransactionClient,
+  instanceId: string,
+  outcomeKey: string,
+  completedAt: Date,
+) {
+  const normalizedOutcomeKey = outcomeKey.trim()
+  if (!normalizedOutcomeKey) {
+    throw new InvalidOutcomeError("Outcome key is required.")
+  }
+
+  const instance = await tx.workflow_instance.findUnique({
+    where: {
+      id: instanceId,
+    },
+    select: {
+      id: true,
+      status: true,
+      workflow_template_id: true,
+    },
+  })
+
+  if (!instance) {
+    throw new WorkflowInstanceNotFoundError()
+  }
+
+  if (WORKFLOW_TERMINAL_STATUSES.includes(instance.status as (typeof WORKFLOW_TERMINAL_STATUSES)[number])) {
+    throw new OutcomeTaskNotEligibleError("Workflow instance is terminal.")
+  }
+
+  const outcomeRows = await getOutcomeCatalogForWorkflowTemplateId(tx, instance.workflow_template_id)
+  const selectedOutcome = outcomeRows.find((row) => row.outcome_key === normalizedOutcomeKey)
+  if (!selectedOutcome) {
+    throw new InvalidOutcomeError()
+  }
+
+  return tx.workflow_instance.update({
+    where: {
+      id: instance.id,
+    },
+    data: {
+      status: "completed",
+      completed_at: completedAt,
+      current_outcome_key: normalizedOutcomeKey,
+      current_outcome_set_at: completedAt,
+      last_event_at: completedAt,
+      updated_at: completedAt,
+    },
+    select: {
+      id: true,
+      status: true,
+      completed_at: true,
+      current_outcome_key: true,
+    },
+  })
+}
+
 /*
  * Driver action keys for the Initial Contact booking driver:
  * - send_booking_link: adviser sends the Initial Meeting Calendly link to the client.
  * - book_in_calendly: adviser records that they will book the meeting directly in Calendly.
+ * - send_discovery_booking_link: adviser sends the Discovery Meeting Calendly link to the client.
  */
 export async function recordDriverAction(
   instanceId: string,
@@ -1683,7 +1800,9 @@ export async function recordDriverAction(
 ): Promise<WorkflowDriverActionResult> {
   const normalizedActionKey = actionKey.trim()
   if (!isWorkflowDriverActionKey(normalizedActionKey)) {
-    throw new InvalidDriverActionError("actionKey must be send_booking_link or book_in_calendly.")
+    throw new InvalidDriverActionError(
+      "actionKey must be send_booking_link, book_in_calendly, or send_discovery_booking_link.",
+    )
   }
 
   const instance = await db.workflow_instance.findUnique({
@@ -1719,16 +1838,32 @@ export async function recordDriverAction(
     throw new OutcomeTaskNotEligibleError("Workflow instance is terminal.")
   }
 
-  if (instance.workflow_template.key !== INITIAL_CONTACT_TEMPLATE_KEY || instance.current_outcome_key !== SUITABLE_OUTCOME_KEY) {
-    throw new InvalidDriverActionError("Booking driver actions require a suitable Initial Contact outcome.")
+  const isInitialContactBookingAction =
+    instance.workflow_template.key === INITIAL_CONTACT_TEMPLATE_KEY &&
+    instance.current_outcome_key === SUITABLE_OUTCOME_KEY &&
+    (normalizedActionKey === SEND_BOOKING_LINK_ACTION_KEY || normalizedActionKey === BOOK_IN_CALENDLY_ACTION_KEY)
+  const isInitialMeetingDiscoveryAction =
+    instance.workflow_template.key === INITIAL_MEETING_TEMPLATE_KEY &&
+    instance.current_outcome_key === PROCEEDING_TO_DISCOVERY_OUTCOME_KEY &&
+    normalizedActionKey === SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
+
+  if (!isInitialContactBookingAction && !isInitialMeetingDiscoveryAction) {
+    throw new InvalidDriverActionError("Booking driver actions require an eligible workflow outcome.")
   }
 
   const now = new Date()
   let emailSent = false
 
-  if (normalizedActionKey === "send_booking_link") {
+  if (normalizedActionKey === SEND_BOOKING_LINK_ACTION_KEY) {
     await sendWorkflowTemplateToClient(db, {
       templateId: BOOKING_LINK_TEMPLATE_ID,
+      engagement: instance.engagement,
+      actorUserId: userId,
+    })
+    emailSent = true
+  } else if (normalizedActionKey === SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY) {
+    await sendWorkflowTemplateToClient(db, {
+      templateId: DISCOVERY_BOOKING_LINK_TEMPLATE_ID,
       engagement: instance.engagement,
       actorUserId: userId,
     })
@@ -1754,9 +1889,11 @@ export async function recordDriverAction(
       householdId: instance.engagement.household_id,
       primaryAdviserId: instance.engagement.primary_adviser_id,
       note:
-        normalizedActionKey === "send_booking_link"
+        normalizedActionKey === SEND_BOOKING_LINK_ACTION_KEY
           ? "Initial Meeting booking link sent to client."
-          : "Adviser will book Initial Meeting in Calendly directly.",
+          : normalizedActionKey === SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
+            ? "Discovery Meeting booking link sent to client."
+            : "Adviser will book Initial Meeting in Calendly directly.",
       at: now,
     })
   })
@@ -1931,7 +2068,11 @@ function deriveDecisionSnapshot(instance: {
     }
   }
 
-  if (instance.current_outcome_key === SUITABLE_OUTCOME_KEY) {
+  if (
+    instance.current_outcome_key === SUITABLE_OUTCOME_KEY ||
+    (instance.workflow_template.key === INITIAL_MEETING_TEMPLATE_KEY &&
+      instance.current_outcome_key === PROCEEDING_TO_DISCOVERY_OUTCOME_KEY)
+  ) {
     return {
       decisionState: "driving_booking",
       awaitingEventEndsAt: null,

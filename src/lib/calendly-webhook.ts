@@ -6,7 +6,9 @@ import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
 import { resolveEmailForParty } from "@/lib/party-contact"
 import {
   advanceEngagementToNextPhase,
+  completeWorkflowInstanceWithOutcome,
   rescheduleWorkflowForEngagement,
+  spawnOffChainWorkflowInstance,
   spawnWorkflowForEngagement,
 } from "@/lib/workflow"
 import {
@@ -64,6 +66,12 @@ const CALENDLY_TEMPLATE_ID_BY_MEETING_TYPE: Record<string, string> = {
 
 const INITIAL_MEETING_KEY = "INITIAL_MEETING"
 const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
+const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
+const DISCOVERY_MEETING_KEY = "DISCOVERY"
+const DISCOVERY_TEMPLATE_KEY = "discovery"
+const PROCEEDING_TO_DISCOVERY_OUTCOME_KEY = "proceeding_to_discovery"
+const SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY = "send_discovery_booking_link"
+const DISCOVERY_BOOKING_CONFIRMATION_TEMPLATE_ID = "discovery_booking_confirmation"
 const LATER_PHASE_TEMPLATE_KEYS = new Set(["engagement", "advice", "implementation"])
 
 function toErrorMessage(error: unknown) {
@@ -718,13 +726,112 @@ async function handleInitialMeetingWorkflowForCreatedEngagement(params: {
   })
 }
 
+async function handleDiscoveryWorkflowForCreatedEngagement(params: {
+  engagementId: string
+  partyId: string | null
+  householdId: string | null
+  primaryAdviserId: string | null
+  scheduledStartAt: Date | null
+  postBookingContext: PostBookingSideEffectContext
+}) {
+  if (!params.partyId) {
+    console.warn(`[calendly] discovery workflow skipped missing-party ${params.engagementId}`)
+    return
+  }
+
+  const now = new Date()
+  const triggerDate = params.scheduledStartAt ?? now
+
+  const result = await db.$transaction(async (tx) => {
+    const initialMeetingInstance = await tx.workflow_instance.findFirst({
+      where: {
+        party_id: params.partyId,
+        status: "active",
+        current_outcome_key: PROCEEDING_TO_DISCOVERY_OUTCOME_KEY,
+        workflow_template: {
+          key: INITIAL_MEETING_TEMPLATE_KEY,
+        },
+      },
+      select: {
+        id: true,
+        last_driver_action_key: true,
+        engagement: {
+          select: {
+            id: true,
+            source: true,
+            meeting_type_key: true,
+            party_id: true,
+            household_id: true,
+            primary_adviser_id: true,
+            opened_at: true,
+          },
+        },
+      },
+      orderBy: {
+        created_at: "desc",
+      },
+    })
+
+    if (!initialMeetingInstance?.engagement) {
+      return {
+        status: "skipped" as const,
+        sendConfirmation: false,
+      }
+    }
+
+    const sendConfirmation =
+      initialMeetingInstance.last_driver_action_key !== SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
+
+    await completeWorkflowInstanceWithOutcome(
+      tx,
+      initialMeetingInstance.id,
+      PROCEEDING_TO_DISCOVERY_OUTCOME_KEY,
+      now,
+    )
+    await spawnOffChainWorkflowInstance(tx, initialMeetingInstance.engagement, DISCOVERY_TEMPLATE_KEY, triggerDate)
+
+    return {
+      status: "spawned" as const,
+      sendConfirmation,
+      workflowEngagementId: initialMeetingInstance.engagement.id,
+    }
+  })
+
+  if (result.status === "skipped") {
+    console.warn(`[calendly] discovery workflow skipped active-initial-meeting-not-found ${params.partyId}`)
+    await createEngagementTimelineNote({
+      engagementId: params.engagementId,
+      partyId: params.partyId,
+      householdId: params.householdId,
+      primaryAdviserId: params.primaryAdviserId,
+      note: "Discovery Meeting booked, but no active Initial Meeting awaiting Discovery booking was found.",
+    })
+    return
+  }
+
+  console.info(
+    `[calendly] discovery workflow spawned ${params.engagementId} workflow-engagement ${result.workflowEngagementId}`,
+  )
+
+  if (result.sendConfirmation) {
+    await triggerPostBookingSideEffects(params.postBookingContext, {
+      templateId: DISCOVERY_BOOKING_CONFIRMATION_TEMPLATE_ID,
+    })
+  }
+}
+
 /**
  * Extension point reserved for:
  * - Task 42b: per-meeting-type confirmation emails
  * - Task 42c: SMS reminders
  * - Task 43: workflow/task auto-creation
  */
-export async function triggerPostBookingSideEffects(context: PostBookingSideEffectContext): Promise<void> {
+export async function triggerPostBookingSideEffects(
+  context: PostBookingSideEffectContext,
+  options?: {
+    templateId?: string
+  },
+): Promise<void> {
   try {
     const engagement = await db.engagement.findUnique({
       where: {
@@ -784,7 +891,7 @@ export async function triggerPostBookingSideEffects(context: PostBookingSideEffe
       return
     }
 
-    const templateId = CALENDLY_TEMPLATE_ID_BY_MEETING_TYPE[meetingTypeKey]
+    const templateId = options?.templateId ?? CALENDLY_TEMPLATE_ID_BY_MEETING_TYPE[meetingTypeKey]
     if (!templateId) {
       console.info(`[calendly webhook] invitee.created confirmation-email-skip unmapped-meeting-type ${meetingTypeKey}`)
       return
@@ -982,12 +1089,12 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
         },
       })
 
-  void triggerPostBookingSideEffects({
+  const postBookingContext = {
     id: engagement.id,
     inviteeName,
     meetingDuration,
     meetingLocation,
-  })
+  }
 
   let didRescheduleExistingWorkflow = false
   if (rescheduledFrom && startAt) {
@@ -1027,11 +1134,24 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
         primaryAdviserId: engagement.primary_adviser_id,
         scheduledStartAt: startAt,
       })
+    } else if (meetingTypeRow.meeting_type_key === DISCOVERY_MEETING_KEY) {
+      await handleDiscoveryWorkflowForCreatedEngagement({
+        engagementId: engagement.id,
+        partyId: engagement.party_id,
+        householdId: engagement.household_id,
+        primaryAdviserId: engagement.primary_adviser_id,
+        scheduledStartAt: startAt,
+        postBookingContext,
+      })
     } else {
       await spawnWorkflowForEngagement(engagement.id).catch((error) => {
         console.error(`[calendly] workflow spawn failed ${engagement.id} ${toErrorMessage(error)}`)
       })
     }
+  }
+
+  if (meetingTypeRow.meeting_type_key !== DISCOVERY_MEETING_KEY) {
+    void triggerPostBookingSideEffects(postBookingContext)
   }
 
   console.info(

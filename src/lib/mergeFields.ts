@@ -16,7 +16,10 @@ export type MergeFieldOverrides = {
   calendlyRescheduleUrl?: string
   calendlyCancelUrl?: string
   calendlyInitialMeetingUrl?: string
+  calendlyDiscoveryUrl?: string
 }
+
+const DEFAULT_DISCOVERY_BOOKING_URL = "https://calendly.com/arwm/discovery-meeting"
 
 export const MERGE_FIELD_TOKENS = [
   "{{client.firstName}}",
@@ -37,6 +40,7 @@ export const MERGE_FIELD_TOKENS = [
   "{{calendly_reschedule_url}}",
   "{{calendly_cancel_url}}",
   "{{calendly_initial_meeting_url}}",
+  "{{calendly_discovery_url}}",
 ] as const
 
 function getDateValues(now: Date) {
@@ -82,6 +86,8 @@ export function applyMergeFields(
     calendly_cancel_url: overrides.calendlyCancelUrl ?? "",
     calendly_initial_meeting_url:
       overrides.calendlyInitialMeetingUrl ?? "https://calendly.com/arwm/initial-meeting-1",
+    calendly_discovery_url:
+      overrides.calendlyDiscoveryUrl ?? process.env.CALENDLY_DISCOVERY_URL ?? DEFAULT_DISCOVERY_BOOKING_URL,
   }
 
   return template.replace(/{{\s*([^}]+?)\s*}}/g, (match, rawToken: string) => {

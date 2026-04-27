@@ -17,8 +17,10 @@ import type {
 
 const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
 const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
-const DECISION_STATE_TEMPLATE_KEYS = [INITIAL_CONTACT_TEMPLATE_KEY, INITIAL_MEETING_TEMPLATE_KEY] as const
+const DISCOVERY_TEMPLATE_KEY = "discovery"
+const DECISION_STATE_TEMPLATE_KEYS = [INITIAL_CONTACT_TEMPLATE_KEY, INITIAL_MEETING_TEMPLATE_KEY, DISCOVERY_TEMPLATE_KEY] as const
 const SUITABLE_OUTCOME_KEY = "suitable"
+const PROCEEDING_TO_DISCOVERY_OUTCOME_KEY = "proceeding_to_discovery"
 const ON_HOLD_OUTCOME_KEY = "on_hold"
 const INITIAL_CONTACT_MEETING_DURATION_MS = 15 * 60 * 1000
 
@@ -121,7 +123,11 @@ function deriveDecisionSnapshot(instance: {
     }
   }
 
-  if (instance.current_outcome_key === SUITABLE_OUTCOME_KEY) {
+  if (
+    instance.current_outcome_key === SUITABLE_OUTCOME_KEY ||
+    (instance.workflow_template.key === INITIAL_MEETING_TEMPLATE_KEY &&
+      instance.current_outcome_key === PROCEEDING_TO_DISCOVERY_OUTCOME_KEY)
+  ) {
     return {
       decisionState: "driving_booking",
       awaitingEventEndsAt: null,
