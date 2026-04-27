@@ -47,6 +47,18 @@ const LIFECYCLE_STAGE_LABELS: Record<LifecycleStage, string> = {
   ceased: "Ceased",
 }
 
+const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
+const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
+const DISCOVERY_TEMPLATE_KEY = "discovery"
+const DECISION_STATE_TEMPLATE_KEYS = [
+  INITIAL_CONTACT_TEMPLATE_KEY,
+  INITIAL_MEETING_TEMPLATE_KEY,
+  DISCOVERY_TEMPLATE_KEY,
+] as const
+const SEND_BOOKING_LINK_ACTION_KEY = "send_booking_link"
+const BOOK_IN_CALENDLY_ACTION_KEY = "book_in_calendly"
+const SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY = "send_discovery_booking_link"
+
 const PHASE_KEY_TO_STAGE: Record<string, LifecycleStage> = {
   initial_contact: "prospect",
   engagement: "engagement",
@@ -62,6 +74,15 @@ const NOT_PROCEEDING_OUTCOME: JourneyOutcomeCatalogEntry = {
   isTerminalLost: true,
   nextPhaseKey: null,
   setsWorkflowStatus: null,
+}
+
+type DriverActionKey =
+  | typeof SEND_BOOKING_LINK_ACTION_KEY
+  | typeof BOOK_IN_CALENDLY_ACTION_KEY
+  | typeof SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
+
+function usesDecisionStateTemplate(templateKey: string) {
+  return DECISION_STATE_TEMPLATE_KEYS.includes(templateKey as (typeof DECISION_STATE_TEMPLATE_KEYS)[number])
 }
 
 function formatStageLabel(stage: LifecycleStage | null) {
@@ -143,6 +164,10 @@ function getOutcomeEffectSummary(
     return "send the no-answer email + SMS templates and increment the retry counter"
   }
 
+  if (outcome.outcomeKey === "proceeding_to_discovery") {
+    return "move to Discovery Meeting booking"
+  }
+
   if (outcome.isTerminalLost) {
     return "close this prospect's workflow"
   }
@@ -160,12 +185,16 @@ function getOutcomeEffectSummary(
 }
 
 function formatDriverActionLabel(value: string | null) {
-  if (value === "send_booking_link") {
+  if (value === SEND_BOOKING_LINK_ACTION_KEY) {
     return "Booking link sent to client"
   }
 
-  if (value === "book_in_calendly") {
+  if (value === BOOK_IN_CALENDLY_ACTION_KEY) {
     return "Adviser will book in Calendly"
+  }
+
+  if (value === SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY) {
+    return "Discovery booking link sent to client"
   }
 
   return "Driver action recorded"
@@ -270,7 +299,7 @@ export default function ClientJourney({
   const showServiceSegmentEditor = lifecycleStage === "client" && !isTerminal
   const usesDecisionCard =
     current !== null &&
-    ["initial_contact", "initial_meeting"].includes(current.template.key) &&
+    usesDecisionStateTemplate(current.template.key) &&
     current.decisionState !== null
   const outcomeCatalog = useMemo(() => current?.outcomeCatalog ?? [], [current])
   const selectedOutcome = outcomeCatalog.find((outcome) => outcome.outcomeKey === selectedOutcomeKey) ?? null
@@ -428,7 +457,7 @@ export default function ClientJourney({
     }
   }
 
-  async function runDriverAction(actionKey: "send_booking_link" | "book_in_calendly") {
+  async function runDriverAction(actionKey: DriverActionKey) {
     if (!current) {
       return
     }
@@ -569,6 +598,9 @@ export default function ClientJourney({
 
   function renderDecisionCard(currentInstance: JourneyCurrentInstance) {
     if (currentInstance.decisionState === "awaiting_event") {
+      const awaitingEventName =
+        currentInstance.template.key === INITIAL_CONTACT_TEMPLATE_KEY ? "15 min call" : currentInstance.template.name
+
       return (
         <>
           <div className="flex flex-wrap items-center gap-2">
@@ -578,7 +610,7 @@ export default function ClientJourney({
             </span>
           </div>
           <p className="mt-2 text-[13px] text-[#4b5563]">
-            Awaiting 15 min call on {formatDateTime(currentInstance.awaitingEventEndsAt)}
+            Awaiting {awaitingEventName} on {formatDateTime(currentInstance.triggerDate)}
           </p>
         </>
       )
@@ -598,7 +630,9 @@ export default function ClientJourney({
             <p className="text-[12px] font-semibold uppercase tracking-[0.5px] text-[#113238]">
               Record outcome
             </p>
-            <p className="mt-1 text-[11px] text-[#6b7280]">Choose the outcome from the Initial Contact.</p>
+            <p className="mt-1 text-[11px] text-[#6b7280]">
+              Choose the outcome from the {currentInstance.template.name}.
+            </p>
 
             {outcomeCatalog.length > 0 ? (
               <>
@@ -640,6 +674,12 @@ export default function ClientJourney({
     }
 
     if (currentInstance.decisionState === "driving_booking") {
+      const isDiscoveryBooking = currentInstance.template.key === INITIAL_MEETING_TEMPLATE_KEY
+      const bookingTargetName = isDiscoveryBooking ? "Discovery Meeting" : "Initial Meeting"
+      const bookingActionKey = isDiscoveryBooking
+        ? SEND_DISCOVERY_BOOKING_LINK_ACTION_KEY
+        : SEND_BOOKING_LINK_ACTION_KEY
+
       return (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -648,32 +688,38 @@ export default function ClientJourney({
               Driving booking
             </span>
           </div>
-          <p className="text-[12px] text-[#6b7280]">Suitable outcome recorded. Drive the Initial Meeting booking.</p>
+          <p className="text-[12px] text-[#6b7280]">
+            Outcome recorded. Drive the {bookingTargetName} booking.
+          </p>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => void runDriverAction("send_booking_link")}
+              onClick={() => void runDriverAction(bookingActionKey)}
               disabled={isMutating}
               className="rounded-[8px] border-[0.5px] border-[#113238] bg-[#113238] px-3 py-2 text-[12px] text-white disabled:opacity-60"
             >
-              Send booking link to client
+              {isDiscoveryBooking ? "Send Discovery booking link" : "Send booking link to client"}
             </button>
-            <button
-              type="button"
-              onClick={() => void runDriverAction("book_in_calendly")}
-              disabled={isMutating}
-              className="rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white px-3 py-2 text-[12px] text-[#113238] disabled:opacity-60"
-            >
-              I&apos;ll book in Calendly myself
-            </button>
-            <button
-              type="button"
-              onClick={() => void runNudgeMute(!currentInstance.nudgesMuted)}
-              disabled={isMutating}
-              className="rounded-[8px] border-[0.5px] border-transparent bg-transparent px-2 py-2 text-[12px] text-[#6b7280] underline-offset-2 hover:text-[#113238] hover:underline disabled:opacity-60"
-            >
-              {currentInstance.nudgesMuted ? "🔕 Nudges muted — Unmute" : "🔔 Mute nudges"}
-            </button>
+            {isDiscoveryBooking ? null : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void runDriverAction(BOOK_IN_CALENDLY_ACTION_KEY)}
+                  disabled={isMutating}
+                  className="rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white px-3 py-2 text-[12px] text-[#113238] disabled:opacity-60"
+                >
+                  I&apos;ll book in Calendly myself
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runNudgeMute(!currentInstance.nudgesMuted)}
+                  disabled={isMutating}
+                  className="rounded-[8px] border-[0.5px] border-transparent bg-transparent px-2 py-2 text-[12px] text-[#6b7280] underline-offset-2 hover:text-[#113238] hover:underline disabled:opacity-60"
+                >
+                  {currentInstance.nudgesMuted ? "🔕 Nudges muted — Unmute" : "🔔 Mute nudges"}
+                </button>
+              </>
+            )}
           </div>
           {currentInstance.lastDriverActionKey ? (
             <p className="text-[11px] text-[#6b7280]">

@@ -18,16 +18,32 @@ import type {
 const INITIAL_CONTACT_TEMPLATE_KEY = "initial_contact"
 const INITIAL_MEETING_TEMPLATE_KEY = "initial_meeting"
 const DISCOVERY_TEMPLATE_KEY = "discovery"
-const DECISION_STATE_TEMPLATE_KEYS = [INITIAL_CONTACT_TEMPLATE_KEY, INITIAL_MEETING_TEMPLATE_KEY, DISCOVERY_TEMPLATE_KEY] as const
+const DECISION_STATE_TEMPLATE_KEYS = [
+  INITIAL_CONTACT_TEMPLATE_KEY,
+  INITIAL_MEETING_TEMPLATE_KEY,
+  DISCOVERY_TEMPLATE_KEY,
+] as const
 const SUITABLE_OUTCOME_KEY = "suitable"
 const PROCEEDING_TO_DISCOVERY_OUTCOME_KEY = "proceeding_to_discovery"
 const ON_HOLD_OUTCOME_KEY = "on_hold"
 const INITIAL_CONTACT_MEETING_DURATION_MS = 15 * 60 * 1000
+const WORKFLOW_ACTIVE_STATUSES = ["active", "paused"] as const
+const WORKFLOW_COMPLETED_OR_STOPPED_STATUSES = ["completed", "cancelled"] as const
 
 function usesDecisionStateTemplate(templateKey: string) {
   return DECISION_STATE_TEMPLATE_KEYS.includes(templateKey as (typeof DECISION_STATE_TEMPLATE_KEYS)[number])
 }
 const OUTCOME_READY_BUFFER_MS = 60 * 60 * 1000
+
+function isActiveWorkflowStatus(status: string) {
+  return WORKFLOW_ACTIVE_STATUSES.includes(status as (typeof WORKFLOW_ACTIVE_STATUSES)[number])
+}
+
+function isCompletedOrStoppedWorkflowStatus(status: string) {
+  return WORKFLOW_COMPLETED_OR_STOPPED_STATUSES.includes(
+    status as (typeof WORKFLOW_COMPLETED_OR_STOPPED_STATUSES)[number],
+  )
+}
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -224,6 +240,32 @@ function toScopedInstance(entry: {
   }
 }
 
+function sortJourneyHistoryInstances<
+  T extends {
+    created_at: Date
+    workflow_template: {
+      phase_order: number | null
+    }
+  },
+>(left: T, right: T) {
+  const leftPhaseOrder = left.workflow_template.phase_order
+  const rightPhaseOrder = right.workflow_template.phase_order
+
+  if (leftPhaseOrder !== null && rightPhaseOrder !== null && leftPhaseOrder !== rightPhaseOrder) {
+    return leftPhaseOrder - rightPhaseOrder
+  }
+
+  if (leftPhaseOrder !== null && rightPhaseOrder === null) {
+    return -1
+  }
+
+  if (leftPhaseOrder === null && rightPhaseOrder !== null) {
+    return 1
+  }
+
+  return left.created_at.getTime() - right.created_at.getTime()
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -365,12 +407,20 @@ export async function GET(
     const activeChainInstances = workflowInstances
       .filter(
         (instance) =>
-          (instance.status === "active" || instance.status === "paused") &&
-          instance.workflow_template.phase_order !== null,
+          isActiveWorkflowStatus(instance.status) && instance.workflow_template.phase_order !== null,
       )
       .sort((left, right) => right.created_at.getTime() - left.created_at.getTime())
 
-    const current = activeChainInstances[0] ?? null
+    const activeDiscoveryInstances = workflowInstances
+      .filter(
+        (instance) =>
+          isActiveWorkflowStatus(instance.status) &&
+          instance.workflow_template.phase_order === null &&
+          instance.workflow_template.key === DISCOVERY_TEMPLATE_KEY,
+      )
+      .sort((left, right) => right.created_at.getTime() - left.created_at.getTime())
+
+    const current = activeChainInstances[0] ?? activeDiscoveryInstances[0] ?? null
     const currentTaskSummary = current ? await getTaskSummaryForInstance(current.id) : null
     const decisionSnapshot = deriveDecisionSnapshot(current)
     const currentOutcomeCatalog =
@@ -397,9 +447,11 @@ export async function GET(
     const pastInstances = workflowInstances
       .filter(
         (instance) =>
-          instance.workflow_template.phase_order !== null &&
-          (instance.status === "completed" || instance.status === "cancelled"),
+          isCompletedOrStoppedWorkflowStatus(instance.status) &&
+          (instance.workflow_template.phase_order !== null ||
+            instance.workflow_template.key === DISCOVERY_TEMPLATE_KEY),
       )
+      .sort(sortJourneyHistoryInstances)
       .map((instance) => {
         const mapped = toScopedInstance(instance)
         return {
@@ -412,10 +464,10 @@ export async function GET(
       .filter((instance) => instance.workflow_template.phase_order === null)
       .map((instance) => toScopedInstance(instance))
 
-    const nextPhaseTemplate = current
+    const nextPhaseTemplate = current && current.workflow_template.phase_order !== null
       ? await db.workflow_template.findFirst({
           where: {
-            phase_order: (current.workflow_template.phase_order ?? 0) + 1,
+            phase_order: current.workflow_template.phase_order + 1,
           },
           select: {
             key: true,
