@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
+import {
+  loadEmailLogSnapshotByMessageId,
+  responseEmailLogIdByMessageId,
+  responseJson,
+  responseMessageId,
+} from "@/lib/email-audit-snapshots"
 import { sendMailAsAdviser } from "@/lib/graphMail"
 
 type SendEmailPayload = {
@@ -33,7 +40,7 @@ function toClientDisplayName(client: {
   return `${first} ${last}`.trim() || client.display_name
 }
 
-export async function POST(request: Request) {
+async function sendEmail(request: Request) {
   const session = await auth()
   if (!session) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 })
@@ -117,3 +124,22 @@ export async function POST(request: Request) {
   }
 }
 
+export const POST = withAuditTrail(sendEmail, {
+  entity_type: "EmailLog",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) =>
+    loadEmailLogSnapshotByMessageId(await responseMessageId(auditContext)),
+  entityIdFn: async (_request, _context, auditContext) =>
+    responseEmailLogIdByMessageId(auditContext),
+  metadataFn: async (_request, _context, auditContext) => {
+    const payload = await responseJson<{ messageId?: unknown }>(auditContext)
+    const emailLogId = await responseEmailLogIdByMessageId(auditContext)
+
+    return {
+      email_log_id: emailLogId,
+      graph_message_id:
+        typeof payload?.messageId === "string" ? payload.messageId : null,
+    }
+  },
+})

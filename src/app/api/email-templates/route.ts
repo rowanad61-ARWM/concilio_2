@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server"
 
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
+import {
+  loadEmailTemplateSnapshot,
+  responseEmailTemplateId,
+} from "@/lib/email-audit-snapshots"
 
 function validateTemplateInput(payload: Record<string, unknown>) {
   const name = typeof payload.name === "string" ? payload.name.trim() : ""
@@ -33,7 +38,7 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
+async function createEmailTemplate(request: Request) {
   try {
     const payload = (await request.json()) as Record<string, unknown>
     const parsed = validateTemplateInput(payload)
@@ -56,3 +61,18 @@ export async function POST(request: Request) {
   }
 }
 
+export const POST = withAuditTrail(createEmailTemplate, {
+  entity_type: "EmailTemplate",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseEmailTemplateId(auditContext)
+    return id ? loadEmailTemplateSnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) =>
+    responseEmailTemplateId(auditContext),
+  metadataFn: async (_request, _context, auditContext) => {
+    const id = await responseEmailTemplateId(auditContext)
+    return id ? { email_template_id: id } : null
+  },
+})

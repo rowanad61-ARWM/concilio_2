@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server"
 
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
+import {
+  emailTemplateRouteId,
+  loadEmailTemplateSnapshot,
+  responseEmailTemplateId,
+  type EmailTemplateRouteContext,
+} from "@/lib/email-audit-snapshots"
 
 function parseTemplateUpdate(payload: Record<string, unknown>) {
   const name = typeof payload.name === "string" ? payload.name.trim() : ""
@@ -37,9 +44,9 @@ export async function GET(
   }
 }
 
-export async function PUT(
+async function updateEmailTemplate(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: EmailTemplateRouteContext,
 ) {
   const { id } = await params
 
@@ -63,9 +70,9 @@ export async function PUT(
   }
 }
 
-export async function DELETE(
+async function archiveEmailTemplate(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: EmailTemplateRouteContext,
 ) {
   const { id } = await params
 
@@ -84,3 +91,40 @@ export async function DELETE(
   }
 }
 
+export const PUT = withAuditTrail<EmailTemplateRouteContext>(
+  updateEmailTemplate,
+  {
+    entity_type: "EmailTemplate",
+    action: "UPDATE",
+    beforeFn: async (_request, context) =>
+      loadEmailTemplateSnapshot(await emailTemplateRouteId(context)),
+    afterFn: async (_request, context) =>
+      loadEmailTemplateSnapshot(await emailTemplateRouteId(context)),
+    entityIdFn: async (_request, context) => emailTemplateRouteId(context),
+    metadataFn: async (_request, context, auditContext) => {
+      const routeId = await emailTemplateRouteId(context)
+      const responseId = await responseEmailTemplateId(auditContext)
+      return {
+        email_template_id: routeId,
+        response_email_template_id: responseId,
+      }
+    },
+  },
+)
+
+export const DELETE = withAuditTrail<EmailTemplateRouteContext>(
+  archiveEmailTemplate,
+  {
+    entity_type: "EmailTemplate",
+    action: "DELETE",
+    beforeFn: async (_request, context) =>
+      loadEmailTemplateSnapshot(await emailTemplateRouteId(context)),
+    afterFn: async (_request, context) =>
+      loadEmailTemplateSnapshot(await emailTemplateRouteId(context)),
+    entityIdFn: async (_request, context) => emailTemplateRouteId(context),
+    metadataFn: async (_request, context) => ({
+      email_template_id: await emailTemplateRouteId(context),
+      archived: true,
+    }),
+  },
+)
