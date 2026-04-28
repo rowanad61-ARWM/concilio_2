@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
+import {
+  loadTaskNoteSnapshot,
+  responseJson,
+  responseNoteId,
+  taskRouteId,
+  type TaskRouteContext,
+} from "@/lib/task-audit-snapshots"
 
 const DEFAULT_PAGE_SIZE = 50
 const MAX_NOTE_BODY_LENGTH = 10000
@@ -105,9 +113,9 @@ export async function GET(
   }
 }
 
-export async function POST(
+async function createTaskNote(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: TaskRouteContext,
 ) {
   const session = await auth()
   if (!session) {
@@ -202,3 +210,28 @@ export async function POST(
     return NextResponse.json({ error: "failed to create task note" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail<TaskRouteContext>(createTaskNote, {
+  entity_type: "TaskNote",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseNoteId(auditContext)
+    return id ? loadTaskNoteSnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) => responseNoteId(auditContext),
+  metadataFn: async (_request, context, auditContext) => {
+    const payload = await responseJson<{
+      note?: { id?: unknown; source?: unknown; author?: { id?: unknown } | null }
+    }>(auditContext)
+
+    return {
+      task_id: await taskRouteId(context),
+      task_note_id: typeof payload?.note?.id === "string" ? payload.note.id : null,
+      source:
+        typeof payload?.note?.source === "string" ? payload.note.source : null,
+      author_id:
+        typeof payload?.note?.author?.id === "string" ? payload.note.author.id : null,
+    }
+  },
+})

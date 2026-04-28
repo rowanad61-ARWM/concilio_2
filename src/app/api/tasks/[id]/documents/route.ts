@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 import { normalizeClientDocumentFolder } from "@/lib/documents"
 import { getFileById } from "@/lib/graph"
+import {
+  loadTaskDocumentLinkSnapshot,
+  responseDocumentLinkId,
+  responseJson,
+  taskRouteId,
+  type TaskRouteContext,
+} from "@/lib/task-audit-snapshots"
 
 function toRequiredTrimmedString(value: unknown) {
   if (typeof value !== "string") {
@@ -89,9 +97,9 @@ export async function GET(
   }
 }
 
-export async function POST(
+async function linkTaskDocument(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: TaskRouteContext,
 ) {
   const session = await auth()
   if (!session) {
@@ -167,3 +175,41 @@ export async function POST(
     return NextResponse.json({ error: "failed to link document" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail<TaskRouteContext>(linkTaskDocument, {
+  entity_type: "TaskDocumentLink",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseDocumentLinkId(auditContext)
+    return id ? loadTaskDocumentLinkSnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) =>
+    responseDocumentLinkId(auditContext),
+  metadataFn: async (_request, context, auditContext) => {
+    const payload = await responseJson<{
+      document?: {
+        id?: unknown
+        sharepointDriveItemId?: unknown
+        fileName?: unknown
+        folder?: unknown
+      }
+    }>(auditContext)
+
+    return {
+      task_id: await taskRouteId(context),
+      task_document_link_id:
+        typeof payload?.document?.id === "string" ? payload.document.id : null,
+      sharepoint_drive_item_id:
+        typeof payload?.document?.sharepointDriveItemId === "string"
+          ? payload.document.sharepointDriveItemId
+          : null,
+      file_name:
+        typeof payload?.document?.fileName === "string"
+          ? payload.document.fileName
+          : null,
+      folder:
+        typeof payload?.document?.folder === "string" ? payload.document.folder : null,
+    }
+  },
+})

@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
+import {
+  loadTaskDocumentLinkSnapshot,
+  taskDocumentRouteIds,
+  type TaskDocumentRouteContext,
+} from "@/lib/task-audit-snapshots"
 
 function isPrismaNotFoundError(error: unknown) {
   return (
@@ -12,9 +18,9 @@ function isPrismaNotFoundError(error: unknown) {
   )
 }
 
-export async function DELETE(
+async function unlinkTaskDocument(
   _request: Request,
-  { params }: { params: Promise<{ id: string; linkId: string }> },
+  { params }: TaskDocumentRouteContext,
 ) {
   const session = await auth()
   if (!session) {
@@ -54,3 +60,27 @@ export async function DELETE(
     return NextResponse.json({ error: "failed to unlink document" }, { status: 500 })
   }
 }
+
+export const DELETE = withAuditTrail<TaskDocumentRouteContext>(
+  unlinkTaskDocument,
+  {
+    entity_type: "TaskDocumentLink",
+    action: "DELETE",
+    beforeFn: async (_request, context) => {
+      const { linkId } = await taskDocumentRouteIds(context)
+      return loadTaskDocumentLinkSnapshot(linkId)
+    },
+    afterFn: async () => null,
+    entityIdFn: async (_request, context) => {
+      const { linkId } = await taskDocumentRouteIds(context)
+      return linkId
+    },
+    metadataFn: async (_request, context) => {
+      const { taskId, linkId } = await taskDocumentRouteIds(context)
+      return {
+        task_id: taskId,
+        task_document_link_id: linkId,
+      }
+    },
+  },
+)

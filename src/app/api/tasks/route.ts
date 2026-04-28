@@ -2,8 +2,13 @@ import { NextResponse } from "next/server"
 import type { RecurrenceCadence, TaskStatus } from "@prisma/client"
 
 import { auth } from "@/auth"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 import { syncTaskToMonday } from "@/lib/task-sync"
+import {
+  loadTaskSnapshot,
+  responseTaskId,
+} from "@/lib/task-audit-snapshots"
 import {
   isLiveSeriesStatus,
   isRecurrenceCadence,
@@ -318,7 +323,7 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+async function createTask(request: Request) {
   const session = await auth()
   if (!session) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 })
@@ -515,3 +520,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "failed to create task" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail(createTask, {
+  entity_type: "Task",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseTaskId(auditContext)
+    return id ? loadTaskSnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) => responseTaskId(auditContext),
+  metadataFn: async (_request, _context, auditContext) => {
+    const taskId = await responseTaskId(auditContext)
+    return taskId ? { task_id: taskId } : null
+  },
+})

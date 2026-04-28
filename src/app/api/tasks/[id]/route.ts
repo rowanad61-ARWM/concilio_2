@@ -2,9 +2,16 @@ import { NextResponse } from "next/server"
 import type { TaskStatus } from "@prisma/client"
 
 import { auth } from "@/auth"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 import { archiveMondayItem } from "@/lib/monday"
 import { syncTaskToMonday } from "@/lib/task-sync"
+import {
+  loadTaskSnapshot,
+  responseTaskId,
+  taskRouteId,
+  type TaskRouteContext,
+} from "@/lib/task-audit-snapshots"
 import {
   isLiveSeriesStatus,
   isRecurrenceCadence,
@@ -246,9 +253,9 @@ export async function GET(
   }
 }
 
-export async function PUT(
+async function updateTask(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: TaskRouteContext,
 ) {
   const session = await auth()
   if (!session) {
@@ -610,9 +617,9 @@ export async function PUT(
   }
 }
 
-export async function DELETE(
+async function deleteTask(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: TaskRouteContext,
 ) {
   const session = await auth()
   if (!session) {
@@ -650,3 +657,30 @@ export async function DELETE(
     return NextResponse.json({ error: "failed to delete task" }, { status: 500 })
   }
 }
+
+export const PUT = withAuditTrail<TaskRouteContext>(updateTask, {
+  entity_type: "Task",
+  action: "UPDATE",
+  beforeFn: async (_request, context) => loadTaskSnapshot(await taskRouteId(context)),
+  afterFn: async (_request, context) => loadTaskSnapshot(await taskRouteId(context)),
+  entityIdFn: async (_request, context) => taskRouteId(context),
+  metadataFn: async (_request, context, auditContext) => {
+    const routeTaskId = await taskRouteId(context)
+    const responseId = await responseTaskId(auditContext)
+    return {
+      task_id: routeTaskId,
+      response_task_id: responseId,
+    }
+  },
+})
+
+export const DELETE = withAuditTrail<TaskRouteContext>(deleteTask, {
+  entity_type: "Task",
+  action: "DELETE",
+  beforeFn: async (_request, context) => loadTaskSnapshot(await taskRouteId(context)),
+  afterFn: async () => null,
+  entityIdFn: async (_request, context) => taskRouteId(context),
+  metadataFn: async (_request, context) => ({
+    task_id: await taskRouteId(context),
+  }),
+})
