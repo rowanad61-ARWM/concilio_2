@@ -3,6 +3,10 @@ import { timingSafeEqual } from "node:crypto"
 import { NextResponse } from "next/server"
 
 import { runWorkflowNudges } from "@/lib/nudges/run"
+import {
+  readSystemAuditRequestId,
+  writeNudgeDispatchAuditEvents,
+} from "@/lib/webhook-cron-audit"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -76,7 +80,13 @@ export async function POST(request: Request) {
   }
 
   try {
+    const requestId = readSystemAuditRequestId(request)
     const result = await runWorkflowNudges({ dryRun })
+    await writeNudgeDispatchAuditEvents({
+      result,
+      requestId,
+      method: "POST",
+    })
     return NextResponse.json(result)
   } catch (error) {
     console.error("[nudges cron] run failed", error)
@@ -91,7 +101,13 @@ export async function GET(request: Request) {
   }
 
   try {
+    const requestId = readSystemAuditRequestId(request)
     const result = await runWorkflowNudges()
+    await writeNudgeDispatchAuditEvents({
+      result,
+      requestId,
+      method: "GET",
+    })
     return NextResponse.json(result)
   } catch (error) {
     console.error("[nudges cron] run failed", error)

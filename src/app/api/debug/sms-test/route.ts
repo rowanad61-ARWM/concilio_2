@@ -2,7 +2,9 @@ import { timingSafeEqual } from "node:crypto"
 
 import { NextResponse } from "next/server"
 
+import { withAuditTrail, type AuditLifecycleContext } from "@/lib/audit-middleware"
 import { sendSms } from "@/lib/messagemedia"
+import { responseJsonSnapshot } from "@/lib/webhook-cron-audit"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -74,7 +76,21 @@ function getErrorResponseBody(error: unknown) {
   return undefined
 }
 
-export async function POST(request: Request) {
+function smsTestMetadata(
+  _request: Request,
+  _context: unknown,
+  auditContext: AuditLifecycleContext,
+) {
+  const afterSnapshot = asObject(auditContext.afterSnapshot)
+
+  return {
+    source: "debug_sms_test",
+    message_id: typeof afterSnapshot?.message_id === "string" ? afterSnapshot.message_id : null,
+    status: typeof afterSnapshot?.status === "string" ? afterSnapshot.status : null,
+  }
+}
+
+async function post(request: Request) {
   const configuredSecret = process.env.CRON_SHARED_SECRET?.trim()
   const providedSecret = request.headers.get("x-cron-secret")?.trim() ?? ""
 
@@ -130,3 +146,12 @@ export async function POST(request: Request) {
     )
   }
 }
+
+export const POST = withAuditTrail(post, {
+  actor: "system",
+  entity_type: "SmsTest",
+  action: "CREATE",
+  afterFn: responseJsonSnapshot,
+  entityIdFn: () => null,
+  metadataFn: smsTestMetadata,
+})

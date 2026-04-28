@@ -6,6 +6,15 @@ import {
   handleInviteeCreated,
   handleRoutingFormSubmission,
 } from "@/lib/calendly-webhook"
+import { withAuditTrail } from "@/lib/audit-middleware"
+import {
+  calendlyWebhookAction,
+  calendlyWebhookEntityId,
+  calendlyWebhookMetadata,
+  captureCalendlyWebhookBeforeSnapshot,
+  loadCalendlyWebhookAfterSnapshot,
+  shouldAuditCalendlyWebhook,
+} from "@/lib/webhook-cron-audit"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -33,7 +42,7 @@ function isSignatureHeaderMalformed(header: string | null) {
   return !hasTimestamp || !hasDigest
 }
 
-export async function POST(request: Request) {
+async function post(request: Request) {
   const rawBody = await request.text()
   const signatureHeader = request.headers.get("Calendly-Webhook-Signature")
   const signingKey = process.env.CALENDLY_WEBHOOK_SIGNING_KEY?.trim()
@@ -84,3 +93,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "handler failed" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail(post, {
+  actor: "system",
+  entity_type: "engagement",
+  action: calendlyWebhookAction,
+  beforeFn: captureCalendlyWebhookBeforeSnapshot,
+  afterFn: loadCalendlyWebhookAfterSnapshot,
+  entityIdFn: calendlyWebhookEntityId,
+  metadataFn: calendlyWebhookMetadata,
+  shouldAuditFn: shouldAuditCalendlyWebhook,
+})

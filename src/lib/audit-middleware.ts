@@ -33,6 +33,12 @@ export type AuditEntityTypeFn<TContext = unknown> = (
   auditContext: AuditLifecycleContext,
 ) => MaybePromise<string | null | undefined>
 
+export type AuditActionFn<TContext = unknown> = (
+  request: Request,
+  context: TContext,
+  auditContext: AuditLifecycleContext,
+) => MaybePromise<AuditAction | null | undefined>
+
 export type AuditMetadataFn<TContext = unknown> = (
   request: Request,
   context: TContext,
@@ -47,12 +53,13 @@ export type AuditShouldAuditFn<TContext = unknown> = (
 
 export interface AuditMiddlewareConfig<TContext = unknown> {
   entity_type: string | AuditEntityTypeFn<TContext>
-  action: AuditAction
+  action: AuditAction | AuditActionFn<TContext>
   beforeFn?: AuditSnapshotFn<TContext>
   afterFn?: AuditSnapshotFn<TContext>
   entityIdFn?: AuditEntityIdFn<TContext>
   metadataFn?: AuditMetadataFn<TContext>
   shouldAuditFn?: AuditShouldAuditFn<TContext>
+  actor?: 'session' | 'system'
 }
 
 interface SessionLike {
@@ -149,19 +156,34 @@ async function resolveActorUserIdFromSession(
   }
 }
 
-async function readActorContext(request: Request): Promise<{
+async function readActorContext(
+  request: Request,
+  actorMode: AuditMiddlewareConfig['actor'] = 'session',
+): Promise<{
   actorUserId: string | null
   actorIp: string | null
   actorUserAgent: string | null
   requestId: string
 }> {
+  const requestId =
+    request.headers.get('x-request-id') ?? (testHooks.requestId ?? randomUUID)()
+
+  if (actorMode === 'system') {
+    return {
+      actorUserId: null,
+      actorIp: null,
+      actorUserAgent: null,
+      requestId,
+    }
+  }
+
   const session = await (testHooks.auth ?? defaultAuth)()
 
   return {
     actorUserId: await resolveActorUserIdFromSession(session),
     actorIp: readClientIp(request.headers),
     actorUserAgent: request.headers.get('user-agent'),
-    requestId: request.headers.get('x-request-id') ?? (testHooks.requestId ?? randomUUID)(),
+    requestId,
   }
 }
 
@@ -233,6 +255,19 @@ async function resolveEntityType<TContext>(
   return (await config.entity_type(request, context, auditContext)) ?? 'unknown'
 }
 
+async function resolveAction<TContext>(
+  request: Request,
+  context: TContext,
+  config: AuditMiddlewareConfig<TContext>,
+  auditContext: AuditLifecycleContext,
+): Promise<AuditAction> {
+  if (typeof config.action === 'string') {
+    return config.action
+  }
+
+  return (await config.action(request, context, auditContext)) ?? 'UPDATE'
+}
+
 async function readSnapshot<TContext>(
   label: 'before' | 'after',
   snapshotFn: AuditSnapshotFn<TContext> | undefined,
@@ -279,29 +314,30 @@ export function withAuditTrail<TContext = unknown>(
     }
 
     try {
+      const afterSnapshot = await readSnapshot('after', config.afterFn, request, context, {
+        response,
+        beforeSnapshot,
+      })
+      const auditContext = {
+        response,
+        beforeSnapshot,
+        afterSnapshot,
+      }
       if (config.shouldAuditFn) {
-        const shouldAudit = await config.shouldAuditFn(request, context, {
-          response,
-          beforeSnapshot,
-        })
+        const shouldAudit = await config.shouldAuditFn(request, context, auditContext)
 
         if (!shouldAudit) {
           return response
         }
       }
 
-      const afterSnapshot = await readSnapshot('after', config.afterFn, request, context, {
-        response,
-        beforeSnapshot,
-      })
-      const actorContext = await readActorContext(request)
-      const auditContext = {
-        response,
-        beforeSnapshot,
-        afterSnapshot,
-      }
+      const actorContext = await readActorContext(request, config.actor)
       const entityId = await resolveEntityId(request, context, config, auditContext)
       const entityType = await resolveEntityType(request, context, config, {
+        ...auditContext,
+        entityId,
+      })
+      const action = await resolveAction(request, context, config, {
         ...auditContext,
         entityId,
       })
@@ -314,10 +350,11 @@ export function withAuditTrail<TContext = unknown>(
 
       await (testHooks.writeAuditEvent ?? defaultWriteAuditEvent)({
         userId: actorContext.actorUserId,
-        action: config.action,
+        action,
         entityType,
         entityId,
-        channel: 'staff_ui',
+        channel: config.actor === 'system' ? 'system' : 'staff_ui',
+        actor_type: config.actor === 'system' ? 'system' : undefined,
         actor_ip: actorContext.actorIp,
         actor_user_agent: actorContext.actorUserAgent,
         before_snapshot: beforeSnapshot,

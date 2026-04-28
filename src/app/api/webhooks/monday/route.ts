@@ -6,6 +6,16 @@ import {
   handleUpdateCreated,
   type MondayEvent,
 } from "@/lib/monday-webhook"
+import { withAuditTrail } from "@/lib/audit-middleware"
+import {
+  captureMondayWebhookBeforeSnapshot,
+  loadMondayWebhookAfterSnapshot,
+  mondayWebhookAction,
+  mondayWebhookEntityId,
+  mondayWebhookEntityType,
+  mondayWebhookMetadata,
+  shouldAuditMondayWebhook,
+} from "@/lib/webhook-cron-audit"
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -38,7 +48,7 @@ function getNumericIdOrNull(value: unknown) {
   return null
 }
 
-export async function POST(request: Request) {
+async function post(request: Request) {
   const rawBody = await request.text()
   const preview = getPreview(rawBody)
   console.log(`[monday webhook] received preview=${preview}`)
@@ -88,3 +98,14 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true })
 }
+
+export const POST = withAuditTrail(post, {
+  actor: "system",
+  entity_type: mondayWebhookEntityType,
+  action: mondayWebhookAction,
+  beforeFn: captureMondayWebhookBeforeSnapshot,
+  afterFn: loadMondayWebhookAfterSnapshot,
+  entityIdFn: mondayWebhookEntityId,
+  metadataFn: mondayWebhookMetadata,
+  shouldAuditFn: shouldAuditMondayWebhook,
+})

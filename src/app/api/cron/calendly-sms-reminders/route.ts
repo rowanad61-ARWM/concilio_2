@@ -2,12 +2,18 @@ import { timingSafeEqual } from "node:crypto"
 
 import { NextResponse } from "next/server"
 
+import type { AuditSnapshot } from "@/lib/audit"
 import {
   formatCalendlyMeetingTime,
   getCalendlyMeetingTypeLabel,
 } from "@/lib/calendly"
 import { db } from "@/lib/db"
 import { sendSms } from "@/lib/messagemedia"
+import { loadEngagementSnapshot } from "@/lib/workflow-audit-snapshots"
+import {
+  readSystemAuditRequestId,
+  writeSystemAuditEvent,
+} from "@/lib/webhook-cron-audit"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -69,6 +75,7 @@ function buildReminderSmsBody(params: {
 }
 
 export async function POST(request: Request) {
+  const requestId = readSystemAuditRequestId(request)
   const configuredSecret = process.env.CRON_SHARED_SECRET?.trim()
   const providedSecret = request.headers.get("x-cron-secret")?.trim() ?? ""
 
@@ -152,6 +159,13 @@ export async function POST(request: Request) {
     }
 
     try {
+      let beforeSnapshot: AuditSnapshot = null
+      try {
+        beforeSnapshot = await loadEngagementSnapshot(engagement.id)
+      } catch (error) {
+        console.error("[calendly sms cron] audit before snapshot failed", error)
+      }
+
       const sms = await sendSms(mobile, messageBody)
       const marked = await db.engagement.updateMany({
         where: {
@@ -174,6 +188,25 @@ export async function POST(request: Request) {
       }
 
       sent += 1
+      try {
+        await writeSystemAuditEvent({
+          action: "UPDATE",
+          entityType: "engagement",
+          entityId: engagement.id,
+          beforeSnapshot,
+          afterSnapshot: await loadEngagementSnapshot(engagement.id),
+          requestId,
+          metadata: {
+            source: "cron",
+            cron_job: "calendly_sms_reminders",
+            result: "sent",
+            sms_message_id: sms.message_id,
+            sms_status: sms.status,
+          },
+        })
+      } catch (error) {
+        console.error("[calendly sms cron] audit write failed", error)
+      }
       details.push({
         engagement_id: engagement.id,
         result: "sent",
