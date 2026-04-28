@@ -55,17 +55,30 @@ console.log(
 
 const ACTOR_ID = "11111111-1111-4111-8111-111111111111";
 const ACTOR_EMAIL = "round1-b1-audit-smoke@example.test";
+const PRACTICE_ID = "22222222-2222-4222-8222-222222222222";
+const RUN_ID = `${Date.now()}`;
 
 function jsonRequest(url, method, body, requestId) {
   return new Request(url, {
     method,
     headers: {
       "content-type": "application/json",
-      "user-agent": "ConcilioHalfB1Integration/1.0",
+      "user-agent": "ConcilioHalfCIntegration/1.0",
       "x-forwarded-for": "127.0.0.1",
       "x-request-id": requestId,
     },
     body: JSON.stringify(body),
+  });
+}
+
+function emptyRequest(url, method, requestId) {
+  return new Request(url, {
+    method,
+    headers: {
+      "user-agent": "ConcilioHalfCIntegration/1.0",
+      "x-forwarded-for": "127.0.0.1",
+      "x-request-id": requestId,
+    },
   });
 }
 
@@ -90,12 +103,13 @@ async function main() {
   const { hardDeleteParty } = require("../src/lib/partyDelete.ts");
   const clientsRoute = require("../src/app/api/clients/route.ts");
   const clientRoute = require("../src/app/api/clients/[id]/route.ts");
+  const adminAlertRoute = require("../src/app/api/admin/alerts/[id]/route.ts");
 
   await db.practice.upsert({
     where: { code: "TEST" },
     update: { name: "Concilio Test Practice", status: "active" },
     create: {
-      id: "22222222-2222-4222-8222-222222222222",
+      id: PRACTICE_ID,
       name: "Concilio Test Practice",
       code: "TEST",
       status: "active",
@@ -106,30 +120,29 @@ async function main() {
     where: { email: ACTOR_EMAIL },
     update: {
       id: ACTOR_ID,
-      name: "Round 1 B1 Smoke Actor",
+      name: "Round 1 Half C Admin Actor",
       status: "active",
-      role: "adviser",
-      practice_id: "22222222-2222-4222-8222-222222222222",
+      role: "owner",
+      practice_id: PRACTICE_ID,
     },
     create: {
       id: ACTOR_ID,
-      practice_id: "22222222-2222-4222-8222-222222222222",
-      name: "Round 1 B1 Smoke Actor",
+      practice_id: PRACTICE_ID,
+      name: "Round 1 Half C Admin Actor",
       email: ACTOR_EMAIL,
-      role: "adviser",
+      role: "owner",
       status: "active",
     },
   });
 
   const requestIds = {
-    create: `half-b1-create-${Date.now()}`,
-    update: `half-b1-update-${Date.now()}`,
-    delete: `half-b1-delete-${Date.now()}`,
-    failed: `half-b1-failed-${Date.now()}`,
+    create: `half-c-create-${RUN_ID}`,
+    update: `half-c-update-${RUN_ID}`,
+    acknowledge: `half-c-acknowledge-${RUN_ID}`,
   };
 
   let clientId = null;
-  let deletedThroughRoute = false;
+  const alertIds = [];
 
   try {
     const createResponse = await clientsRoute.POST(
@@ -137,12 +150,12 @@ async function main() {
         "http://localhost/api/clients",
         "POST",
         {
-          firstName: "Round",
-          lastName: "Smoke",
-          preferredName: "B1",
-          dateOfBirth: "1980-01-02",
-          email: "round.b1.smoke@example.test",
-          mobile: "0400000000",
+          firstName: "Half",
+          lastName: "Alert",
+          preferredName: "HC",
+          dateOfBirth: "1982-03-04",
+          email: `half-c-old-${RUN_ID}@example.test`,
+          mobile: "0400000001",
           relationshipStatus: "single",
           countryOfResidence: "AU",
         },
@@ -158,10 +171,13 @@ async function main() {
         `http://localhost/api/clients/${clientId}`,
         "PATCH",
         {
-          firstName: "Round",
-          lastName: "Smoke Updated",
-          preferredName: "B1 Updated",
-          mobile: "0499999999",
+          firstName: "Half",
+          lastName: "Alert",
+          preferredName: "HC",
+          email: `half-c-new-${RUN_ID}@example.test`,
+          mobile: "0400000001",
+          relationshipStatus: "single",
+          countryOfResidence: "AU",
         },
         requestIds.update,
       ),
@@ -169,106 +185,110 @@ async function main() {
     );
     const updated = await expectJson(updateResponse, 200);
     assert.equal(updated.id, clientId);
-    assert.equal(updated.displayName, "Round Smoke Updated");
 
-    const failedResponse = await clientsRoute.POST(
-      jsonRequest(
-        "http://localhost/api/clients",
-        "POST",
-        {
-          firstName: "Invalid",
-        },
-        requestIds.failed,
-      ),
-    );
-    await expectJson(failedResponse, 400);
-
-    const deleteResponse = await clientRoute.DELETE(
-      new Request(`http://localhost/api/clients/${clientId}`, {
-        method: "DELETE",
-        headers: {
-          "user-agent": "ConcilioHalfB1Integration/1.0",
-          "x-forwarded-for": "127.0.0.1",
-          "x-request-id": requestIds.delete,
-        },
-      }),
-      contextFor(clientId),
-    );
-    const deleted = await expectJson(deleteResponse, 200);
-    assert.equal(deleted.success, true);
-    deletedThroughRoute = true;
-
-    const eventChain = await db.audit_event.findMany({
+    const updateAuditEvent = await db.audit_event.findFirst({
       where: {
+        request_id: requestIds.update,
+        event_type: "UPDATE",
+        subject_type: "person",
         subject_id: clientId,
-        event_type: {
-          in: ["CREATE", "UPDATE", "DELETE"],
-        },
       },
-      orderBy: { occurred_at: "asc" },
       select: {
-        event_type: true,
-        subject_type: true,
-        subject_id: true,
-        request_id: true,
-        actor_ip: true,
-        actor_user_agent: true,
+        id: true,
         before_snapshot: true,
         after_snapshot: true,
-        details: true,
       },
     });
 
-    assert.deepEqual(
-      eventChain.map((event) => event.event_type),
-      ["CREATE", "UPDATE", "DELETE"],
-    );
-    assert.deepEqual(
-      eventChain.map((event) => event.subject_type),
-      ["person", "person", "person"],
-    );
-    assert.deepEqual(
-      eventChain.map((event) => event.request_id),
-      [requestIds.create, requestIds.update, requestIds.delete],
-    );
-    assert.equal(eventChain.every((event) => event.actor_ip === "127.0.0.1"), true);
-    assert.equal(
-      eventChain.every(
-        (event) => event.actor_user_agent === "ConcilioHalfB1Integration/1.0",
-      ),
-      true,
-    );
-    assert.equal(eventChain[0].before_snapshot, null);
-    assert.equal(Boolean(eventChain[0].after_snapshot), true);
-    assert.equal(Boolean(eventChain[1].before_snapshot), true);
-    assert.equal(Boolean(eventChain[1].after_snapshot), true);
-    assert.equal(Boolean(eventChain[2].before_snapshot), true);
-    assert.equal(eventChain[2].after_snapshot, null);
-    assert.equal(Boolean(eventChain[2].details?.metadata?.cascaded), true);
+    assert.ok(updateAuditEvent, "expected UPDATE audit_event for email change");
 
-    const failedAuditCount = await db.audit_event.count({
-      where: { request_id: requestIds.failed },
+    const alertRows = await db.alert_instance.findMany({
+      where: {
+        audit_event_id: updateAuditEvent.id,
+        alert_type: "FIELD_CHANGE",
+        entity_type: "person",
+        entity_id: clientId,
+        acknowledged_at: null,
+      },
+      orderBy: { occurred_at: "desc" },
     });
-    assert.equal(failedAuditCount, 0);
 
-    const remainingParty = await db.party.findUnique({ where: { id: clientId } });
-    assert.equal(remainingParty, null);
+    assert.equal(alertRows.length, 1);
+    const alert = alertRows[0];
+    alertIds.push(alert.id);
+    assert.deepEqual(alert.payload, {
+      field: "email",
+      old: `half-c-old-${RUN_ID}@example.test`,
+      new: `half-c-new-${RUN_ID}@example.test`,
+    });
 
-    console.log("[integration] Half B1 event chain:");
-    for (const event of eventChain) {
-      console.log(
-        `  ${event.event_type} ${event.subject_type}/${event.subject_id} request_id=${event.request_id}`,
-      );
-    }
-    console.log("[integration] Failed validation produced 0 audit_event rows.");
+    const acknowledgeResponse = await adminAlertRoute.PATCH(
+      emptyRequest(
+        `http://localhost/api/admin/alerts/${alert.id}`,
+        "PATCH",
+        requestIds.acknowledge,
+      ),
+      contextFor(alert.id),
+    );
+    const acknowledged = await expectJson(acknowledgeResponse, 200);
+    assert.equal(acknowledged.alert.id, alert.id);
+    assert.equal(acknowledged.alert.acknowledged_by_user_id, ACTOR_ID);
+
+    const storedAlert = await db.alert_instance.findUnique({
+      where: { id: alert.id },
+      select: {
+        acknowledged_at: true,
+        acknowledged_by_user_id: true,
+      },
+    });
+    assert.ok(storedAlert?.acknowledged_at, "expected acknowledged_at to be set");
+    assert.equal(storedAlert.acknowledged_by_user_id, ACTOR_ID);
+
+    const outstandingCount = await db.alert_instance.count({
+      where: {
+        id: alert.id,
+        acknowledged_at: null,
+      },
+    });
+    assert.equal(outstandingCount, 0);
+
+    const acknowledgeAuditEvent = await db.audit_event.findFirst({
+      where: {
+        request_id: requestIds.acknowledge,
+        event_type: "UPDATE",
+        subject_type: "alert_instance",
+        subject_id: alert.id,
+      },
+      select: {
+        id: true,
+        before_snapshot: true,
+        after_snapshot: true,
+      },
+    });
+
+    assert.ok(acknowledgeAuditEvent, "expected audit_event for alert acknowledgement");
+    assert.equal(
+      acknowledgeAuditEvent.before_snapshot.acknowledged_at,
+      null,
+      "expected pre-ack snapshot to be unacknowledged",
+    );
+    assert.ok(
+      acknowledgeAuditEvent.after_snapshot.acknowledged_at,
+      "expected post-ack snapshot to include acknowledged_at",
+    );
+
+    console.log("[integration] Half C alert flow:");
+    console.log(`  UPDATE audit_event=${updateAuditEvent.id}`);
+    console.log(`  FIELD_CHANGE alert_instance=${alert.id}`);
+    console.log(`  ACK audit_event=${acknowledgeAuditEvent.id}`);
   } finally {
-    if (clientId) {
+    if (alertIds.length > 0) {
       await db.alert_instance.deleteMany({
-        where: { entity_id: clientId },
+        where: { id: { in: alertIds } },
       });
     }
 
-    if (clientId && !deletedThroughRoute) {
+    if (clientId) {
       try {
         await hardDeleteParty(clientId, ACTOR_ID);
       } catch (error) {

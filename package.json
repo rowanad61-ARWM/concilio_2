@@ -11,6 +11,7 @@
     "test:integration": "node -r ./test/setup-local-env.cjs test/half-b1.integration.cjs",
     "test:integration:b2": "node -r ./test/setup-local-env.cjs test/half-b2.integration.cjs",
     "test:integration:b3": "node -r ./test/setup-local-env.cjs test/half-b3.integration.cjs",
+    "test:integration:c": "node -r ./test/setup-local-env.cjs test/half-c.integration.cjs",
     "start": "next start",
     "lint": "eslint",
     "seed": "npx tsx src/scripts/seed.ts",

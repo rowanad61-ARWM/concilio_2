@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth"
 
 const adminNavItems = [
   { href: "/admin/templates", label: "Templates" },
+  { href: "/admin/alerts", label: "Alerts" },
   { href: "/admin/email-templates", label: "Email templates" },
   { href: "/admin/nudges", label: "Nudges" },
   { href: "/admin/calendly-event-types", label: "Calendly event types" },
