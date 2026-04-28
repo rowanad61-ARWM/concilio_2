@@ -94,6 +94,14 @@ function actorTypeFor(input: AuditEventInput): string {
   }
 }
 
+function toJsonCompatible(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(
+    JSON.stringify(value, (_key, nestedValue) =>
+      typeof nestedValue === 'bigint' ? nestedValue.toString() : nestedValue,
+    ),
+  ) as Prisma.InputJsonValue
+}
+
 export async function writeAuditEvent(input: AuditEventInput): Promise<void> {
   const beforeSnapshot =
     input.before_snapshot ?? input.beforeSnapshot ?? input.beforeState ?? null
@@ -127,13 +135,13 @@ export async function writeAuditEvent(input: AuditEventInput): Promise<void> {
         actor_id: toNullableUuid(input.userId),
         subject_type: entityType,
         subject_id: toSubjectUuid(entityId),
-        details: details as Prisma.InputJsonValue,
+        details: toJsonCompatible(details),
         actor_ip: actorIp,
         actor_user_agent: actorUserAgent,
         before_snapshot:
-          beforeSnapshot === null ? undefined : (beforeSnapshot as Prisma.InputJsonValue),
+          beforeSnapshot === null ? undefined : toJsonCompatible(beforeSnapshot),
         after_snapshot:
-          afterSnapshot === null ? undefined : (afterSnapshot as Prisma.InputJsonValue),
+          afterSnapshot === null ? undefined : toJsonCompatible(afterSnapshot),
         request_id: requestId,
       },
     })

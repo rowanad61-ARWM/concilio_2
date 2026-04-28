@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
+import {
+  loadClientParentSnapshot,
+  loadClientRecordSnapshot,
+  responseJson,
+  routeParamId,
+  type ClientRouteContext,
+} from "@/lib/client-audit-snapshots"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 import { hardDeleteParty, PartyDeleteBlockedError, PartyNotFoundError } from "@/lib/partyDelete"
 
@@ -60,9 +68,9 @@ async function getEmploymentStatusOptions() {
   return rows.flatMap((row) => extractConstraintValues(row.definition))
 }
 
-export async function PATCH(
+async function updateClient(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: ClientRouteContext,
 ) {
   const { id } = await params
 
@@ -287,9 +295,9 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
+async function deleteClient(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: ClientRouteContext,
 ) {
   const session = await auth()
   if (!session) {
@@ -332,3 +340,28 @@ export async function DELETE(
     return NextResponse.json({ error: "failed to delete client" }, { status: 500 })
   }
 }
+
+export const PATCH = withAuditTrail<ClientRouteContext>(updateClient, {
+  entity_type: "person",
+  action: "UPDATE",
+  beforeFn: async (_request, context) =>
+    loadClientRecordSnapshot(await routeParamId(context)),
+  afterFn: async (_request, context) =>
+    loadClientRecordSnapshot(await routeParamId(context)),
+  entityIdFn: async (_request, context) => routeParamId(context),
+})
+
+export const DELETE = withAuditTrail<ClientRouteContext>(deleteClient, {
+  entity_type: "person",
+  action: "DELETE",
+  beforeFn: async (_request, context) =>
+    loadClientParentSnapshot(await routeParamId(context)),
+  afterFn: async () => null,
+  entityIdFn: async (_request, context) => routeParamId(context),
+  metadataFn: async (_request, _context, auditContext) => {
+    const payload = await responseJson<{ counts?: Record<string, number> }>(auditContext)
+    return {
+      cascaded: payload?.counts ?? {},
+    }
+  },
+})

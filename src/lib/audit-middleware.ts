@@ -8,26 +8,44 @@ export type AuditedRouteHandler<TContext = unknown> = (
   context: TContext,
 ) => MaybePromise<Response>
 
+export interface AuditLifecycleContext {
+  response?: Response
+  beforeSnapshot?: AuditSnapshot | null
+  afterSnapshot?: AuditSnapshot | null
+  entityId?: string | null
+}
+
 export type AuditSnapshotFn<TContext = unknown> = (
   request: Request,
   context: TContext,
+  auditContext: AuditLifecycleContext,
 ) => MaybePromise<AuditSnapshot | undefined>
 
 export type AuditEntityIdFn<TContext = unknown> = (
   request: Request,
   context: TContext,
-  snapshots: {
-    beforeSnapshot: AuditSnapshot | null
-    afterSnapshot: AuditSnapshot | null
-  },
+  auditContext: AuditLifecycleContext,
 ) => MaybePromise<string | null | undefined>
 
+export type AuditEntityTypeFn<TContext = unknown> = (
+  request: Request,
+  context: TContext,
+  auditContext: AuditLifecycleContext,
+) => MaybePromise<string | null | undefined>
+
+export type AuditMetadataFn<TContext = unknown> = (
+  request: Request,
+  context: TContext,
+  auditContext: AuditLifecycleContext,
+) => MaybePromise<Record<string, unknown> | null | undefined>
+
 export interface AuditMiddlewareConfig<TContext = unknown> {
-  entity_type: string
+  entity_type: string | AuditEntityTypeFn<TContext>
   action: AuditAction
   beforeFn?: AuditSnapshotFn<TContext>
   afterFn?: AuditSnapshotFn<TContext>
   entityIdFn?: AuditEntityIdFn<TContext>
+  metadataFn?: AuditMetadataFn<TContext>
 }
 
 interface SessionLike {
@@ -179,23 +197,33 @@ async function resolveEntityId<TContext>(
   request: Request,
   context: TContext,
   config: AuditMiddlewareConfig<TContext>,
-  snapshots: {
-    beforeSnapshot: AuditSnapshot | null
-    afterSnapshot: AuditSnapshot | null
-  },
+  auditContext: AuditLifecycleContext,
 ): Promise<string | null> {
   if (config.entityIdFn) {
-    const explicitId = await config.entityIdFn(request, context, snapshots)
+    const explicitId = await config.entityIdFn(request, context, auditContext)
     if (explicitId) {
       return explicitId
     }
   }
 
   return (
-    extractIdFromSnapshot(snapshots.afterSnapshot) ??
-    extractIdFromSnapshot(snapshots.beforeSnapshot) ??
+    extractIdFromSnapshot(auditContext.afterSnapshot ?? null) ??
+    extractIdFromSnapshot(auditContext.beforeSnapshot ?? null) ??
     (await extractIdFromContext(context))
   )
+}
+
+async function resolveEntityType<TContext>(
+  request: Request,
+  context: TContext,
+  config: AuditMiddlewareConfig<TContext>,
+  auditContext: AuditLifecycleContext,
+): Promise<string> {
+  if (typeof config.entity_type === 'string') {
+    return config.entity_type
+  }
+
+  return (await config.entity_type(request, context, auditContext)) ?? 'unknown'
 }
 
 async function readSnapshot<TContext>(
@@ -203,13 +231,14 @@ async function readSnapshot<TContext>(
   snapshotFn: AuditSnapshotFn<TContext> | undefined,
   request: Request,
   context: TContext,
+  auditContext: AuditLifecycleContext,
 ): Promise<AuditSnapshot | null> {
   if (!snapshotFn) {
     return null
   }
 
   try {
-    return (await snapshotFn(request, context)) ?? null
+    return (await snapshotFn(request, context, auditContext)) ?? null
   } catch (error) {
     logAuditMiddlewareError(
       `[Audit Middleware] Failed to capture ${label} snapshot`,
@@ -233,6 +262,7 @@ export function withAuditTrail<TContext = unknown>(
       config.beforeFn,
       request,
       context,
+      {},
     )
 
     const response = await handler(request, context)
@@ -242,17 +272,32 @@ export function withAuditTrail<TContext = unknown>(
     }
 
     try {
-      const afterSnapshot = await readSnapshot('after', config.afterFn, request, context)
+      const afterSnapshot = await readSnapshot('after', config.afterFn, request, context, {
+        response,
+        beforeSnapshot,
+      })
       const actorContext = await readActorContext(request)
-      const entityId = await resolveEntityId(request, context, config, {
+      const auditContext = {
+        response,
         beforeSnapshot,
         afterSnapshot,
+      }
+      const entityId = await resolveEntityId(request, context, config, auditContext)
+      const entityType = await resolveEntityType(request, context, config, {
+        ...auditContext,
+        entityId,
       })
+      const metadata = config.metadataFn
+        ? await config.metadataFn(request, context, {
+            ...auditContext,
+            entityId,
+          })
+        : null
 
       await (testHooks.writeAuditEvent ?? defaultWriteAuditEvent)({
         userId: actorContext.actorUserId,
         action: config.action,
-        entityType: config.entity_type,
+        entityType,
         entityId,
         channel: 'staff_ui',
         actor_ip: actorContext.actorIp,
@@ -260,6 +305,7 @@ export function withAuditTrail<TContext = unknown>(
         before_snapshot: beforeSnapshot,
         after_snapshot: afterSnapshot,
         request_id: actorContext.requestId,
+        metadata: metadata ?? undefined,
       })
     } catch (error) {
       logAuditMiddlewareError(

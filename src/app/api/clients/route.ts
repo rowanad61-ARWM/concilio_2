@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server"
 
+import { loadClientRecordSnapshot, responseId } from "@/lib/client-audit-snapshots"
 import { db } from "@/lib/db"
+import { withAuditTrail } from "@/lib/audit-middleware"
 
-export async function POST(request: Request) {
+async function createClient(request: Request) {
   const {
     firstName,
     lastName,
@@ -54,3 +56,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "failed to create client" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail(createClient, {
+  entity_type: "person",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseId(auditContext)
+    return id ? loadClientRecordSnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) => responseId(auditContext),
+})
