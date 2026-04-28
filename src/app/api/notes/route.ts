@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server"
 
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
+import {
+  loadFileNoteSnapshot,
+  responseFileNoteId,
+} from "@/lib/document-note-audit-snapshots"
 
 type NoteCategory = "general" | "meeting" | "phone_call" | "email" | "compliance" | "other"
 
@@ -15,7 +20,7 @@ const VALID_CATEGORIES: NoteCategory[] = [
 
 const PLACEHOLDER_AUTHOR_ID = "00000000-0000-0000-0000-000000000001"
 
-export async function POST(request: Request) {
+async function createFileNote(request: Request) {
   const { partyId, body, category } = await request.json()
 
   if (!partyId || !body) {
@@ -40,3 +45,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "failed to create note" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail(createFileNote, {
+  entity_type: "file_note",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseFileNoteId(auditContext)
+    return id ? loadFileNoteSnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) =>
+    responseFileNoteId(auditContext),
+})

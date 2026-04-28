@@ -92,9 +92,10 @@ async function createFolder(parentSegments: string[], folderName: string) {
       folder: {},
       "@microsoft.graph.conflictBehavior": "fail",
     })
+    return [...parentSegments, folderName].join("/")
   } catch (error) {
     if (isGraphErrorWithStatus(error, 409)) {
-      return
+      return null
     }
 
     throw error
@@ -112,20 +113,21 @@ function mapGraphFileMetadata(item: GraphDriveItem): GraphFileMetadata {
   }
 }
 
-async function ensureFolderPath(pathSegments: string[]) {
+async function ensureFolderPath(pathSegments: string[]): Promise<string[]> {
   if (pathSegments.length === 0) {
-    return
+    return []
   }
 
   const existing = await getGraphItemByPath(pathSegments)
   if (existing) {
-    return
+    return []
   }
 
   const parentSegments = pathSegments.slice(0, -1)
   const folderName = pathSegments[pathSegments.length - 1]
-  await ensureFolderPath(parentSegments)
-  await createFolder(parentSegments, folderName)
+  const parentCreated = await ensureFolderPath(parentSegments)
+  const created = await createFolder(parentSegments, folderName)
+  return created ? [...parentCreated, created] : parentCreated
 }
 
 export function getGraphClient() {
@@ -199,8 +201,9 @@ export async function ensureFolder(clientId: string, folder: ClientDocumentFolde
     throw new Error("clientId is required")
   }
 
-  await ensureFolderPath([normalizedClientId])
-  await ensureFolderPath([normalizedClientId, folder])
+  const clientFolders = await ensureFolderPath([normalizedClientId])
+  const childFolders = await ensureFolderPath([normalizedClientId, folder])
+  return [...clientFolders, ...childFolders]
 }
 
 export async function listFiles(clientId: string, folder: ClientDocumentFolder) {

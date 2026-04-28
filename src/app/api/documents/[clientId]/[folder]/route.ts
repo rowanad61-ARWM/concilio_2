@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 
+import { withAuditTrail } from "@/lib/audit-middleware"
 import {
   ensureFolder,
   listFiles,
@@ -8,6 +9,13 @@ import {
 import {
   normalizeClientDocumentFolder,
 } from "@/lib/documents"
+import {
+  documentFolderRouteParams,
+  readCreatedFolders,
+  responseFileId,
+  responseJson,
+  type DocumentFolderRouteContext,
+} from "@/lib/document-note-audit-snapshots"
 
 function decodeSegment(value: string) {
   try {
@@ -17,9 +25,9 @@ function decodeSegment(value: string) {
   }
 }
 
-export async function GET(
+async function listDocuments(
   _request: Request,
-  { params }: { params: Promise<{ clientId: string; folder: string }> },
+  { params }: DocumentFolderRouteContext,
 ) {
   const { clientId, folder } = await params
   const resolvedClientId = decodeSegment(clientId).trim()
@@ -30,18 +38,22 @@ export async function GET(
   }
 
   try {
-    await ensureFolder(resolvedClientId, resolvedFolder)
+    const createdFolders = await ensureFolder(resolvedClientId, resolvedFolder)
     const files = await listFiles(resolvedClientId, resolvedFolder)
-    return NextResponse.json(files)
+    const response = NextResponse.json(files)
+    if (createdFolders.length > 0) {
+      response.headers.set("x-concilio-created-folders", JSON.stringify(createdFolders))
+    }
+    return response
   } catch (error) {
     console.error("[documents list error]", error)
     return NextResponse.json([], { status: 200 })
   }
 }
 
-export async function POST(
+async function uploadDocument(
   request: Request,
-  { params }: { params: Promise<{ clientId: string; folder: string }> },
+  { params }: DocumentFolderRouteContext,
 ) {
   const { clientId, folder } = await params
   const resolvedClientId = decodeSegment(clientId).trim()
@@ -69,3 +81,58 @@ export async function POST(
     return NextResponse.json({ error: "failed to upload document" }, { status: 500 })
   }
 }
+
+export const GET = withAuditTrail<DocumentFolderRouteContext>(listDocuments, {
+  entity_type: "SharePointFolder",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, context, auditContext) => {
+    const { clientId, folder } = await documentFolderRouteParams(context)
+    const createdFolders = readCreatedFolders(auditContext.response)
+    return createdFolders.length > 0
+      ? {
+          client_id: clientId,
+          folder,
+          created_folders: createdFolders,
+        }
+      : null
+  },
+  entityIdFn: async (_request, context) => {
+    const { clientId } = await documentFolderRouteParams(context)
+    return clientId
+  },
+  shouldAuditFn: async (_request, _context, auditContext) =>
+    readCreatedFolders(auditContext.response).length > 0,
+  metadataFn: async (_request, context, auditContext) => {
+    const { clientId, folder } = await documentFolderRouteParams(context)
+    return {
+      client_id: clientId,
+      folder,
+      created_folders: readCreatedFolders(auditContext.response),
+    }
+  },
+})
+
+export const POST = withAuditTrail<DocumentFolderRouteContext>(uploadDocument, {
+  entity_type: "SharePointFile",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) =>
+    responseJson<Record<string, unknown>>(auditContext),
+  entityIdFn: async (_request, _context, auditContext) => responseFileId(auditContext),
+  metadataFn: async (_request, context, auditContext) => {
+    const { clientId, folder } = await documentFolderRouteParams(context)
+    const payload = await responseJson<{ id?: unknown; name?: unknown; webUrl?: unknown }>(
+      auditContext,
+    )
+
+    return {
+      client_id: clientId,
+      folder,
+      sharepoint_drive_item_id:
+        typeof payload?.id === "string" ? payload.id : null,
+      file_name: typeof payload?.name === "string" ? payload.name : null,
+      web_url: typeof payload?.webUrl === "string" ? payload.webUrl : null,
+    }
+  },
+})

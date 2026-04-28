@@ -39,6 +39,12 @@ export type AuditMetadataFn<TContext = unknown> = (
   auditContext: AuditLifecycleContext,
 ) => MaybePromise<Record<string, unknown> | null | undefined>
 
+export type AuditShouldAuditFn<TContext = unknown> = (
+  request: Request,
+  context: TContext,
+  auditContext: AuditLifecycleContext,
+) => MaybePromise<boolean>
+
 export interface AuditMiddlewareConfig<TContext = unknown> {
   entity_type: string | AuditEntityTypeFn<TContext>
   action: AuditAction
@@ -46,6 +52,7 @@ export interface AuditMiddlewareConfig<TContext = unknown> {
   afterFn?: AuditSnapshotFn<TContext>
   entityIdFn?: AuditEntityIdFn<TContext>
   metadataFn?: AuditMetadataFn<TContext>
+  shouldAuditFn?: AuditShouldAuditFn<TContext>
 }
 
 interface SessionLike {
@@ -272,6 +279,17 @@ export function withAuditTrail<TContext = unknown>(
     }
 
     try {
+      if (config.shouldAuditFn) {
+        const shouldAudit = await config.shouldAuditFn(request, context, {
+          response,
+          beforeSnapshot,
+        })
+
+        if (!shouldAudit) {
+          return response
+        }
+      }
+
       const afterSnapshot = await readSnapshot('after', config.afterFn, request, context, {
         response,
         beforeSnapshot,
