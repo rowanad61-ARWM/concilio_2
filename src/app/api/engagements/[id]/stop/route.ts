@@ -6,6 +6,13 @@ import {
   stopEngagementWorkflow,
   WorkflowEngagementNotFoundError,
 } from "@/lib/workflow"
+import { withAuditTrail } from "@/lib/audit-middleware"
+import {
+  loadEngagementSnapshot,
+  responseJson,
+  routeParamId,
+  type IdRouteContext,
+} from "@/lib/workflow-audit-snapshots"
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -19,9 +26,9 @@ function toErrorMessage(error: unknown) {
   return "unknown error"
 }
 
-export async function POST(
+async function stopEngagement(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: IdRouteContext,
 ) {
   const session = await auth()
   if (!session) {
@@ -46,3 +53,33 @@ export async function POST(
     return NextResponse.json({ error: "failed to stop engagement journey", code: "INTERNAL_ERROR" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail<IdRouteContext>(stopEngagement, {
+  entity_type: "engagement",
+  action: "WORKFLOW_STOPPED",
+  beforeFn: async (_request, context) =>
+    loadEngagementSnapshot(await routeParamId(context)),
+  afterFn: async (_request, context) =>
+    loadEngagementSnapshot(await routeParamId(context)),
+  entityIdFn: async (_request, context) => routeParamId(context),
+  metadataFn: async (_request, _context, auditContext) => {
+    const payload = await responseJson<{
+      closedInstance?: { id?: unknown } | null
+      closingInstance?: { id?: unknown } | null
+      terminalStage?: unknown
+    }>(auditContext)
+
+    return {
+      closed_instance_id:
+        typeof payload?.closedInstance?.id === "string"
+          ? payload.closedInstance.id
+          : null,
+      spawned_instance_id:
+        typeof payload?.closingInstance?.id === "string"
+          ? payload.closingInstance.id
+          : null,
+      terminal_stage:
+        typeof payload?.terminalStage === "string" ? payload.terminalStage : null,
+    }
+  },
+})

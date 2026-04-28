@@ -2,6 +2,12 @@ import { NextResponse } from "next/server"
 
 import { db } from "@/lib/db"
 import { ENGAGEMENT_TYPE_VALUES, mapEngagementRow } from "@/lib/engagement"
+import { withAuditTrail } from "@/lib/audit-middleware"
+import {
+  loadEngagementSnapshot,
+  responseId,
+  responseJson,
+} from "@/lib/workflow-audit-snapshots"
 
 const PLACEHOLDER_PRIMARY_ADVISER_ID = "00000000-0000-0000-0000-000000000001"
 const VALID_ENGAGEMENT_TYPES = new Set<string>(ENGAGEMENT_TYPE_VALUES)
@@ -120,7 +126,7 @@ async function getEngagementRowsByHousehold(householdId: string, orderBy: string
   )
 }
 
-export async function POST(request: Request) {
+async function createEngagement(request: Request) {
   const { householdId, engagementType, title, description, templateId } = await request.json()
 
   if (
@@ -309,6 +315,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "failed to create engagement" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail(createEngagement, {
+  entity_type: "engagement",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseId(auditContext)
+    return id ? loadEngagementSnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) => responseId(auditContext),
+  metadataFn: async (_request, _context, auditContext) => {
+    const payload = await responseJson<{
+      workflowInstance?: { id?: unknown } | null
+    }>(auditContext)
+    const workflowInstanceId = payload?.workflowInstance?.id
+
+    return typeof workflowInstanceId === "string"
+      ? { spawned_instance_id: workflowInstanceId }
+      : null
+  },
+})
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
