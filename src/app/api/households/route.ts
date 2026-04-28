@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server"
 
+import {
+  loadHouseholdSnapshot,
+  responseId,
+} from "@/lib/client-audit-snapshots"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 
-export async function POST(request: Request) {
+async function createHousehold(request: Request) {
   const { householdName, memberIds, primaryMemberId } = await request.json()
 
   if (
@@ -37,3 +42,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "failed to create household" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail(createHousehold, {
+  entity_type: "household_group",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseId(auditContext)
+    return id ? loadHouseholdSnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) => responseId(auditContext),
+})
