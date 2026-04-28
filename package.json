@@ -6,6 +6,7 @@
     "dev": "next dev",
     "postinstall": "prisma generate",
     "build": "next build",
+    "test:audit": "node test/audit-middleware.test.cjs",
     "start": "next start",
     "lint": "eslint",
     "seed": "npx tsx src/scripts/seed.ts",

@@ -1,18 +1,28 @@
 /**
  * Audit trail writer for Concilio.
- * Every create, update, archive and sensitive-data access is logged here.
+ * Every create, update, delete, login, workflow action and sensitive-data access is logged here.
  * Call writeAuditEvent() from any API route after a successful operation.
- * Failures are caught and logged to console — they never crash the app.
+ * Failures are caught and logged to console; they never crash the app.
  */
 
+import type { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 
 export type AuditAction =
   | 'CREATE'
   | 'UPDATE'
+  | 'DELETE'
   | 'ARCHIVE'
   | 'VIEW_SENSITIVE'
   | 'LOGIN'
+  | 'LOGIN_SUCCESS'
+  | 'LOGIN_FAIL'
+  | 'OUTCOME_SET'
+  | 'WORKFLOW_ADVANCED'
+  | 'WORKFLOW_STOPPED'
+  | 'DRIVER_ACTION_RECORDED'
+  | 'WORKFLOW_SPAWNED'
+  | 'NUDGE_FIRED'
   | 'SEND_COMMS'
 
 export type AuditChannel =
@@ -21,37 +31,110 @@ export type AuditChannel =
   | 'api'
   | 'system'
 
+export type AuditSnapshot = Record<string, unknown> | unknown[] | null
+
 export interface AuditEventInput {
-  userId: string
+  userId?: string | null
   action: AuditAction
-  entityType: string
-  entityId: string
-  beforeState?: Record<string, unknown>
-  afterState?: Record<string, unknown>
-  channel: AuditChannel
-  ipAddress?: string
-  userAgent?: string
+  entityType?: string
+  entity_type?: string
+  entityId?: string | null
+  entity_id?: string | null
+  beforeState?: AuditSnapshot
+  afterState?: AuditSnapshot
+  beforeSnapshot?: AuditSnapshot
+  afterSnapshot?: AuditSnapshot
+  before_snapshot?: AuditSnapshot
+  after_snapshot?: AuditSnapshot
+  channel?: AuditChannel
+  actorType?: string
+  actor_type?: string
+  ipAddress?: string | null
+  userAgent?: string | null
+  actorIp?: string | null
+  actorUserAgent?: string | null
+  actor_ip?: string | null
+  actor_user_agent?: string | null
+  requestId?: string | null
+  request_id?: string | null
+  details?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}
+
+const NIL_UUID = '00000000-0000-0000-0000-000000000000'
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isUuid(value: string | null | undefined): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value)
+}
+
+function toNullableUuid(value: string | null | undefined): string | null {
+  return isUuid(value) ? value : null
+}
+
+function toSubjectUuid(value: string | null | undefined): string {
+  return isUuid(value) ? value : NIL_UUID
+}
+
+function actorTypeFor(input: AuditEventInput): string {
+  if (input.actor_type) return input.actor_type
+  if (input.actorType) return input.actorType
+
+  switch (input.channel) {
+    case 'staff_ui':
+      return 'user'
+    case 'portal':
+      return 'portal'
+    case 'api':
+      return 'api'
+    case 'system':
+    default:
+      return 'system'
+  }
 }
 
 export async function writeAuditEvent(input: AuditEventInput): Promise<void> {
-  const details: any = {
-    before: (input.beforeState ?? {}) as any,
-    after: (input.afterState ?? {}) as any,
-    ip_address: input.ipAddress ?? null,
-    user_agent: input.userAgent ?? null,
+  const beforeSnapshot =
+    input.before_snapshot ?? input.beforeSnapshot ?? input.beforeState ?? null
+  const afterSnapshot =
+    input.after_snapshot ?? input.afterSnapshot ?? input.afterState ?? null
+  const actorIp = input.actor_ip ?? input.actorIp ?? input.ipAddress ?? null
+  const actorUserAgent =
+    input.actor_user_agent ?? input.actorUserAgent ?? input.userAgent ?? null
+  const requestId = input.request_id ?? input.requestId ?? null
+  const entityType = input.entity_type ?? input.entityType ?? 'unknown'
+  const entityId = input.entity_id ?? input.entityId ?? null
+
+  const details: Record<string, unknown> = {
+    ...(input.details ?? {}),
+    before: input.beforeState ?? beforeSnapshot ?? {},
+    after: input.afterState ?? afterSnapshot ?? {},
+    ip_address: actorIp,
+    user_agent: actorUserAgent,
+    request_id: requestId,
+  }
+
+  if (input.metadata) {
+    details.metadata = input.metadata
   }
 
   try {
     await db.audit_event.create({
       data: {
         event_type: input.action,
-        actor_type: input.channel === 'staff_ui' ? 'user' :
-                    input.channel === 'portal' ? 'portal' :
-                    input.channel === 'api' ? 'api' : 'system',
-        actor_id: input.userId,
-        subject_type: input.entityType,
-        subject_id: input.entityId,
-        details,
+        actor_type: actorTypeFor(input),
+        actor_id: toNullableUuid(input.userId),
+        subject_type: entityType,
+        subject_id: toSubjectUuid(entityId),
+        details: details as Prisma.InputJsonValue,
+        actor_ip: actorIp,
+        actor_user_agent: actorUserAgent,
+        before_snapshot:
+          beforeSnapshot === null ? undefined : (beforeSnapshot as Prisma.InputJsonValue),
+        after_snapshot:
+          afterSnapshot === null ? undefined : (afterSnapshot as Prisma.InputJsonValue),
+        request_id: requestId,
       },
     })
   } catch (error) {

@@ -38,18 +38,25 @@ model advice_scope_item {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model audit_event {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  event_type   String
-  actor_type   String
-  actor_id     String?  @db.Uuid
-  subject_type String
-  subject_id   String   @db.Uuid
-  details      Json?    @default("{}")
-  occurred_at  DateTime @default(now()) @db.Timestamptz(6)
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_type       String
+  actor_type       String
+  actor_id         String?  @db.Uuid
+  subject_type     String
+  subject_id       String   @db.Uuid
+  details          Json?    @default("{}")
+  occurred_at      DateTime @default(now()) @db.Timestamptz(6)
+  actor_ip         String?
+  actor_user_agent String?
+  before_snapshot  Json?
+  after_snapshot   Json?
+  request_id       String?
 
   @@index([actor_id], map: "idx_audit_actor")
+  @@index([actor_id, occurred_at(sort: Desc)], map: "idx_audit_actor_occurred_desc")
   @@index([occurred_at], map: "idx_audit_occurred")
   @@index([subject_type, subject_id], map: "idx_audit_subject")
+  @@index([subject_type, subject_id, occurred_at(sort: Desc)], map: "idx_audit_subject_occurred_desc")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
