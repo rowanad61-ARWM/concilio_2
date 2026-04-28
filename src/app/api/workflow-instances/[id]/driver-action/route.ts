@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
 import { db } from "@/lib/db"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import {
   InvalidDriverActionError,
   OutcomeTaskNotEligibleError,
@@ -10,6 +11,12 @@ import {
   WorkflowEngagementNotFoundError,
   WorkflowInstanceNotFoundError,
 } from "@/lib/workflow"
+import {
+  loadWorkflowInstanceSnapshot,
+  responseJson,
+  routeParamId,
+  type IdRouteContext,
+} from "@/lib/workflow-audit-snapshots"
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -27,7 +34,9 @@ function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null
 }
 
-async function loadActorIdFromSession() {
+type ActorIdResult = { actorId: string } | { error: Response }
+
+async function loadActorIdFromSession(): Promise<ActorIdResult> {
   const session = await auth()
   if (!session) {
     return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) }
@@ -96,9 +105,9 @@ async function loadInstanceState(instanceId: string) {
   }
 }
 
-export async function POST(
+async function recordWorkflowInstanceDriverAction(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: IdRouteContext,
 ) {
   const actorResult = await loadActorIdFromSession()
   if ("error" in actorResult) {
@@ -140,3 +149,40 @@ export async function POST(
     return NextResponse.json({ error: "failed to record workflow driver action" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail<IdRouteContext>(
+  recordWorkflowInstanceDriverAction,
+  {
+    entity_type: "workflow_instance",
+    action: "DRIVER_ACTION_RECORDED",
+    beforeFn: async (_request, context) =>
+      loadWorkflowInstanceSnapshot(await routeParamId(context)),
+    afterFn: async (_request, context) =>
+      loadWorkflowInstanceSnapshot(await routeParamId(context)),
+    entityIdFn: async (_request, context) => routeParamId(context),
+    metadataFn: async (_request, _context, auditContext) => {
+      const payload = await responseJson<{
+        result?: {
+          actionKey?: unknown
+          emailSent?: unknown
+          engagementId?: unknown
+        }
+      }>(auditContext)
+
+      return {
+        action_key:
+          typeof payload?.result?.actionKey === "string"
+            ? payload.result.actionKey
+            : null,
+        email_sent:
+          typeof payload?.result?.emailSent === "boolean"
+            ? payload.result.emailSent
+            : null,
+        engagement_id:
+          typeof payload?.result?.engagementId === "string"
+            ? payload.result.engagementId
+            : null,
+      }
+    },
+  },
+)

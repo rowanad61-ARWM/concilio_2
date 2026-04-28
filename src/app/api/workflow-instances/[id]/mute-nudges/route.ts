@@ -2,7 +2,14 @@ import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
 import { db } from "@/lib/db"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { createJourneyTimelineEvent } from "@/lib/workflow"
+import {
+  loadWorkflowInstanceSnapshot,
+  responseJson,
+  routeParamId,
+  type IdRouteContext,
+} from "@/lib/workflow-audit-snapshots"
 
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null
@@ -50,7 +57,15 @@ function toResponse(instance: {
   }
 }
 
-async function loadActorFromSession() {
+type ActorResult = {
+  actor: {
+    id: string
+    name: string | null
+    email: string
+  }
+} | { error: Response }
+
+async function loadActorFromSession(): Promise<ActorResult> {
   const session = await auth()
   if (!session) {
     return { error: NextResponse.json({ error: "unauthorized" }, { status: 401 }) }
@@ -79,9 +94,9 @@ async function loadActorFromSession() {
   return { actor }
 }
 
-export async function POST(
+async function updateWorkflowInstanceNudgeMute(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: IdRouteContext,
 ) {
   const actorResult = await loadActorFromSession()
   if ("error" in actorResult) {
@@ -170,3 +185,32 @@ export async function POST(
     return NextResponse.json({ error: "failed to update nudge mute state" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail<IdRouteContext>(
+  updateWorkflowInstanceNudgeMute,
+  {
+    entity_type: "workflow_instance",
+    action: "UPDATE",
+    beforeFn: async (_request, context) =>
+      loadWorkflowInstanceSnapshot(await routeParamId(context)),
+    afterFn: async (_request, context) =>
+      loadWorkflowInstanceSnapshot(await routeParamId(context)),
+    entityIdFn: async (_request, context) => routeParamId(context),
+    metadataFn: async (_request, _context, auditContext) => {
+      const payload = await responseJson<{
+        instance?: { nudgesMuted?: unknown; engagementId?: unknown }
+      }>(auditContext)
+
+      return {
+        muted:
+          typeof payload?.instance?.nudgesMuted === "boolean"
+            ? payload.instance.nudgesMuted
+            : null,
+        engagement_id:
+          typeof payload?.instance?.engagementId === "string"
+            ? payload.instance.engagementId
+            : null,
+      }
+    },
+  },
+)
