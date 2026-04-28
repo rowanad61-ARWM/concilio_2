@@ -7,6 +7,41 @@ require("ts-node").register({
 });
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const Module = require("node:module");
+const path = require("node:path");
+
+const rootDir = path.resolve(__dirname, "..");
+const originalResolveFilename = Module._resolveFilename;
+
+function resolveAlias(request) {
+  const relative = request.slice(2);
+  const base = path.join(rootDir, "src", relative);
+  const candidates = [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    `${base}.js`,
+    `${base}.jsx`,
+    path.join(base, "index.ts"),
+    path.join(base, "index.tsx"),
+  ];
+
+  const match = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!match) {
+    throw new Error(`Unable to resolve alias ${request}`);
+  }
+
+  return match;
+}
+
+Module._resolveFilename = function resolveFilename(request, parent, isMain, options) {
+  if (request.startsWith("@/")) {
+    return resolveAlias(request);
+  }
+
+  return originalResolveFilename.call(this, request, parent, isMain, options);
+};
 
 const {
   resetAuditMiddlewareTestHooks,
@@ -16,6 +51,7 @@ const {
 
 const ACTOR_ID = "11111111-1111-4111-8111-111111111111";
 const ENTITY_ID = "22222222-2222-4222-8222-222222222222";
+const AUDIT_EVENT_ID = "33333333-3333-4333-8333-333333333333";
 const tests = [];
 
 function test(name, fn) {
@@ -169,6 +205,165 @@ test("no diff between snapshots still writes audit_event", async () => {
   assert.equal(writes.length, 1);
   assert.deepEqual(writes[0].before_snapshot, unchangedSnapshot);
   assert.deepEqual(writes[0].after_snapshot, unchangedSnapshot);
+});
+
+test("update person.email writes one alert_instance", async () => {
+  const auditWrites = [];
+  const alertWrites = [];
+
+  setAuditMiddlewareTestHooks({
+    auth: async () => ({ user: { id: ACTOR_ID } }),
+    resolveActorUserId: async () => ACTOR_ID,
+    writeAuditEvent: async (input) => {
+      auditWrites.push(input);
+      return AUDIT_EVENT_ID;
+    },
+    writeAlertInstance: async (input) => {
+      alertWrites.push(input);
+    },
+  });
+
+  const wrapped = withAuditTrail(
+    async () => jsonResponse({ ok: true }),
+    {
+      entity_type: "person",
+      action: "UPDATE",
+      beforeFn: async () => ({
+        id: ENTITY_ID,
+        person: { email_primary: "old@example.test" },
+      }),
+      afterFn: async () => ({
+        id: ENTITY_ID,
+        person: { email_primary: "new@example.test" },
+      }),
+    },
+  );
+
+  const response = await wrapped(auditRequest(), {});
+
+  assert.equal(response.status, 200);
+  assert.equal(auditWrites.length, 1);
+  assert.equal(alertWrites.length, 1);
+  assert.equal(alertWrites[0].alert_type, "FIELD_CHANGE");
+  assert.equal(alertWrites[0].entity_type, "person");
+  assert.equal(alertWrites[0].entity_id, ENTITY_ID);
+  assert.equal(alertWrites[0].audit_event_id, AUDIT_EVENT_ID);
+  assert.deepEqual(alertWrites[0].payload, {
+    field: "email",
+    old: "old@example.test",
+    new: "new@example.test",
+  });
+});
+
+test("update person.first_name writes zero alert_instances", async () => {
+  const alertWrites = [];
+
+  setAuditMiddlewareTestHooks({
+    auth: async () => ({ user: { id: ACTOR_ID } }),
+    resolveActorUserId: async () => ACTOR_ID,
+    writeAuditEvent: async () => AUDIT_EVENT_ID,
+    writeAlertInstance: async (input) => {
+      alertWrites.push(input);
+    },
+  });
+
+  const wrapped = withAuditTrail(
+    async () => jsonResponse({ ok: true }),
+    {
+      entity_type: "person",
+      action: "UPDATE",
+      beforeFn: async () => ({
+        id: ENTITY_ID,
+        person: { legal_given_name: "Old" },
+      }),
+      afterFn: async () => ({
+        id: ENTITY_ID,
+        person: { legal_given_name: "New" },
+      }),
+    },
+  );
+
+  const response = await wrapped(auditRequest(), {});
+
+  assert.equal(response.status, 200);
+  assert.equal(alertWrites.length, 0);
+});
+
+test("update financial_account.account_name writes one alert_instance", async () => {
+  const alertWrites = [];
+
+  setAuditMiddlewareTestHooks({
+    auth: async () => ({ user: { id: ACTOR_ID } }),
+    resolveActorUserId: async () => ACTOR_ID,
+    writeAuditEvent: async () => AUDIT_EVENT_ID,
+    writeAlertInstance: async (input) => {
+      alertWrites.push(input);
+    },
+  });
+
+  const wrapped = withAuditTrail(
+    async () => jsonResponse({ ok: true }),
+    {
+      entity_type: "financial_account",
+      action: "UPDATE",
+      beforeFn: async () => ({ id: ENTITY_ID, account_name: "Old Account" }),
+      afterFn: async () => ({ id: ENTITY_ID, account_name: "New Account" }),
+    },
+  );
+
+  const response = await wrapped(auditRequest(), {});
+
+  assert.equal(response.status, 200);
+  assert.equal(alertWrites.length, 1);
+  assert.deepEqual(alertWrites[0].payload, {
+    field: "account_name",
+    old: "Old Account",
+    new: "New Account",
+  });
+});
+
+test("CREATE and DELETE write zero alert_instances", async () => {
+  const alertWrites = [];
+
+  setAuditMiddlewareTestHooks({
+    auth: async () => ({ user: { id: ACTOR_ID } }),
+    resolveActorUserId: async () => ACTOR_ID,
+    writeAuditEvent: async () => AUDIT_EVENT_ID,
+    writeAlertInstance: async (input) => {
+      alertWrites.push(input);
+    },
+  });
+
+  const createWrapped = withAuditTrail(
+    async () => jsonResponse({ ok: true }),
+    {
+      entity_type: "person",
+      action: "CREATE",
+      beforeFn: async () => null,
+      afterFn: async () => ({
+        id: ENTITY_ID,
+        person: { email_primary: "created@example.test" },
+      }),
+    },
+  );
+
+  const deleteWrapped = withAuditTrail(
+    async () => jsonResponse({ ok: true }),
+    {
+      entity_type: "person",
+      action: "DELETE",
+      beforeFn: async () => ({
+        id: ENTITY_ID,
+        person: { email_primary: "deleted@example.test" },
+      }),
+      afterFn: async () => null,
+    },
+  );
+
+  await createWrapped(auditRequest(), {});
+  await deleteWrapped(auditRequest(), {});
+
+  assert.equal(alertWrites.length, 0);
 });
 
 async function run() {

@@ -102,7 +102,7 @@ function toJsonCompatible(value: unknown): Prisma.InputJsonValue {
   ) as Prisma.InputJsonValue
 }
 
-export async function writeAuditEvent(input: AuditEventInput): Promise<void> {
+export async function writeAuditEvent(input: AuditEventInput): Promise<string | null> {
   const beforeSnapshot =
     input.before_snapshot ?? input.beforeSnapshot ?? input.beforeState ?? null
   const afterSnapshot =
@@ -128,7 +128,8 @@ export async function writeAuditEvent(input: AuditEventInput): Promise<void> {
   }
 
   try {
-    await db.audit_event.create({
+    const event = await db.audit_event.create({
+      select: { id: true },
       data: {
         event_type: input.action,
         actor_type: actorTypeFor(input),
@@ -145,7 +146,9 @@ export async function writeAuditEvent(input: AuditEventInput): Promise<void> {
         request_id: requestId,
       },
     })
+    return event.id
   } catch (error) {
     console.error('[Audit] Failed to write audit event:', error)
+    return null
   }
 }

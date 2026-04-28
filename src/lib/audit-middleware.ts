@@ -1,7 +1,17 @@
 import { randomUUID } from 'node:crypto'
+import type { Prisma } from '@prisma/client'
 import type { AuditAction, AuditEventInput, AuditSnapshot } from '@/lib/audit'
 
 type MaybePromise<T> = T | Promise<T>
+type AuditEventWriteResult = string | { id?: string | null } | null | void
+
+export type AlertInstanceWriteInput = {
+  alert_type: 'FIELD_CHANGE'
+  entity_type: string
+  entity_id: string
+  payload: Record<string, unknown>
+  audit_event_id: string
+}
 
 export type AuditedRouteHandler<TContext = unknown> = (
   request: Request,
@@ -71,7 +81,8 @@ interface SessionLike {
 
 interface AuditMiddlewareTestHooks {
   auth?: () => MaybePromise<SessionLike | null>
-  writeAuditEvent?: (input: AuditEventInput) => Promise<void>
+  writeAuditEvent?: (input: AuditEventInput) => Promise<AuditEventWriteResult>
+  writeAlertInstance?: (input: AlertInstanceWriteInput) => Promise<void>
   requestId?: () => string
   logError?: (...args: unknown[]) => void
   resolveActorUserId?: (session: SessionLike | null) => MaybePromise<string | null>
@@ -94,9 +105,34 @@ async function defaultAuth(): Promise<SessionLike | null> {
   return auth()
 }
 
-async function defaultWriteAuditEvent(input: AuditEventInput): Promise<void> {
+async function defaultWriteAuditEvent(
+  input: AuditEventInput,
+): Promise<AuditEventWriteResult> {
   const { writeAuditEvent } = await import('@/lib/audit')
-  await writeAuditEvent(input)
+  return writeAuditEvent(input)
+}
+
+function toJsonCompatible(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(
+    JSON.stringify(value, (_key, nestedValue) =>
+      typeof nestedValue === 'bigint' ? nestedValue.toString() : nestedValue,
+    ),
+  ) as Prisma.InputJsonValue
+}
+
+async function defaultWriteAlertInstance(
+  input: AlertInstanceWriteInput,
+): Promise<void> {
+  const { db } = await import('@/lib/db')
+  await db.alert_instance.create({
+    data: {
+      alert_type: input.alert_type,
+      entity_type: input.entity_type,
+      entity_id: input.entity_id,
+      payload: toJsonCompatible(input.payload),
+      audit_event_id: input.audit_event_id,
+    },
+  })
 }
 
 function maybeString(value: unknown): string | null {
@@ -105,6 +141,18 @@ function maybeString(value: unknown): string | null {
 
 function isUuid(value: string | null): value is string {
   return typeof value === 'string' && UUID_PATTERN.test(value)
+}
+
+function auditEventIdFromResult(result: AuditEventWriteResult): string | null {
+  if (typeof result === 'string') {
+    return result
+  }
+
+  if (isRecord(result)) {
+    return maybeString(result.id)
+  }
+
+  return null
 }
 
 function readClientIp(headers: Headers): string | null {
@@ -294,6 +342,49 @@ function logAuditMiddlewareError(message: string, error: unknown): void {
   ;(testHooks.logError ?? console.error)(message, error)
 }
 
+async function writeFieldChangeAlerts(params: {
+  action: AuditAction
+  entityType: string
+  entityId: string | null
+  auditEventId: string | null
+  beforeSnapshot: AuditSnapshot | null
+  afterSnapshot: AuditSnapshot | null
+}): Promise<void> {
+  if (
+    params.action !== 'UPDATE' ||
+    !params.auditEventId ||
+    !isUuid(params.entityId) ||
+    !isRecord(params.beforeSnapshot) ||
+    !isRecord(params.afterSnapshot)
+  ) {
+    return
+  }
+
+  try {
+    const { detectFieldChanges } = await import('@/lib/field-change-alerts')
+    const changes = detectFieldChanges(
+      params.entityType,
+      params.beforeSnapshot,
+      params.afterSnapshot,
+    )
+
+    for (const change of changes) {
+      await (testHooks.writeAlertInstance ?? defaultWriteAlertInstance)({
+        alert_type: 'FIELD_CHANGE',
+        entity_type: params.entityType,
+        entity_id: params.entityId,
+        payload: change,
+        audit_event_id: params.auditEventId,
+      })
+    }
+  } catch (error) {
+    logAuditMiddlewareError(
+      '[Audit Middleware] Failed to write alert_instance; route response will still be returned',
+      error,
+    )
+  }
+}
+
 export function withAuditTrail<TContext = unknown>(
   handler: AuditedRouteHandler<TContext>,
   config: AuditMiddlewareConfig<TContext>,
@@ -348,7 +439,8 @@ export function withAuditTrail<TContext = unknown>(
           })
         : null
 
-      await (testHooks.writeAuditEvent ?? defaultWriteAuditEvent)({
+      const auditEventId = auditEventIdFromResult(
+        await (testHooks.writeAuditEvent ?? defaultWriteAuditEvent)({
         userId: actorContext.actorUserId,
         action,
         entityType,
@@ -361,6 +453,16 @@ export function withAuditTrail<TContext = unknown>(
         after_snapshot: afterSnapshot,
         request_id: actorContext.requestId,
         metadata: metadata ?? undefined,
+        }),
+      )
+
+      await writeFieldChangeAlerts({
+        action,
+        entityType,
+        entityId,
+        auditEventId,
+        beforeSnapshot,
+        afterSnapshot,
       })
     } catch (error) {
       logAuditMiddlewareError(

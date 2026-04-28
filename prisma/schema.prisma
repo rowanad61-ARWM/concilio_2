@@ -38,25 +38,44 @@ model advice_scope_item {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model audit_event {
-  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   event_type       String
   actor_type       String
-  actor_id         String?  @db.Uuid
+  actor_id         String?          @db.Uuid
   subject_type     String
-  subject_id       String   @db.Uuid
-  details          Json?    @default("{}")
-  occurred_at      DateTime @default(now()) @db.Timestamptz(6)
+  subject_id       String           @db.Uuid
+  details          Json?            @default("{}")
+  occurred_at      DateTime         @default(now()) @db.Timestamptz(6)
   actor_ip         String?
   actor_user_agent String?
   before_snapshot  Json?
   after_snapshot   Json?
   request_id       String?
+  alert_instance   alert_instance[]
 
   @@index([actor_id], map: "idx_audit_actor")
   @@index([actor_id, occurred_at(sort: Desc)], map: "idx_audit_actor_occurred_desc")
   @@index([occurred_at], map: "idx_audit_occurred")
   @@index([subject_type, subject_id], map: "idx_audit_subject")
   @@index([subject_type, subject_id, occurred_at(sort: Desc)], map: "idx_audit_subject_occurred_desc")
+}
+
+model alert_instance {
+  id                      String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  occurred_at             DateTime      @default(now()) @db.Timestamptz(6)
+  alert_type              String
+  entity_type             String
+  entity_id               String        @db.Uuid
+  payload                 Json
+  acknowledged_at         DateTime?     @db.Timestamptz(6)
+  acknowledged_by_user_id String?       @db.Uuid
+  audit_event_id          String?       @db.Uuid
+  audit_event             audit_event?  @relation(fields: [audit_event_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  acknowledged_by_user    user_account? @relation("alert_instance_acknowledged_by_user", fields: [acknowledged_by_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([acknowledged_at, occurred_at(sort: Desc)], map: "idx_alert_instance_acknowledged_occurred")
+  @@index([audit_event_id], map: "idx_alert_instance_audit_event")
+  @@index([entity_type, entity_id], map: "idx_alert_instance_entity")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -827,6 +846,7 @@ model user_account {
   workflow_template     workflow_template[]
   workflow_spawned_task workflow_spawned_task[] @relation("workflow_spawned_task_outcome_set_by")
   taskNotes             TaskNote[]
+  acknowledged_alerts   alert_instance[]        @relation("alert_instance_acknowledged_by_user")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
