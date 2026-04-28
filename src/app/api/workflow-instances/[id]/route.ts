@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server"
 
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
+import {
+  loadWorkflowInstanceSnapshot,
+  responseJson,
+  routeParamId,
+  type IdRouteContext,
+} from "@/lib/workflow-audit-snapshots"
 
 function extractStageKeys(stages: unknown) {
   if (!Array.isArray(stages)) {
@@ -19,9 +26,9 @@ function extractStageKeys(stages: unknown) {
     .filter((value): value is string => Boolean(value))
 }
 
-export async function PATCH(
+async function updateWorkflowInstance(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: IdRouteContext,
 ) {
   const { id } = await params
 
@@ -100,3 +107,30 @@ export async function PATCH(
   }
 }
 
+export const PATCH = withAuditTrail<IdRouteContext>(updateWorkflowInstance, {
+  entity_type: "workflow_instance",
+  action: "UPDATE",
+  beforeFn: async (_request, context) =>
+    loadWorkflowInstanceSnapshot(await routeParamId(context)),
+  afterFn: async (_request, context) =>
+    loadWorkflowInstanceSnapshot(await routeParamId(context)),
+  entityIdFn: async (_request, context) => routeParamId(context),
+  metadataFn: async (_request, _context, auditContext) => {
+    const payload = await responseJson<{
+      currentStage?: unknown
+      status?: unknown
+      completedAt?: unknown
+      lastEventAt?: unknown
+    }>(auditContext)
+
+    return {
+      current_stage:
+        typeof payload?.currentStage === "string" ? payload.currentStage : null,
+      status: typeof payload?.status === "string" ? payload.status : null,
+      completed_at:
+        typeof payload?.completedAt === "string" ? payload.completedAt : null,
+      last_event_at:
+        typeof payload?.lastEventAt === "string" ? payload.lastEventAt : null,
+    }
+  },
+})

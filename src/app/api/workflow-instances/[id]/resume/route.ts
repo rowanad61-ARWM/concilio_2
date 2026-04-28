@@ -2,6 +2,13 @@ import { NextResponse } from "next/server"
 
 import { auth } from "@/auth"
 import { db } from "@/lib/db"
+import { withAuditTrail } from "@/lib/audit-middleware"
+import {
+  loadWorkflowInstanceSnapshot,
+  responseJson,
+  routeParamId,
+  type IdRouteContext,
+} from "@/lib/workflow-audit-snapshots"
 
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null
@@ -47,9 +54,9 @@ function toResponse(instance: {
   }
 }
 
-export async function POST(
+async function resumeWorkflowInstance(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: IdRouteContext,
 ) {
   const session = await auth()
   if (!session) {
@@ -107,3 +114,35 @@ export async function POST(
     return NextResponse.json({ error: "failed to resume workflow instance" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail<IdRouteContext>(resumeWorkflowInstance, {
+  entity_type: "workflow_instance",
+  action: "UPDATE",
+  beforeFn: async (_request, context) =>
+    loadWorkflowInstanceSnapshot(await routeParamId(context)),
+  afterFn: async (_request, context) =>
+    loadWorkflowInstanceSnapshot(await routeParamId(context)),
+  entityIdFn: async (_request, context) => routeParamId(context),
+  metadataFn: async (_request, _context, auditContext) => {
+    const payload = await responseJson<{
+      instance?: {
+        engagementId?: unknown
+        status?: unknown
+        currentOutcomeKey?: unknown
+      }
+    }>(auditContext)
+
+    return {
+      engagement_id:
+        typeof payload?.instance?.engagementId === "string"
+          ? payload.instance.engagementId
+          : null,
+      status:
+        typeof payload?.instance?.status === "string" ? payload.instance.status : null,
+      current_outcome_key:
+        typeof payload?.instance?.currentOutcomeKey === "string"
+          ? payload.instance.currentOutcomeKey
+          : null,
+    }
+  },
+})
