@@ -1,5 +1,14 @@
 import { NextResponse } from "next/server"
 
+import {
+  loadFinancialAccountSnapshot,
+  loadPropertyAssetSnapshot,
+  responseItemId,
+  responseJson,
+  routeParamId,
+  type ClientRouteContext,
+} from "@/lib/client-audit-snapshots"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 
 const PROPERTY_USAGE_TYPES = [
@@ -128,9 +137,9 @@ export async function GET(
   }
 }
 
-export async function POST(
+async function createAsset(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: ClientRouteContext,
 ) {
   const { id } = await params
   const body = await request.json()
@@ -231,3 +240,54 @@ export async function POST(
   }
 }
 
+type CreatedAssetResponse = {
+  type?: string
+  item?: {
+    id?: string
+  }
+}
+
+export const POST = withAuditTrail<ClientRouteContext>(createAsset, {
+  entity_type: async (_request, _context, auditContext) => {
+    const payload = await responseJson<CreatedAssetResponse>(auditContext)
+
+    if (payload?.type === "property") {
+      return "property_asset"
+    }
+
+    if (payload?.type === "account") {
+      return "financial_account"
+    }
+
+    return "asset"
+  },
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const payload = await responseJson<CreatedAssetResponse>(auditContext)
+    const id = payload?.item?.id
+
+    if (!id) {
+      return null
+    }
+
+    if (payload?.type === "property") {
+      return loadPropertyAssetSnapshot(id)
+    }
+
+    if (payload?.type === "account") {
+      return loadFinancialAccountSnapshot(id)
+    }
+
+    return null
+  },
+  entityIdFn: async (_request, _context, auditContext) => responseItemId(auditContext),
+  metadataFn: async (_request, context, auditContext) => {
+    const payload = await responseJson<CreatedAssetResponse>(auditContext)
+
+    return {
+      owner_party_id: await routeParamId(context),
+      asset_type: payload?.type ?? null,
+    }
+  },
+})

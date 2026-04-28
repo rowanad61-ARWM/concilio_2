@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server"
 
+import {
+  loadLiabilitySnapshot,
+  responseId,
+  routeParamId,
+  type ClientRouteContext,
+} from "@/lib/client-audit-snapshots"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 
 const LIABILITY_TYPES = [
@@ -86,9 +93,9 @@ export async function GET(
   }
 }
 
-export async function POST(
+async function createLiability(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: ClientRouteContext,
 ) {
   const { id } = await params
   const {
@@ -153,3 +160,16 @@ export async function POST(
   }
 }
 
+export const POST = withAuditTrail<ClientRouteContext>(createLiability, {
+  entity_type: "liability",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseId(auditContext)
+    return id ? loadLiabilitySnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) => responseId(auditContext),
+  metadataFn: async (_request, context) => ({
+    owner_party_id: await routeParamId(context),
+  }),
+})

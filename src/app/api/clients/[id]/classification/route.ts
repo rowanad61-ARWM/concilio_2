@@ -1,10 +1,16 @@
 ﻿import { NextResponse } from "next/server"
 
+import {
+  loadClassificationSnapshot,
+  routeParamId,
+  type ClientRouteContext,
+} from "@/lib/client-audit-snapshots"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 
-export async function PATCH(
+async function updateClassification(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: ClientRouteContext,
 ) {
   const { id } = await params
 
@@ -152,3 +158,15 @@ export async function PATCH(
     return NextResponse.json({ error: "failed to update classification" }, { status: 500 })
   }
 }
+
+export const PATCH = withAuditTrail<ClientRouteContext>(updateClassification, {
+  entity_type: "client_classification",
+  action: "UPDATE",
+  beforeFn: async (_request, context) =>
+    loadClassificationSnapshot(await routeParamId(context)),
+  afterFn: async (_request, context) =>
+    loadClassificationSnapshot(await routeParamId(context)),
+  metadataFn: async (_request, context) => ({
+    party_id: await routeParamId(context),
+  }),
+})

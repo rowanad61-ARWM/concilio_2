@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server"
 
+import {
+  loadIncomeItemSnapshot,
+  responseId,
+  routeParamId,
+  type ClientRouteContext,
+} from "@/lib/client-audit-snapshots"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 
 const INCOME_TYPE_VALUES = [
@@ -80,9 +87,9 @@ export async function GET(
   }
 }
 
-export async function POST(
+async function createIncomeItem(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: ClientRouteContext,
 ) {
   const { id } = await params
   const { incomeType, description, amount, frequency, isGross } = await request.json()
@@ -122,3 +129,16 @@ export async function POST(
   }
 }
 
+export const POST = withAuditTrail<ClientRouteContext>(createIncomeItem, {
+  entity_type: "income_item",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseId(auditContext)
+    return id ? loadIncomeItemSnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) => responseId(auditContext),
+  metadataFn: async (_request, context) => ({
+    owner_party_id: await routeParamId(context),
+  }),
+})

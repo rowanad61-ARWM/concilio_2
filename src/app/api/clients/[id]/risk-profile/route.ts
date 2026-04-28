@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server"
 
+import {
+  loadRiskProfileSnapshot,
+  responseId,
+  routeParamId,
+  type ClientRouteContext,
+} from "@/lib/client-audit-snapshots"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 import { allocationToRiskResult, scoreToAllocation, type RiskAllocation } from "@/lib/risk"
 
@@ -16,9 +23,9 @@ function toNullableString(value: unknown) {
   return trimmed ? trimmed : null
 }
 
-export async function POST(
+async function createRiskProfile(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: ClientRouteContext,
 ) {
   const { id } = await params
 
@@ -97,3 +104,17 @@ export async function POST(
     return NextResponse.json({ error: "failed to create risk profile" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail<ClientRouteContext>(createRiskProfile, {
+  entity_type: "risk_profile",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseId(auditContext)
+    return id ? loadRiskProfileSnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) => responseId(auditContext),
+  metadataFn: async (_request, context) => ({
+    party_id: await routeParamId(context),
+  }),
+})

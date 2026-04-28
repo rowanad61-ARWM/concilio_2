@@ -1,12 +1,19 @@
 ﻿import { NextResponse } from "next/server"
+import {
+  loadVerificationCheckSnapshot,
+  responseId,
+  routeParamId,
+  type ClientRouteContext,
+} from "@/lib/client-audit-snapshots"
+import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 
 const PLACEHOLDER_VERIFIED_BY = "00000000-0000-0000-0000-000000000001"
 const VALID_RESULTS = ["verified", "pending", "failed", "expired"]
 
-export async function POST(
+async function createVerificationCheck(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: ClientRouteContext,
 ) {
   const { id } = await params
   try {
@@ -48,3 +55,17 @@ export async function POST(
     return NextResponse.json({ error: "failed to create verification check" }, { status: 500 })
   }
 }
+
+export const POST = withAuditTrail<ClientRouteContext>(createVerificationCheck, {
+  entity_type: "verification_check",
+  action: "CREATE",
+  beforeFn: async () => null,
+  afterFn: async (_request, _context, auditContext) => {
+    const id = await responseId(auditContext)
+    return id ? loadVerificationCheckSnapshot(id) : null
+  },
+  entityIdFn: async (_request, _context, auditContext) => responseId(auditContext),
+  metadataFn: async (_request, context) => ({
+    party_id: await routeParamId(context),
+  }),
+})
