@@ -15,6 +15,7 @@
  * - household_member.relation
  * - centrelink_detail.benefit_type
  * - centrelink_detail.concession_card_type
+ * - super_pension_account.beneficiary_nomination_type
  *
  * Out of scope for coercion -- UI must enforce real values:
  * - party.communication_preference (NOT NULL, default 'auto')
@@ -27,6 +28,7 @@
  * - estate_executor.entity_type (NOT NULL)
  * - power_of_attorney.poa_type (NOT NULL)
  * - power_of_attorney.entity_type (NOT NULL)
+ * - super_pension_account.account_type (NOT NULL)
  */
 
 export const CHECK_CONSTRAINED_PERSON_FIELDS = [
@@ -65,6 +67,10 @@ export const CHECK_CONSTRAINED_ESTATE_BENEFICIARY_FIELDS = [] as const
 export const CHECK_CONSTRAINED_ESTATE_EXECUTOR_FIELDS = [] as const
 
 export const CHECK_CONSTRAINED_POWER_OF_ATTORNEY_FIELDS = [] as const
+
+export const CHECK_CONSTRAINED_SUPER_PENSION_ACCOUNT_FIELDS = [
+  "beneficiary_nomination_type",
+] as const
 
 export function coerceEmptyToNull<T extends Record<string, unknown>>(
   obj: T,

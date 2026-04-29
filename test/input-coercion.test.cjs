@@ -16,6 +16,7 @@ const {
   CHECK_CONSTRAINED_PERSON_FIELDS,
   CHECK_CONSTRAINED_POWER_OF_ATTORNEY_FIELDS,
   CHECK_CONSTRAINED_PROFESSIONAL_RELATIONSHIP_FIELDS,
+  CHECK_CONSTRAINED_SUPER_PENSION_ACCOUNT_FIELDS,
   coerceEmptyToNull,
 } = require("../src/lib/input-coercion.ts");
 
@@ -57,5 +58,6 @@ assert.equal(CHECK_CONSTRAINED_PROFESSIONAL_RELATIONSHIP_FIELDS.length, 0);
 assert.equal(CHECK_CONSTRAINED_ESTATE_BENEFICIARY_FIELDS.length, 0);
 assert.equal(CHECK_CONSTRAINED_ESTATE_EXECUTOR_FIELDS.length, 0);
 assert.equal(CHECK_CONSTRAINED_POWER_OF_ATTORNEY_FIELDS.length, 0);
+assert.ok(CHECK_CONSTRAINED_SUPER_PENSION_ACCOUNT_FIELDS.includes("beneficiary_nomination_type"));
 
 console.log("ok - Round 2 coercion constants include nullable fields and leave NOT NULL fields to route validation");

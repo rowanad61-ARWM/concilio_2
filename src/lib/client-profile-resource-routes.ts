@@ -11,6 +11,7 @@ import {
   CHECK_CONSTRAINED_ESTATE_EXECUTOR_FIELDS,
   CHECK_CONSTRAINED_POWER_OF_ATTORNEY_FIELDS,
   CHECK_CONSTRAINED_PROFESSIONAL_RELATIONSHIP_FIELDS,
+  CHECK_CONSTRAINED_SUPER_PENSION_ACCOUNT_FIELDS,
   coerceEmptyToNull,
 } from "@/lib/input-coercion"
 
@@ -21,7 +22,7 @@ type ClientResourceRowContext = {
   }>
 }
 
-type FieldType = "string" | "boolean" | "date" | "integer"
+type FieldType = "string" | "boolean" | "date" | "integer" | "decimal"
 
 type ResourceFieldConfig = {
   column: string
@@ -68,6 +69,22 @@ const POWER_OF_ATTORNEY_TYPES = [
   "medical",
   "financial",
   "other",
+] as const
+
+const SUPER_PENSION_ACCOUNT_TYPES = [
+  "super",
+  "pension",
+  "ttr",
+  "defined_benefit",
+  "smsf",
+] as const
+
+const BENEFICIARY_NOMINATION_TYPES = [
+  "binding",
+  "non_binding",
+  "reversionary",
+  "none",
+  "unknown",
 ] as const
 
 const COMMON_PERSON_FIELDS: ResourceFieldConfig[] = [
@@ -153,6 +170,45 @@ export const POWER_OF_ATTORNEY_CONFIG: ClientProfileResourceConfig = {
       allowedValues: ESTATE_EXECUTOR_ENTITY_TYPES,
     },
     ...COMMON_PERSON_FIELDS,
+  ],
+}
+
+export const SUPER_PENSION_ACCOUNT_CONFIG: ClientProfileResourceConfig = {
+  tableName: "super_pension_account",
+  entityType: "super_pension_account",
+  coercionFields: CHECK_CONSTRAINED_SUPER_PENSION_ACCOUNT_FIELDS,
+  fields: [
+    {
+      column: "account_type",
+      aliases: ["accountType"],
+      requiredOnCreate: true,
+      allowedValues: SUPER_PENSION_ACCOUNT_TYPES,
+    },
+    {
+      column: "provider_name",
+      aliases: ["providerName"],
+      requiredOnCreate: true,
+    },
+    { column: "product_name", aliases: ["productName"] },
+    { column: "member_number", aliases: ["memberNumber"] },
+    { column: "current_balance", aliases: ["currentBalance"], type: "decimal" },
+    { column: "balance_as_at", aliases: ["balanceAsAt"], type: "date" },
+    { column: "investment_option", aliases: ["investmentOption"] },
+    { column: "insurance_in_fund_summary", aliases: ["insuranceInFundSummary"] },
+    {
+      column: "beneficiary_nomination_type",
+      aliases: ["beneficiaryNominationType"],
+      allowedValues: BENEFICIARY_NOMINATION_TYPES,
+    },
+    {
+      column: "beneficiary_nomination_notes",
+      aliases: ["beneficiaryNominationNotes"],
+    },
+    { column: "contributions_ytd", aliases: ["contributionsYtd"], type: "decimal" },
+    { column: "bpay_biller_code", aliases: ["bpayBillerCode"] },
+    { column: "bpay_reference", aliases: ["bpayReference"] },
+    { column: "notes" },
+    { column: "source_document_id", aliases: ["sourceDocumentId"] },
   ],
 }
 
@@ -244,6 +300,27 @@ function parseInteger(value: unknown): number | null | "invalid" {
   return Number.isInteger(parsed) ? parsed : "invalid"
 }
 
+function parseDecimal(value: unknown): string | null | "invalid" {
+  if (value === null || value === undefined || value === "") {
+    return null
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value.toString() : "invalid"
+  }
+
+  if (typeof value !== "string") {
+    return "invalid"
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  return /^-?\d+(\.\d{1,2})?$/.test(trimmed) ? trimmed : "invalid"
+}
+
 function parseFieldValue(field: ResourceFieldConfig, value: unknown) {
   switch (field.type ?? "string") {
     case "boolean":
@@ -252,6 +329,8 @@ function parseFieldValue(field: ResourceFieldConfig, value: unknown) {
       return parseDate(value)
     case "integer":
       return parseInteger(value)
+    case "decimal":
+      return parseDecimal(value)
     case "string":
     default:
       return parseString(value)
