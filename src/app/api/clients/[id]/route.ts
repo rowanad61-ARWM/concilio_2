@@ -48,6 +48,50 @@ function toNullableString(value: unknown) {
   return trimmed ? trimmed : null
 }
 
+function hasAnyProperty(source: Record<string, unknown>, keys: string[]) {
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(source, key))
+}
+
+function valueFor(source: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      return source[key]
+    }
+  }
+
+  return undefined
+}
+
+function assignIfPresent(
+  target: Record<string, unknown>,
+  column: string,
+  source: Record<string, unknown>,
+  keys: string[],
+) {
+  if (hasAnyProperty(source, keys)) {
+    target[column] = valueFor(source, keys) ?? null
+  }
+}
+
+function booleanValue(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true
+    if (value === 0) return false
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase()
+    if (["true", "1", "yes", "on"].includes(normalized)) return true
+    if (["false", "0", "no", "off", ""].includes(normalized)) return false
+  }
+
+  return null
+}
+
 async function getEmploymentColumns() {
   const rows = await db.$queryRawUnsafe<ColumnRow[]>(
     `SELECT column_name
@@ -114,19 +158,64 @@ async function updateClient(
     const hasEmploymentPayload =
       hasEmploymentStatus || hasEmployerName || hasOccupation || hasIndustry || hasEmploymentType
 
+    const personPayload: Record<string, unknown> = payload
+    const personUpdateData: Record<string, unknown> = {
+      legal_given_name: firstName ?? existingPerson.legal_given_name,
+      legal_family_name: lastName ?? existingPerson.legal_family_name,
+      preferred_name: preferredName ?? null,
+      date_of_birth: dateOfBirth ? new Date(dateOfBirth) : existingPerson.date_of_birth,
+      email_primary: email ?? null,
+      mobile_phone: mobile ?? null,
+      relationship_status: relationshipStatus ?? null,
+      country_of_residence: countryOfResidence ?? null,
+      ...(hasAddressResidential ? { address_residential: addressResidential } : {}),
+      ...(hasAddressPostal ? { address_postal: addressPostal } : {}),
+    }
+
+    assignIfPresent(personUpdateData, "title", personPayload, ["title"])
+    assignIfPresent(personUpdateData, "initials", personPayload, ["initials"])
+    assignIfPresent(personUpdateData, "maiden_name", personPayload, ["maiden_name", "maidenName"])
+    assignIfPresent(personUpdateData, "mothers_maiden_name", personPayload, [
+      "mothers_maiden_name",
+      "mothersMaidenName",
+    ])
+    assignIfPresent(personUpdateData, "gender", personPayload, ["gender"])
+    assignIfPresent(personUpdateData, "place_of_birth", personPayload, [
+      "place_of_birth",
+      "placeOfBirth",
+    ])
+    assignIfPresent(personUpdateData, "country_of_birth", personPayload, [
+      "country_of_birth",
+      "countryOfBirth",
+    ])
+    assignIfPresent(personUpdateData, "resident_status", personPayload, [
+      "resident_status",
+      "residentStatus",
+    ])
+    assignIfPresent(personUpdateData, "country_of_tax_residency", personPayload, [
+      "country_of_tax_residency",
+      "countryOfTaxResidency",
+    ])
+    assignIfPresent(personUpdateData, "tax_resident_status", personPayload, [
+      "tax_resident_status",
+      "taxResidentStatus",
+    ])
+    assignIfPresent(personUpdateData, "pep_notes", personPayload, ["pep_notes", "pepNotes"])
+
+    if (hasAnyProperty(personPayload, ["is_pep_risk", "isPepRisk"])) {
+      const parsedPepRisk = booleanValue(
+        valueFor(personPayload, ["is_pep_risk", "isPepRisk"]),
+      )
+
+      if (parsedPepRisk === null) {
+        return NextResponse.json({ error: "invalid is_pep_risk" }, { status: 400 })
+      }
+
+      personUpdateData.is_pep_risk = parsedPepRisk
+    }
+
     const personData = coerceEmptyToNull(
-      {
-        legal_given_name: firstName ?? existingPerson.legal_given_name,
-        legal_family_name: lastName ?? existingPerson.legal_family_name,
-        preferred_name: preferredName ?? null,
-        date_of_birth: dateOfBirth ? new Date(dateOfBirth) : existingPerson.date_of_birth,
-        email_primary: email ?? null,
-        mobile_phone: mobile ?? null,
-        relationship_status: relationshipStatus ?? null,
-        country_of_residence: countryOfResidence ?? null,
-        ...(hasAddressResidential ? { address_residential: addressResidential } : {}),
-        ...(hasAddressPostal ? { address_postal: addressPostal } : {}),
-      },
+      personUpdateData,
       CHECK_CONSTRAINED_PERSON_FIELDS,
     )
 

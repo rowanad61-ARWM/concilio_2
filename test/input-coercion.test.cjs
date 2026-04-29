@@ -8,7 +8,12 @@ require("ts-node").register({
 
 const assert = require("node:assert/strict");
 
-const { coerceEmptyToNull } = require("../src/lib/input-coercion.ts");
+const {
+  CHECK_CONSTRAINED_CENTRELINK_DETAIL_FIELDS,
+  CHECK_CONSTRAINED_HOUSEHOLD_MEMBER_FIELDS,
+  CHECK_CONSTRAINED_PERSON_FIELDS,
+  coerceEmptyToNull,
+} = require("../src/lib/input-coercion.ts");
 
 const input = {
   empty: "",
@@ -36,3 +41,12 @@ assert.equal(output.untouched, "");
 assert.equal(input.empty, "");
 
 console.log("ok - coerceEmptyToNull only converts named empty strings");
+
+assert.ok(CHECK_CONSTRAINED_PERSON_FIELDS.includes("resident_status"));
+assert.ok(CHECK_CONSTRAINED_PERSON_FIELDS.includes("tax_resident_status"));
+assert.ok(CHECK_CONSTRAINED_HOUSEHOLD_MEMBER_FIELDS.includes("relation"));
+assert.ok(CHECK_CONSTRAINED_HOUSEHOLD_MEMBER_FIELDS.includes("role_in_household"));
+assert.ok(CHECK_CONSTRAINED_CENTRELINK_DETAIL_FIELDS.includes("benefit_type"));
+assert.ok(CHECK_CONSTRAINED_CENTRELINK_DETAIL_FIELDS.includes("concession_card_type"));
+
+console.log("ok - Round 2 Half A coercion constants include new constrained fields");

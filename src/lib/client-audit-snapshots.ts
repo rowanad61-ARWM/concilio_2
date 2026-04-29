@@ -52,13 +52,20 @@ export async function loadClientParentSnapshot(id: string): Promise<AuditSnapsho
       person: {
         select: {
           id: true,
+          title: true,
           legal_given_name: true,
           legal_middle_names: true,
           legal_family_name: true,
+          initials: true,
           preferred_name: true,
           previous_names: true,
+          maiden_name: true,
+          mothers_maiden_name: true,
           date_of_birth: true,
+          gender: true,
           gender_pronouns: true,
+          place_of_birth: true,
+          country_of_birth: true,
           mobile_phone: true,
           email_primary: true,
           email_alternate: true,
@@ -69,6 +76,11 @@ export async function loadClientParentSnapshot(id: string): Promise<AuditSnapsho
           communication_exclusions: true,
           citizenships: true,
           country_of_residence: true,
+          resident_status: true,
+          country_of_tax_residency: true,
+          tax_resident_status: true,
+          is_pep_risk: true,
+          pep_notes: true,
           relationship_status: true,
           relationship_status_date: true,
           portal_access_preference: true,
@@ -189,4 +201,28 @@ export async function loadHouseholdSnapshot(id: string): Promise<AuditSnapshot> 
   })
 
   return household
+}
+
+export async function loadHouseholdMemberSnapshot(
+  id: string,
+): Promise<AuditSnapshot> {
+  return db.household_member.findUnique({
+    where: { id },
+    include: {
+      party: {
+        include: {
+          person: true,
+        },
+      },
+      relation_to_member: true,
+    },
+  })
+}
+
+export async function loadCentrelinkDetailSnapshot(
+  personId: string,
+): Promise<AuditSnapshot> {
+  return db.centrelink_detail.findUnique({
+    where: { person_id: personId },
+  })
 }

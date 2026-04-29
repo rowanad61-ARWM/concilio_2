@@ -130,6 +130,24 @@ model client_classification {
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model centrelink_detail {
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  person_id                String   @unique(map: "centrelink_detail_person_unique") @db.Uuid
+  is_eligible              Boolean?
+  benefit_type             String?
+  crn                      String?
+  has_concession_card      Boolean  @default(false)
+  concession_card_type     String?
+  has_gifted_assets        Boolean  @default(false)
+  notes                    String?
+  created_at               DateTime @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime @default(now()) @db.Timestamptz(6)
+  person                   person   @relation(fields: [person_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([person_id], map: "idx_centrelink_detail_person_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model client_instruction {
   id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   engagement_id    String     @db.Uuid
@@ -465,6 +483,9 @@ model household_group {
   servicing_status      String                  @default("active")
   primary_adviser_id    String?                 @db.Uuid
   finance_style         String?
+  salutation_informal   String?
+  address_title_formal  String?
+  household_notes       String?
   created_at            DateTime                @default(now()) @db.Timestamptz(6)
   updated_at            DateTime                @default(now()) @db.Timestamptz(6)
   archived_at           DateTime?               @db.Timestamptz(6)
@@ -480,16 +501,23 @@ model household_group {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model household_member {
-  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  household_id      String          @db.Uuid
-  party_id          String          @db.Uuid
-  role_in_household String          @default("member")
-  start_date        DateTime        @default(dbgenerated("CURRENT_DATE")) @db.Date
-  end_date          DateTime?       @db.Date
-  visibility_flags  Json?           @default("{}")
-  created_at        DateTime        @default(now()) @db.Timestamptz(6)
-  household_group   household_group @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  party             party           @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  household_id               String             @db.Uuid
+  party_id                   String             @db.Uuid
+  role_in_household          String             @default("member")
+  start_date                 DateTime           @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date                   DateTime?          @db.Date
+  visibility_flags           Json?              @default("{}")
+  created_at                 DateTime           @default(now()) @db.Timestamptz(6)
+  is_financial_dependant     Boolean            @default(false)
+  dependant_until_age        Int?
+  relation                   String?
+  relation_to_member_id      String?            @db.Uuid
+  dependant_notes            String?
+  household_group            household_group    @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party                      party              @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  relation_to_member         household_member?  @relation("household_member_relation_to_member", fields: [relation_to_member_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  related_dependants         household_member[] @relation("household_member_relation_to_member")
 
   @@unique([household_id, party_id], map: "idx_hm_active", where: raw("(end_date IS NULL)"))
 }
@@ -674,13 +702,20 @@ model permission_grant {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model person {
   id                       String    @id @db.Uuid
+  title                    String?
   legal_given_name         String
   legal_middle_names       String?
   legal_family_name        String
+  initials                 String?
   preferred_name           String?
   previous_names           String?
+  maiden_name              String?
+  mothers_maiden_name      String?
   date_of_birth            DateTime  @db.Date
+  gender                   String?
   gender_pronouns          String?
+  place_of_birth           String?
+  country_of_birth         String?
   mobile_phone             String?
   email_primary            String?
   email_alternate          String?
@@ -691,6 +726,11 @@ model person {
   communication_exclusions String?
   citizenships             String[]
   country_of_residence     String?   @default("AU")
+  resident_status          String?
+  country_of_tax_residency String?
+  tax_resident_status      String?
+  is_pep_risk              Boolean   @default(false)
+  pep_notes                String?
   relationship_status      String?
   relationship_status_date DateTime? @db.Date
   portal_access_preference String?
@@ -699,6 +739,7 @@ model person {
   person_status_notes      String?
   created_at               DateTime  @default(now()) @db.Timestamptz(6)
   updated_at               DateTime  @default(now()) @db.Timestamptz(6)
+  centrelink_detail        centrelink_detail?
   party                    party     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([date_of_birth], map: "idx_person_dob")

@@ -7,8 +7,23 @@ import {
 import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 
+function valueFor(source: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      return source[key]
+    }
+  }
+
+  return undefined
+}
+
+function nullableString(value: unknown) {
+  return typeof value === "string" ? value : null
+}
+
 async function createHousehold(request: Request) {
-  const { householdName, memberIds, primaryMemberId } = await request.json()
+  const body = await request.json()
+  const { householdName, memberIds, primaryMemberId } = body
 
   if (
     !householdName ||
@@ -25,6 +40,15 @@ async function createHousehold(request: Request) {
       data: {
         household_name: householdName,
         servicing_status: "active",
+        salutation_informal: nullableString(
+          valueFor(body, ["salutation_informal", "salutationInformal"]),
+        ),
+        address_title_formal: nullableString(
+          valueFor(body, ["address_title_formal", "addressTitleFormal"]),
+        ),
+        household_notes: nullableString(
+          valueFor(body, ["household_notes", "householdNotes"]),
+        ),
       },
     })
 

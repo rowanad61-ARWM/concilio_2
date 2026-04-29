@@ -8,6 +8,7 @@ export const DESIGNATED_ALERT_FIELDS = {
     "postal_address.postcode",
   ],
   financial_account: ["account_name", "account_number"],
+  centrelink_detail: ["crn"],
 } as const
 
 export type DesignatedAlertEntityType = keyof typeof DESIGNATED_ALERT_FIELDS

@@ -9,7 +9,7 @@
     "dev": "next dev",
     "postinstall": "prisma generate",
     "build": "next build",
-    "test": "node -r ./test/setup-local-env.cjs test/audit-middleware.test.cjs && node -r ./test/setup-local-env.cjs test/input-coercion.test.cjs && node -r ./test/setup-local-env.cjs test/tu4-client-coercion.integration.cjs",
+    "test": "node -r ./test/setup-local-env.cjs test/audit-middleware.test.cjs && node -r ./test/setup-local-env.cjs test/input-coercion.test.cjs && node -r ./test/setup-local-env.cjs test/tu4-client-coercion.integration.cjs && node -r ./test/setup-local-env.cjs test/round2-half-a.integration.cjs",
     "test:audit": "node -r ./test/setup-local-env.cjs test/audit-middleware.test.cjs",
     "test:integration": "node -r ./test/setup-local-env.cjs test/half-b1.integration.cjs",
     "test:integration:b2": "node -r ./test/setup-local-env.cjs test/half-b2.integration.cjs",
