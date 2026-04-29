@@ -3,6 +3,12 @@ import { NextResponse } from "next/server"
 import { loadClientRecordSnapshot, responseId } from "@/lib/client-audit-snapshots"
 import { db } from "@/lib/db"
 import { withAuditTrail } from "@/lib/audit-middleware"
+import {
+  CHECK_CONSTRAINED_CLIENT_CLASSIFICATION_FIELDS,
+  CHECK_CONSTRAINED_PARTY_FIELDS,
+  CHECK_CONSTRAINED_PERSON_FIELDS,
+  coerceEmptyToNull,
+} from "@/lib/input-coercion"
 
 async function createClient(request: Request) {
   const {
@@ -21,16 +27,21 @@ async function createClient(request: Request) {
   }
 
   try {
-    const party = await db.party.create({
-      data: {
+    const partyData = coerceEmptyToNull(
+      {
         party_type: "person",
         display_name: `${firstName} ${lastName}`.trim(),
         status: "active",
       },
+      CHECK_CONSTRAINED_PARTY_FIELDS,
+    )
+
+    const party = await db.party.create({
+      data: partyData,
     })
 
-    await db.person.create({
-      data: {
+    const personData = coerceEmptyToNull(
+      {
         id: party.id,
         legal_given_name: firstName,
         legal_family_name: lastName,
@@ -42,13 +53,23 @@ async function createClient(request: Request) {
         country_of_residence: countryOfResidence || "AU",
         citizenships: [],
       },
+      CHECK_CONSTRAINED_PERSON_FIELDS,
+    )
+
+    await db.person.create({
+      data: personData,
     })
 
-    await db.client_classification.create({
-      data: {
+    const classificationData = coerceEmptyToNull(
+      {
         party_id: party.id,
         lifecycle_stage: "prospect",
       },
+      CHECK_CONSTRAINED_CLIENT_CLASSIFICATION_FIELDS,
+    )
+
+    await db.client_classification.create({
+      data: classificationData,
     })
 
     return NextResponse.json({ id: party.id })

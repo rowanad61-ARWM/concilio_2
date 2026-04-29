@@ -10,6 +10,12 @@ import {
 } from "@/lib/client-audit-snapshots"
 import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
+import {
+  CHECK_CONSTRAINED_EMPLOYMENT_PROFILE_FIELDS,
+  CHECK_CONSTRAINED_PARTY_FIELDS,
+  CHECK_CONSTRAINED_PERSON_FIELDS,
+  coerceEmptyToNull,
+} from "@/lib/input-coercion"
 import { hardDeleteParty, PartyDeleteBlockedError, PartyNotFoundError } from "@/lib/partyDelete"
 
 type ColumnRow = {
@@ -108,9 +114,8 @@ async function updateClient(
     const hasEmploymentPayload =
       hasEmploymentStatus || hasEmployerName || hasOccupation || hasIndustry || hasEmploymentType
 
-    const updatedPerson = await db.person.update({
-      where: { id },
-      data: {
+    const personData = coerceEmptyToNull(
+      {
         legal_given_name: firstName ?? existingPerson.legal_given_name,
         legal_family_name: lastName ?? existingPerson.legal_family_name,
         preferred_name: preferredName ?? null,
@@ -122,6 +127,12 @@ async function updateClient(
         ...(hasAddressResidential ? { address_residential: addressResidential } : {}),
         ...(hasAddressPostal ? { address_postal: addressPostal } : {}),
       },
+      CHECK_CONSTRAINED_PERSON_FIELDS,
+    )
+
+    const updatedPerson = await db.person.update({
+      where: { id },
+      data: personData,
     })
 
     if (firstName || lastName) {
@@ -129,11 +140,16 @@ async function updateClient(
         lastName ?? existingPerson.legal_family_name
       }`.trim()
 
-      await db.party.update({
-        where: { id },
-        data: {
+      const partyData = coerceEmptyToNull(
+        {
           display_name: displayName,
         },
+        CHECK_CONSTRAINED_PARTY_FIELDS,
+      )
+
+      await db.party.update({
+        where: { id },
+        data: partyData,
       })
     }
 
@@ -190,11 +206,8 @@ async function updateClient(
       )
 
       if (existingEmployment) {
-        await db.employment_profile.update({
-          where: {
-            id: existingEmployment.id,
-          },
-          data: {
+        const employmentData = coerceEmptyToNull(
+          {
             employment_status: resolvedEmploymentStatus,
             employer_business_name:
               incomingEmployerName !== undefined
@@ -206,6 +219,14 @@ async function updateClient(
                 : existingEmployment.occupation_title,
             industry: incomingIndustry !== undefined ? incomingIndustry : existingEmployment.industry,
           },
+          CHECK_CONSTRAINED_EMPLOYMENT_PROFILE_FIELDS,
+        )
+
+        await db.employment_profile.update({
+          where: {
+            id: existingEmployment.id,
+          },
+          data: employmentData,
         })
 
         if (columns.has("employment_type") && incomingEmploymentType !== undefined) {
@@ -218,8 +239,8 @@ async function updateClient(
           )
         }
       } else if (hasAnyEmploymentInput) {
-        const createdEmployment = await db.employment_profile.create({
-          data: {
+        const employmentData = coerceEmptyToNull(
+          {
             party_id: id,
             employment_status: resolvedEmploymentStatus,
             employer_business_name: incomingEmployerName ?? null,
@@ -227,6 +248,11 @@ async function updateClient(
             industry: incomingIndustry ?? null,
             effective_from: new Date(),
           },
+          CHECK_CONSTRAINED_EMPLOYMENT_PROFILE_FIELDS,
+        )
+
+        const createdEmployment = await db.employment_profile.create({
+          data: employmentData,
         })
 
         if (columns.has("employment_type") && incomingEmploymentType !== undefined) {
