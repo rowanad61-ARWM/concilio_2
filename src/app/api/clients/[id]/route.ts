@@ -92,6 +92,23 @@ function booleanValue(value: unknown): boolean | null {
   return null
 }
 
+function optionalDateValue(value: unknown): Date | null | "invalid" {
+  if (value === null || value === undefined || value === "") {
+    return null
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.valueOf()) ? "invalid" : value
+  }
+
+  if (typeof value !== "string") {
+    return "invalid"
+  }
+
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.valueOf()) ? "invalid" : parsed
+}
+
 async function getEmploymentColumns() {
   const rows = await db.$queryRawUnsafe<ColumnRow[]>(
     `SELECT column_name
@@ -201,6 +218,18 @@ async function updateClient(
       "taxResidentStatus",
     ])
     assignIfPresent(personUpdateData, "pep_notes", personPayload, ["pep_notes", "pepNotes"])
+    assignIfPresent(personUpdateData, "will_location", personPayload, [
+      "will_location",
+      "willLocation",
+    ])
+    assignIfPresent(personUpdateData, "estate_planning_notes", personPayload, [
+      "estate_planning_notes",
+      "estatePlanningNotes",
+    ])
+    assignIfPresent(personUpdateData, "funeral_plan_status", personPayload, [
+      "funeral_plan_status",
+      "funeralPlanStatus",
+    ])
 
     if (hasAnyProperty(personPayload, ["is_pep_risk", "isPepRisk"])) {
       const parsedPepRisk = booleanValue(
@@ -212,6 +241,42 @@ async function updateClient(
       }
 
       personUpdateData.is_pep_risk = parsedPepRisk
+    }
+
+    if (hasAnyProperty(personPayload, ["will_exists", "willExists"])) {
+      const parsedWillExists = booleanValue(
+        valueFor(personPayload, ["will_exists", "willExists"]),
+      )
+
+      if (parsedWillExists === null) {
+        return NextResponse.json({ error: "invalid will_exists" }, { status: 400 })
+      }
+
+      personUpdateData.will_exists = parsedWillExists
+    }
+
+    if (hasAnyProperty(personPayload, ["will_is_current", "willIsCurrent"])) {
+      const parsedWillIsCurrent = booleanValue(
+        valueFor(personPayload, ["will_is_current", "willIsCurrent"]),
+      )
+
+      if (parsedWillIsCurrent === null) {
+        return NextResponse.json({ error: "invalid will_is_current" }, { status: 400 })
+      }
+
+      personUpdateData.will_is_current = parsedWillIsCurrent
+    }
+
+    if (hasAnyProperty(personPayload, ["will_date", "willDate"])) {
+      const parsedWillDate = optionalDateValue(
+        valueFor(personPayload, ["will_date", "willDate"]),
+      )
+
+      if (parsedWillDate === "invalid") {
+        return NextResponse.json({ error: "invalid will_date" }, { status: 400 })
+      }
+
+      personUpdateData.will_date = parsedWillDate
     }
 
     const personData = coerceEmptyToNull(

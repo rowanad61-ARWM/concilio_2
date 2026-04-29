@@ -1,11 +1,12 @@
 /*
- * TU-4 / Round 2 Half A check-constrained text column survey, Azure production,
+ * TU-4 / Round 2 check-constrained text column survey, Azure production,
  * 2026-04-29.
  *
  * Nullable columns covered by empty-string-to-null coercion:
  * - person.relationship_status
  * - person.resident_status
  * - person.tax_resident_status
+ * - person.funeral_plan_status
  * - person.portal_access_preference
  * - person.preferred_contact_method
  * - client_classification.lifecycle_stage
@@ -21,12 +22,18 @@
  * - party.status (NOT NULL, default 'active')
  * - employment_profile.employment_status (NOT NULL)
  * - household_member.role_in_household (NOT NULL, default 'member'; route validation handles blanks)
+ * - professional_relationship.relationship_type (NOT NULL)
+ * - estate_beneficiary.entity_type (NOT NULL)
+ * - estate_executor.entity_type (NOT NULL)
+ * - power_of_attorney.poa_type (NOT NULL)
+ * - power_of_attorney.entity_type (NOT NULL)
  */
 
 export const CHECK_CONSTRAINED_PERSON_FIELDS = [
   "relationship_status",
   "resident_status",
   "tax_resident_status",
+  "funeral_plan_status",
   "portal_access_preference",
   "preferred_contact_method",
 ] as const
@@ -50,6 +57,14 @@ export const CHECK_CONSTRAINED_CENTRELINK_DETAIL_FIELDS = [
   "benefit_type",
   "concession_card_type",
 ] as const
+
+export const CHECK_CONSTRAINED_PROFESSIONAL_RELATIONSHIP_FIELDS = [] as const
+
+export const CHECK_CONSTRAINED_ESTATE_BENEFICIARY_FIELDS = [] as const
+
+export const CHECK_CONSTRAINED_ESTATE_EXECUTOR_FIELDS = [] as const
+
+export const CHECK_CONSTRAINED_POWER_OF_ATTORNEY_FIELDS = [] as const
 
 export function coerceEmptyToNull<T extends Record<string, unknown>>(
   obj: T,

@@ -9,6 +9,8 @@ export const DESIGNATED_ALERT_FIELDS = {
   ],
   financial_account: ["account_name", "account_number"],
   centrelink_detail: ["crn"],
+  power_of_attorney: ["first_name", "surname"],
+  estate_executor: ["first_name", "surname"],
 } as const
 
 export type DesignatedAlertEntityType = keyof typeof DESIGNATED_ALERT_FIELDS
