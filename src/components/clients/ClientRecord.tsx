@@ -1,13 +1,18 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useState } from "react"
 
+import AddressSectionModal from "@/components/clients/AddressSectionModal"
 import ClientJourney from "@/components/clients/ClientJourney"
 import ClientTimeline from "@/components/clients/ClientTimeline"
 import DeleteClientButton from "@/components/clients/DeleteClientButton"
 import ClientEmailTemplateModal from "@/components/clients/ClientEmailTemplateModal"
 import DocumentsTab from "@/components/clients/DocumentsTab"
+import ContactSectionModal from "@/components/clients/ContactSectionModal"
+import EmploymentSectionModal from "@/components/clients/EmploymentSectionModal"
+import PersonalSectionModal from "@/components/clients/PersonalSectionModal"
 import QuickAddMeetingModal from "@/components/clients/QuickAddMeetingModal"
 import QuickAddNoteModal from "@/components/clients/QuickAddNoteModal"
 import QuickAddPhoneCallModal from "@/components/clients/QuickAddPhoneCallModal"
@@ -32,6 +37,7 @@ type ClientRecordProps = {
 type TimelineFilter = "all" | "emails" | "tasks" | "notes" | "docs"
 type ClientDetailTab = "timeline" | "documents"
 type QuickAddKind = "phone_call" | "meeting" | "file_note"
+type SectionModalKind = "personal" | "address" | "employment" | "contact" | null
 type EngagementType = (typeof ENGAGEMENT_TYPE_VALUES)[number]
 type LifecycleStage = "prospect" | "engagement" | "advice" | "implementation" | "client" | "lost" | "ceased"
 type ServiceTier = "transaction" | "cashflow" | "wealth" | "wealth_plus"
@@ -48,28 +54,6 @@ type HeaderIndicator = {
 type IncomeFrequency = "weekly" | "fortnightly" | "monthly" | "annual"
 type LiabilityRepaymentFrequency = "weekly" | "fortnightly" | "monthly"
 type CapacityForLoss = "low" | "medium" | "high"
-
-type EditFormState = {
-  firstName: string
-  lastName: string
-  preferredName: string
-  dateOfBirth: string
-  email: string
-  mobile: string
-  relationshipStatus: string
-  countryOfResidence: string
-  addressLine1: string
-  addressLine2: string
-  addressSuburb: string
-  addressState: string
-  addressPostcode: string
-  addressCountry: string
-  employmentStatus: string
-  employerName: string
-  occupation: string
-  industry: string
-  employmentType: string
-}
 
 type AddIdFormState = {
   documentType: VerificationDocumentType
@@ -227,23 +211,6 @@ const timelineFilters: { label: string; value: TimelineFilter }[] = [
   { label: "Docs", value: "docs" },
 ]
 
-const relationshipOptions = ["single", "married", "de_facto", "separated", "divorced", "widowed"]
-const employmentStatusOptions = [
-  "employed_full_time",
-  "employed_part_time",
-  "self_employed",
-  "unemployed",
-  "retired",
-  "home_duties",
-  "student",
-  "other",
-]
-const employmentTypeOptions = [
-  "employed_full_time",
-  "employed_part_time",
-  "self_employed",
-  "other",
-]
 const incomeTypeOptions = [
   "salary",
   "pension_super",
@@ -327,48 +294,6 @@ const verificationResultOptions: { label: string; value: VerificationResult }[] 
 
 const inputClassName =
   "w-full rounded-[6px] border-[0.5px] border-[#e5e7eb] px-[8px] py-[6px] text-[13px] text-[#113238] outline-none"
-
-function buildEditForm(client: ClientDetail): EditFormState {
-  const residentialAddress = client.person?.addressResidential
-
-  return {
-    firstName: client.person?.legalGivenName ?? "",
-    lastName: client.person?.legalFamilyName ?? "",
-    preferredName: client.person?.preferredName ?? "",
-    dateOfBirth: client.person?.dateOfBirth ? client.person.dateOfBirth.slice(0, 10) : "",
-    email: client.resolvedEmail ?? "",
-    mobile: client.resolvedMobile ?? "",
-    relationshipStatus: client.person?.relationshipStatus ?? "",
-    countryOfResidence: client.person?.countryOfResidence ?? "",
-    addressLine1: residentialAddress?.line1 ?? "",
-    addressLine2: residentialAddress?.line2 ?? "",
-    addressSuburb: residentialAddress?.suburb ?? "",
-    addressState: residentialAddress?.state ?? "",
-    addressPostcode: residentialAddress?.postcode ?? "",
-    addressCountry: residentialAddress?.country ?? "AU",
-    employmentStatus: client.employment?.employmentStatus ?? "",
-    employerName: client.employment?.employerName ?? "",
-    occupation: client.employment?.occupation ?? "",
-    industry: client.employment?.industry ?? "",
-    employmentType: client.employment?.employmentType ?? "",
-  }
-}
-
-function mapAddress(value: unknown): ClientAddress | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null
-  }
-
-  const address = value as Record<string, unknown>
-  return {
-    line1: typeof address.line1 === "string" ? address.line1 : null,
-    line2: typeof address.line2 === "string" ? address.line2 : null,
-    suburb: typeof address.suburb === "string" ? address.suburb : null,
-    state: typeof address.state === "string" ? address.state : null,
-    postcode: typeof address.postcode === "string" ? address.postcode : null,
-    country: typeof address.country === "string" ? address.country : null,
-  }
-}
 
 function buildAddIdForm(): AddIdFormState {
   return {
@@ -1288,11 +1213,13 @@ function TaskIcon() {
 }
 
 export default function ClientRecord({ client }: ClientRecordProps) {
+  const router = useRouter()
   const [clientData, setClientData] = useState(client)
   const [activeDetailTab, setActiveDetailTab] = useState<ClientDetailTab>("timeline")
   const [verificationChecks, setVerificationChecks] = useState<VerificationCheck[]>(client.verificationChecks)
   const [activeFilter, setActiveFilter] = useState<TimelineFilter>("all")
   const [quickAddOpen, setQuickAddOpen] = useState<QuickAddKind | null>(null)
+  const [openSectionModal, setOpenSectionModal] = useState<SectionModalKind>(null)
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0)
   const [isEngagementPanelOpen, setIsEngagementPanelOpen] = useState(false)
   const [isSavingEngagement, setIsSavingEngagement] = useState(false)
@@ -1329,9 +1256,6 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const [engagementForm, setEngagementForm] = useState<EngagementFormState>(() => buildEngagementForm())
   const [workflowTemplates, setWorkflowTemplates] = useState<WorkflowTemplateOption[]>([])
   const [isLoadingWorkflowTemplates, setIsLoadingWorkflowTemplates] = useState(false)
-  const [isEditing, setIsEditing] = useState(false)
-  const [isSavingChanges, setIsSavingChanges] = useState(false)
-  const [editForm, setEditForm] = useState<EditFormState>(() => buildEditForm(client))
   const [isLinkingHousehold, setIsLinkingHousehold] = useState(false)
   const [householdNameInput, setHouseholdNameInput] = useState("")
   const [isCreatingHousehold, setIsCreatingHousehold] = useState(false)
@@ -1355,6 +1279,12 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const [taskTypeOptions, setTaskTypeOptions] = useState<TaskTypeGroup[]>([])
   const [ownerOptions, setOwnerOptions] = useState<TaskOwnerOption[]>([])
   const [emailToast, setEmailToast] = useState<EmailToastState | null>(null)
+
+  useEffect(() => {
+    setClientData(client)
+    setVerificationChecks(client.verificationChecks)
+    setLocalEngagements(client.engagements)
+  }, [client])
 
   const fullLegalName = clientData.person
     ? `${clientData.person.legalGivenName} ${clientData.person.legalFamilyName}`.trim()
@@ -1396,6 +1326,13 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const residentialAddressLines = formatAddressLines(residentialAddress)
   const postalAddressLines = formatAddressLines(postalAddress)
   const showPostalAddress = postalAddressLines.length > 0 && !addressesEqual(residentialAddress, postalAddress)
+  const hasEmergencyContact = Boolean(
+    clientData.person?.emergencyContactName ||
+      clientData.person?.emergencyContactRelationship ||
+      clientData.person?.emergencyContactPhone ||
+      clientData.person?.emergencyContactEmail ||
+      clientData.person?.emergencyContactNotes,
+  )
   const riskScoreValue = Number(riskProfileForm.score)
   const recommendedAllocation =
     Number.isFinite(riskScoreValue) && riskScoreValue >= 0 && riskScoreValue <= 100
@@ -1994,10 +1931,6 @@ export default function ClientRecord({ client }: ClientRecordProps) {
     }
   }, [clientData.id, isLiabilitiesDrawerOpen])
 
-  function updateEditField<Key extends keyof EditFormState>(key: Key, value: EditFormState[Key]) {
-    setEditForm((current) => ({ ...current, [key]: value }))
-  }
-
   function updateAddIdField<Key extends keyof AddIdFormState>(key: Key, value: AddIdFormState[Key]) {
     setAddIdForm((current) => ({ ...current, [key]: value }))
   }
@@ -2131,124 +2064,6 @@ export default function ClientRecord({ client }: ClientRecordProps) {
     }
   }
 
-  async function handleSaveChanges() {
-    setIsSavingChanges(true)
-
-    try {
-      const response = await fetch(`/api/clients/${clientData.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          firstName: editForm.firstName,
-          lastName: editForm.lastName,
-          preferredName: editForm.preferredName,
-          dateOfBirth: editForm.dateOfBirth,
-          email: editForm.email,
-          mobile: editForm.mobile,
-          relationshipStatus: editForm.relationshipStatus,
-          countryOfResidence: editForm.countryOfResidence,
-          employmentStatus: editForm.employmentStatus || null,
-          employerName: editForm.employerName || null,
-          occupation: editForm.occupation || null,
-          industry: editForm.industry || null,
-          employmentType: editForm.employmentType || null,
-          addressResidential: {
-            line1: editForm.addressLine1 || null,
-            line2: editForm.addressLine2 || null,
-            suburb: editForm.addressSuburb || null,
-            state: editForm.addressState || null,
-            postcode: editForm.addressPostcode || null,
-            country: editForm.addressCountry || null,
-          },
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to update client")
-      }
-
-      const updated = await response.json()
-
-      const nextClientData: ClientDetail = {
-        ...clientData,
-        displayName: updated.displayName,
-        resolvedEmail:
-          typeof updated.person?.email_primary === "string" && updated.person.email_primary.trim()
-            ? updated.person.email_primary
-            : null,
-        resolvedMobile:
-          typeof updated.person?.mobile_phone === "string" && updated.person.mobile_phone.trim()
-            ? updated.person.mobile_phone
-            : null,
-        resolvedPreferredContactMethod:
-          typeof updated.person?.preferred_contact_method === "string" &&
-          updated.person.preferred_contact_method.trim()
-            ? updated.person.preferred_contact_method
-            : null,
-        person: clientData.person
-          ? {
-              ...clientData.person,
-              legalGivenName: updated.person.legal_given_name,
-              legalFamilyName: updated.person.legal_family_name,
-              preferredName: updated.person.preferred_name,
-              dateOfBirth: updated.person.date_of_birth,
-              emailPrimary: updated.person.email_primary,
-              mobilePhone: updated.person.mobile_phone,
-              relationshipStatus: updated.person.relationship_status,
-              countryOfResidence: updated.person.country_of_residence,
-              addressResidential: mapAddress(updated.person.address_residential),
-              addressPostal: mapAddress(updated.person.address_postal),
-            }
-          : {
-              legalGivenName: updated.person.legal_given_name,
-              legalFamilyName: updated.person.legal_family_name,
-              preferredName: updated.person.preferred_name,
-              dateOfBirth: updated.person.date_of_birth,
-              mobilePhone: updated.person.mobile_phone,
-              emailPrimary: updated.person.email_primary,
-              relationshipStatus: updated.person.relationship_status,
-              countryOfResidence: updated.person.country_of_residence,
-              preferredContactMethod: null,
-              addressResidential: mapAddress(updated.person.address_residential),
-              addressPostal: mapAddress(updated.person.address_postal),
-            },
-        employment:
-          updated.employment && typeof updated.employment === "object" && !Array.isArray(updated.employment)
-            ? {
-                employmentStatus:
-                  typeof updated.employment.employmentStatus === "string"
-                    ? updated.employment.employmentStatus
-                    : null,
-                employerName:
-                  typeof updated.employment.employerName === "string"
-                    ? updated.employment.employerName
-                    : null,
-                occupation:
-                  typeof updated.employment.occupation === "string"
-                    ? updated.employment.occupation
-                    : null,
-                industry:
-                  typeof updated.employment.industry === "string" ? updated.employment.industry : null,
-                employmentType:
-                  typeof updated.employment.employmentType === "string"
-                    ? updated.employment.employmentType
-                    : null,
-              }
-            : clientData.employment,
-      }
-
-      setClientData(nextClientData)
-      setEditForm(buildEditForm(nextClientData))
-      setIsEditing(false)
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setIsSavingChanges(false)
-    }
-  }
-
   async function handleCreateHousehold() {
     if (!householdNameInput.trim()) {
       return
@@ -2363,31 +2178,6 @@ export default function ClientRecord({ client }: ClientRecordProps) {
       console.error(error)
     } finally {
       setIsUpdatingServiceTier(false)
-    }
-  }
-
-  async function handleCopyAddressFromMember(memberId: string) {
-    try {
-      const response = await fetch(`/api/clients/${memberId}/address`)
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch household member address")
-      }
-
-      const result = await response.json()
-      const copiedAddress = mapAddress(result.addressResidential)
-
-      setEditForm((current) => ({
-        ...current,
-        addressLine1: copiedAddress?.line1 ?? "",
-        addressLine2: copiedAddress?.line2 ?? "",
-        addressSuburb: copiedAddress?.suburb ?? "",
-        addressState: copiedAddress?.state ?? "",
-        addressPostcode: copiedAddress?.postcode ?? "",
-        addressCountry: copiedAddress?.country ?? "",
-      }))
-    } catch (error) {
-      console.error(error)
     }
   }
 
@@ -3128,19 +2918,25 @@ export default function ClientRecord({ client }: ClientRecordProps) {
     setActiveDetailTab("timeline")
   }
 
+  function refreshClientData() {
+    router.refresh()
+  }
+
+  function renderSectionEditButton(kind: Exclude<SectionModalKind, null>) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpenSectionModal(kind)}
+        className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+      >
+        Edit
+      </button>
+    )
+  }
+
   function handleCancelEngagement() {
     setEngagementForm(buildEngagementForm())
     setIsEngagementPanelOpen(false)
-  }
-
-  function handleStartEditing() {
-    setEditForm(buildEditForm(clientData))
-    setIsEditing(true)
-  }
-
-  function handleCancelEditing() {
-    setEditForm(buildEditForm(clientData))
-    setIsEditing(false)
   }
 
   function handleOpenAddIdForm() {
@@ -3216,13 +3012,6 @@ export default function ClientRecord({ client }: ClientRecordProps) {
                 + Note
               </button>
             </div>
-            <button
-              type="button"
-              onClick={handleStartEditing}
-              className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
-            >
-              Edit
-            </button>
             <DeleteClientButton clientId={clientData.id} clientName={clientData.displayName} />
             <button
               type="button"
@@ -3265,40 +3054,11 @@ export default function ClientRecord({ client }: ClientRecordProps) {
       <div className="flex-1 overflow-y-auto bg-[#F7F9FB]">
         <div className="space-y-4 px-[18px] py-[14px]">
           <div className="flex flex-col rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white px-4">
-          <ExpandableSection title="Contact" className="order-2">
+          <ExpandableSection title="Contact" action={renderSectionEditButton("contact")} className="order-2">
             <div className="space-y-[10px]">
-              {isEditing ? (
-                <>
-                  <EditField label="Email">
-                    <input
-                      value={editForm.email}
-                      onChange={(event) => updateEditField("email", event.target.value)}
-                      className={inputClassName}
-                    />
-                  </EditField>
-                  <EditField label="Mobile">
-                    <input
-                      value={editForm.mobile}
-                      onChange={(event) => updateEditField("mobile", event.target.value)}
-                      className={inputClassName}
-                    />
-                  </EditField>
-                  <EditField label="Date of birth">
-                    <input
-                      type="date"
-                      value={editForm.dateOfBirth}
-                      onChange={(event) => updateEditField("dateOfBirth", event.target.value)}
-                      className={inputClassName}
-                    />
-                  </EditField>
-                </>
-              ) : (
-                <>
-                  <DetailField label="Email" value={clientData.resolvedEmail ?? null} />
-                  <DetailField label="Mobile" value={clientData.resolvedMobile ?? null} />
-                  <DetailField label="Date of birth" value={formatDate(clientData.person?.dateOfBirth ?? null)} />
-                </>
-              )}
+              <DetailField label="Email" value={clientData.resolvedEmail ?? null} />
+              <DetailField label="Alternate email" value={clientData.person?.emailAlternate ?? null} />
+              <DetailField label="Mobile" value={clientData.resolvedMobile ?? null} />
               <DetailField
                 label="Preferred contact method"
                 value={clientData.resolvedPreferredContactMethod ?? null}
@@ -3306,69 +3066,8 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </div>
           </ExpandableSection>
 
-          <ExpandableSection title="Address" className="order-3">
-            {isEditing && otherHouseholdMembers.length > 0 ? (
-              <div className="mb-[10px] space-y-1">
-                {otherHouseholdMembers.map((member) => (
-                  <button
-                    key={member.id}
-                    type="button"
-                    onClick={() => void handleCopyAddressFromMember(member.id)}
-                    className="block cursor-pointer border-0 bg-transparent p-0 text-left text-[11px] text-[#FF8C42] hover:underline"
-                  >
-                    Same address as {member.displayName}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {isEditing ? (
-              <div className="space-y-[10px]">
-                <EditField label="Line 1">
-                  <input
-                    value={editForm.addressLine1}
-                    onChange={(event) => updateEditField("addressLine1", event.target.value)}
-                    className={inputClassName}
-                  />
-                </EditField>
-                <EditField label="Line 2 (optional)">
-                  <input
-                    value={editForm.addressLine2}
-                    onChange={(event) => updateEditField("addressLine2", event.target.value)}
-                    className={inputClassName}
-                  />
-                </EditField>
-                <div className="grid grid-cols-2 gap-2">
-                  <EditField label="Suburb">
-                    <input
-                      value={editForm.addressSuburb}
-                      onChange={(event) => updateEditField("addressSuburb", event.target.value)}
-                      className={inputClassName}
-                    />
-                  </EditField>
-                  <EditField label="State">
-                    <input
-                      value={editForm.addressState}
-                      onChange={(event) => updateEditField("addressState", event.target.value)}
-                      className={inputClassName}
-                    />
-                  </EditField>
-                </div>
-                <EditField label="Postcode">
-                  <input
-                    value={editForm.addressPostcode}
-                    onChange={(event) => updateEditField("addressPostcode", event.target.value)}
-                    className={inputClassName}
-                  />
-                </EditField>
-                <EditField label="Country">
-                  <input
-                    value={editForm.addressCountry}
-                    onChange={(event) => updateEditField("addressCountry", event.target.value)}
-                    className={inputClassName}
-                  />
-                </EditField>
-              </div>
-            ) : residentialAddressLines.length > 0 ? (
+          <ExpandableSection title="Address" action={renderSectionEditButton("address")} className="order-3">
+            {residentialAddressLines.length > 0 ? (
               <div className="space-y-[10px]">
                 <div className="space-y-1">
                   {residentialAddressLines.map((line, index) => (
@@ -3444,60 +3143,24 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             )}
           </ExpandableSection>
 
-          <ExpandableSection title="Personal details" className="order-1">
+          <ExpandableSection title="Personal details" action={renderSectionEditButton("personal")} className="order-1">
             <div className="space-y-[10px]">
-              {isEditing ? (
-                <>
-                  <EditField label="First name">
-                    <input
-                      value={editForm.firstName}
-                      onChange={(event) => updateEditField("firstName", event.target.value)}
-                      className={inputClassName}
-                    />
-                  </EditField>
-                  <EditField label="Last name">
-                    <input
-                      value={editForm.lastName}
-                      onChange={(event) => updateEditField("lastName", event.target.value)}
-                      className={inputClassName}
-                    />
-                  </EditField>
-                  <EditField label="Preferred name">
-                    <input
-                      value={editForm.preferredName}
-                      onChange={(event) => updateEditField("preferredName", event.target.value)}
-                      className={inputClassName}
-                    />
-                  </EditField>
-                  <EditField label="Relationship status">
-                    <select
-                      value={editForm.relationshipStatus}
-                      onChange={(event) => updateEditField("relationshipStatus", event.target.value)}
-                      className={inputClassName}
-                    >
-                      <option value="">Select</option>
-                      {relationshipOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {formatCategory(option)}
-                        </option>
-                      ))}
-                    </select>
-                  </EditField>
-                  <EditField label="Country of residence">
-                    <input
-                      value={editForm.countryOfResidence}
-                      onChange={(event) => updateEditField("countryOfResidence", event.target.value)}
-                      className={inputClassName}
-                    />
-                  </EditField>
-                </>
-              ) : (
-                <>
-                  <DetailField label="Full legal name" value={fullLegalName} />
-                  <DetailField label="Relationship status" value={clientData.person?.relationshipStatus ?? null} />
-                  <DetailField label="Country of residence" value={clientData.person?.countryOfResidence ?? null} />
-                </>
-              )}
+              <DetailField label="Full legal name" value={fullLegalName} />
+              <DetailField label="Title" value={clientData.person?.title ?? null} />
+              <DetailField label="Middle names" value={clientData.person?.legalMiddleNames ?? null} />
+              <DetailField label="Preferred name" value={clientData.person?.preferredName ?? null} />
+              <DetailField label="Maiden name" value={clientData.person?.maidenName ?? null} />
+              <DetailField label="Mother's maiden name" value={clientData.person?.mothersMaidenName ?? null} />
+              <DetailField label="Date of birth" value={formatDate(clientData.person?.dateOfBirth ?? null)} />
+              <DetailField label="Gender" value={clientData.person?.gender ?? null} />
+              <DetailField label="Gender pronouns" value={clientData.person?.genderPronouns ?? null} />
+              <DetailField label="Relationship status" value={clientData.person?.relationshipStatus ?? null} />
+              <DetailField label="Place of birth" value={clientData.person?.placeOfBirth ?? null} />
+              <DetailField label="Country of birth" value={clientData.person?.countryOfBirth ?? null} />
+              <DetailField label="Country of residence" value={clientData.person?.countryOfResidence ?? null} />
+              <DetailField label="Resident status" value={clientData.person?.residentStatus ?? null} />
+              <DetailField label="Country of tax residency" value={clientData.person?.countryOfTaxResidency ?? null} />
+              <DetailField label="Tax resident status" value={clientData.person?.taxResidentStatus ?? null} />
             </div>
             <div className="mt-4 border-t-[0.5px] border-[#f0f0f0] pt-4">
               <div className="mb-[10px] flex items-center justify-between">
@@ -3626,66 +3289,33 @@ export default function ClientRecord({ client }: ClientRecordProps) {
                 </div>
               )}
             </div>
+            <div className="mt-4 border-t-[0.5px] border-[#f0f0f0] pt-4">
+              <h3 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Identity & risk</h3>
+              <div className="space-y-[10px]">
+                <DetailField label="PEP risk" value={clientData.person?.isPepRisk ? "Yes" : "No"} />
+                {clientData.person?.pepNotes ? (
+                  <DetailField label="PEP notes" value={clientData.person.pepNotes} />
+                ) : null}
+              </div>
+            </div>
+            <div className="mt-4 border-t-[0.5px] border-[#f0f0f0] pt-4">
+              <h3 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Emergency Contact</h3>
+              {hasEmergencyContact ? (
+                <div className="space-y-[10px]">
+                  <DetailField label="Name" value={clientData.person?.emergencyContactName ?? null} />
+                  <DetailField label="Relationship" value={clientData.person?.emergencyContactRelationship ?? null} />
+                  <DetailField label="Phone" value={clientData.person?.emergencyContactPhone ?? null} />
+                  <DetailField label="Email" value={clientData.person?.emergencyContactEmail ?? null} />
+                  <DetailField label="Notes" value={clientData.person?.emergencyContactNotes ?? null} />
+                </div>
+              ) : (
+                <p className="text-[12px] text-[#9ca3af]">No emergency contact recorded.</p>
+              )}
+            </div>
           </ExpandableSection>
 
-          <ExpandableSection title="Employment" className="order-5">
-            {isEditing ? (
-              <div className="space-y-[10px]">
-                <EditField label="Employment status">
-                  <select
-                    value={editForm.employmentStatus}
-                    onChange={(event) => updateEditField("employmentStatus", event.target.value)}
-                    className={inputClassName}
-                  >
-                    <option value="">Select</option>
-                    {employmentStatusOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {formatCategory(option)}
-                      </option>
-                    ))}
-                  </select>
-                </EditField>
-
-                <EditField label="Employer name">
-                  <input
-                    value={editForm.employerName}
-                    onChange={(event) => updateEditField("employerName", event.target.value)}
-                    className={inputClassName}
-                  />
-                </EditField>
-
-                <EditField label="Occupation">
-                  <input
-                    value={editForm.occupation}
-                    onChange={(event) => updateEditField("occupation", event.target.value)}
-                    className={inputClassName}
-                  />
-                </EditField>
-
-                <EditField label="Industry">
-                  <input
-                    value={editForm.industry}
-                    onChange={(event) => updateEditField("industry", event.target.value)}
-                    className={inputClassName}
-                  />
-                </EditField>
-
-                <EditField label="Employment type">
-                  <select
-                    value={editForm.employmentType}
-                    onChange={(event) => updateEditField("employmentType", event.target.value)}
-                    className={inputClassName}
-                  >
-                    <option value="">Select</option>
-                    {employmentTypeOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {formatCategory(option)}
-                      </option>
-                    ))}
-                  </select>
-                </EditField>
-              </div>
-            ) : clientData.employment ? (
+          <ExpandableSection title="Employment" action={renderSectionEditButton("employment")} className="order-5">
+            {clientData.employment ? (
               <div className="space-y-[10px]">
                 <DetailField
                   label="Employment status"
@@ -3960,25 +3590,6 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </p>
           </ExpandableSection>
 
-          {isEditing ? (
-            <div className="order-9 mt-4 rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-3">
-              <button
-                type="button"
-                onClick={handleSaveChanges}
-                disabled={isSavingChanges}
-                className="w-full rounded-[7px] bg-[#FF8C42] px-4 py-[10px] text-[12px] text-white disabled:opacity-60"
-              >
-                {isSavingChanges ? "Saving..." : "Save changes"}
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelEditing}
-                className="mt-[6px] w-full rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-4 py-[10px] text-[12px] text-[#113238]"
-              >
-                Cancel
-              </button>
-            </div>
-          ) : null}
         </div>
 
         <section className="flex min-h-[560px] flex-col">
@@ -4550,6 +4161,35 @@ export default function ClientRecord({ client }: ClientRecordProps) {
           </div>
         </aside>
       </div>
+
+      <PersonalSectionModal
+        clientId={clientData.id}
+        clientDetail={clientData}
+        isOpen={openSectionModal === "personal"}
+        onClose={() => setOpenSectionModal(null)}
+        onSaved={refreshClientData}
+      />
+      <AddressSectionModal
+        clientId={clientData.id}
+        clientDetail={clientData}
+        isOpen={openSectionModal === "address"}
+        onClose={() => setOpenSectionModal(null)}
+        onSaved={refreshClientData}
+      />
+      <EmploymentSectionModal
+        clientId={clientData.id}
+        clientDetail={clientData}
+        isOpen={openSectionModal === "employment"}
+        onClose={() => setOpenSectionModal(null)}
+        onSaved={refreshClientData}
+      />
+      <ContactSectionModal
+        clientId={clientData.id}
+        clientDetail={clientData}
+        isOpen={openSectionModal === "contact"}
+        onClose={() => setOpenSectionModal(null)}
+        onSaved={refreshClientData}
+      />
 
       <ClientEmailTemplateModal
         isOpen={isEmailTemplateModalOpen}

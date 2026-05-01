@@ -59,14 +59,40 @@ export type ClientDetail = {
     lifecycleStage: string | null
   } | null
   person: {
+    title: string | null
     legalGivenName: string
+    legalMiddleNames: string | null
     legalFamilyName: string
+    initials: string | null
     preferredName: string | null
+    maidenName: string | null
+    mothersMaidenName: string | null
     dateOfBirth: string | null
+    gender: string | null
+    genderPronouns: string | null
+    placeOfBirth: string | null
+    countryOfBirth: string | null
     mobilePhone: string | null
     emailPrimary: string | null
+    emailAlternate: string | null
     relationshipStatus: string | null
     countryOfResidence: string | null
+    residentStatus: string | null
+    countryOfTaxResidency: string | null
+    taxResidentStatus: string | null
+    isPepRisk: boolean
+    pepNotes: string | null
+    willExists: boolean | null
+    willIsCurrent: boolean | null
+    willDate: string | null
+    willLocation: string | null
+    estatePlanningNotes: string | null
+    funeralPlanStatus: string | null
+    emergencyContactName: string | null
+    emergencyContactRelationship: string | null
+    emergencyContactPhone: string | null
+    emergencyContactEmail: string | null
+    emergencyContactNotes: string | null
     preferredContactMethod: string | null
     addressResidential: ClientAddress | null
     addressPostal: ClientAddress | null

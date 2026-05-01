@@ -73,6 +73,41 @@ function assignIfPresent(
   }
 }
 
+function assignLimitedStringIfPresent(
+  target: Record<string, unknown>,
+  column: string,
+  source: Record<string, unknown>,
+  keys: string[],
+  maxLength: number,
+) {
+  if (!hasAnyProperty(source, keys)) {
+    return null
+  }
+
+  const value = valueFor(source, keys)
+  if (value === null || value === undefined || value === "") {
+    target[column] = null
+    return null
+  }
+
+  if (typeof value !== "string") {
+    return `${column} must be a string`
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    target[column] = null
+    return null
+  }
+
+  if (trimmed.length > maxLength) {
+    return `${column} must be ${maxLength} characters or fewer`
+  }
+
+  target[column] = trimmed
+  return null
+}
+
 function booleanValue(value: unknown): boolean | null {
   if (typeof value === "boolean") {
     return value
@@ -155,12 +190,7 @@ async function updateClient(
     const {
       firstName,
       lastName,
-      preferredName,
       dateOfBirth,
-      email,
-      mobile,
-      relationshipStatus,
-      countryOfResidence,
       addressResidential,
       addressPostal,
     } = payload
@@ -179,24 +209,50 @@ async function updateClient(
     const personUpdateData: Record<string, unknown> = {
       legal_given_name: firstName ?? existingPerson.legal_given_name,
       legal_family_name: lastName ?? existingPerson.legal_family_name,
-      preferred_name: preferredName ?? null,
       date_of_birth: dateOfBirth ? new Date(dateOfBirth) : existingPerson.date_of_birth,
-      email_primary: email ?? null,
-      mobile_phone: mobile ?? null,
-      relationship_status: relationshipStatus ?? null,
-      country_of_residence: countryOfResidence ?? null,
       ...(hasAddressResidential ? { address_residential: addressResidential } : {}),
       ...(hasAddressPostal ? { address_postal: addressPostal } : {}),
     }
 
+    assignIfPresent(personUpdateData, "preferred_name", personPayload, [
+      "preferred_name",
+      "preferredName",
+    ])
+    assignIfPresent(personUpdateData, "email_primary", personPayload, [
+      "email_primary",
+      "emailPrimary",
+      "email",
+    ])
+    assignIfPresent(personUpdateData, "mobile_phone", personPayload, [
+      "mobile_phone",
+      "mobilePhone",
+      "mobile",
+    ])
+    assignIfPresent(personUpdateData, "relationship_status", personPayload, [
+      "relationship_status",
+      "relationshipStatus",
+    ])
+    assignIfPresent(personUpdateData, "country_of_residence", personPayload, [
+      "country_of_residence",
+      "countryOfResidence",
+    ])
     assignIfPresent(personUpdateData, "title", personPayload, ["title"])
     assignIfPresent(personUpdateData, "initials", personPayload, ["initials"])
+    assignIfPresent(personUpdateData, "legal_middle_names", personPayload, [
+      "legal_middle_names",
+      "legalMiddleNames",
+      "middleNames",
+    ])
     assignIfPresent(personUpdateData, "maiden_name", personPayload, ["maiden_name", "maidenName"])
     assignIfPresent(personUpdateData, "mothers_maiden_name", personPayload, [
       "mothers_maiden_name",
       "mothersMaidenName",
     ])
     assignIfPresent(personUpdateData, "gender", personPayload, ["gender"])
+    assignIfPresent(personUpdateData, "gender_pronouns", personPayload, [
+      "gender_pronouns",
+      "genderPronouns",
+    ])
     assignIfPresent(personUpdateData, "place_of_birth", personPayload, [
       "place_of_birth",
       "placeOfBirth",
@@ -230,6 +286,40 @@ async function updateClient(
       "funeral_plan_status",
       "funeralPlanStatus",
     ])
+    assignIfPresent(personUpdateData, "preferred_contact_method", personPayload, [
+      "preferred_contact_method",
+      "preferredContactMethod",
+    ])
+
+    const limitedTextError =
+      assignLimitedStringIfPresent(personUpdateData, "email_alternate", personPayload, [
+        "email_alternate",
+        "emailAlternate",
+      ], 200) ??
+      assignLimitedStringIfPresent(personUpdateData, "emergency_contact_name", personPayload, [
+        "emergency_contact_name",
+        "emergencyContactName",
+      ], 200) ??
+      assignLimitedStringIfPresent(personUpdateData, "emergency_contact_relationship", personPayload, [
+        "emergency_contact_relationship",
+        "emergencyContactRelationship",
+      ], 100) ??
+      assignLimitedStringIfPresent(personUpdateData, "emergency_contact_phone", personPayload, [
+        "emergency_contact_phone",
+        "emergencyContactPhone",
+      ], 50) ??
+      assignLimitedStringIfPresent(personUpdateData, "emergency_contact_email", personPayload, [
+        "emergency_contact_email",
+        "emergencyContactEmail",
+      ], 200) ??
+      assignLimitedStringIfPresent(personUpdateData, "emergency_contact_notes", personPayload, [
+        "emergency_contact_notes",
+        "emergencyContactNotes",
+      ], 2000)
+
+    if (limitedTextError) {
+      return NextResponse.json({ error: limitedTextError }, { status: 400 })
+    }
 
     if (hasAnyProperty(personPayload, ["is_pep_risk", "isPepRisk"])) {
       const parsedPepRisk = booleanValue(
