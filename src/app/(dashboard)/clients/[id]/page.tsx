@@ -128,7 +128,11 @@ export default async function ClientRecordPage({
             end_date: null,
           },
           include: {
-            party: true,
+            party: {
+              include: {
+                person: true,
+              },
+            },
           },
           orderBy: {
             created_at: "asc",
@@ -182,11 +186,24 @@ export default async function ClientRecordPage({
       ? {
           id: householdMembership.household_group.id,
           name: householdMembership.household_group.household_name,
+          salutationInformal: householdMembership.household_group.salutation_informal,
+          addressTitleFormal: householdMembership.household_group.address_title_formal,
+          householdNotes: householdMembership.household_group.household_notes,
           role: householdMembership.role_in_household,
           members: householdMembers.map((member: HouseholdMemberWithParty) => ({
-            id: member.party.id,
+            id: member.id,
+            partyId: member.party.id,
             displayName: member.party.display_name,
             role: member.role_in_household,
+            endDate: member.end_date?.toISOString() ?? null,
+            relation: member.relation,
+            isFinancialDependant: member.is_financial_dependant ?? false,
+            dependantUntilAge: member.dependant_until_age,
+            dependantNotes: member.dependant_notes,
+            relationToMemberId: member.relation_to_member_id,
+            dateOfBirth: member.party.person?.date_of_birth?.toISOString() ?? null,
+            legalGivenName: member.party.person?.legal_given_name ?? null,
+            legalFamilyName: member.party.person?.legal_family_name ?? null,
           })),
         }
       : null,

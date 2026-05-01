@@ -11,7 +11,10 @@ import DeleteClientButton from "@/components/clients/DeleteClientButton"
 import ClientEmailTemplateModal from "@/components/clients/ClientEmailTemplateModal"
 import DocumentsTab from "@/components/clients/DocumentsTab"
 import ContactSectionModal from "@/components/clients/ContactSectionModal"
+import DependantDeleteConfirm from "@/components/clients/DependantDeleteConfirm"
+import DependantModal from "@/components/clients/DependantModal"
 import EmploymentSectionModal from "@/components/clients/EmploymentSectionModal"
+import HouseholdSectionModal from "@/components/clients/HouseholdSectionModal"
 import PersonalSectionModal from "@/components/clients/PersonalSectionModal"
 import QuickAddMeetingModal from "@/components/clients/QuickAddMeetingModal"
 import QuickAddNoteModal from "@/components/clients/QuickAddNoteModal"
@@ -27,7 +30,13 @@ import TaskModal, {
 import { formatCalendlyMeetingDateTime, getCalendlyMeetingTypeLabel } from "@/lib/calendly"
 import { ENGAGEMENT_TYPE_VALUES } from "@/lib/engagement"
 import { scoreToAllocation, type RiskAllocation } from "@/lib/risk"
-import type { ClientAddress, ClientDetail, TimelineEngagement, TimelineNote } from "@/types/client-record"
+import type {
+  ClientAddress,
+  ClientDetail,
+  ClientHouseholdMember,
+  TimelineEngagement,
+  TimelineNote,
+} from "@/types/client-record"
 
 type ClientRecordProps = {
   client: ClientDetail
@@ -37,7 +46,11 @@ type ClientRecordProps = {
 type TimelineFilter = "all" | "emails" | "tasks" | "notes" | "docs"
 type ClientDetailTab = "timeline" | "documents"
 type QuickAddKind = "phone_call" | "meeting" | "file_note"
-type SectionModalKind = "personal" | "address" | "employment" | "contact" | null
+type SectionModalKind = "personal" | "address" | "employment" | "contact" | "household" | null
+type DependantModalState =
+  | { mode: "create"; member: null }
+  | { mode: "edit"; member: ClientHouseholdMember }
+  | null
 type EngagementType = (typeof ENGAGEMENT_TYPE_VALUES)[number]
 type LifecycleStage = "prospect" | "engagement" | "advice" | "implementation" | "client" | "lost" | "ceased"
 type ServiceTier = "transaction" | "cashflow" | "wealth" | "wealth_plus"
@@ -937,6 +950,48 @@ function formatHouseholdRole(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
+function formatHouseholdRelation(value: string | null) {
+  if (!value) {
+    return "Not provided"
+  }
+
+  return formatCategory(value)
+}
+
+function calculateAge(dateOfBirth: string | null) {
+  if (!dateOfBirth) {
+    return null
+  }
+
+  const birthDate = new Date(dateOfBirth)
+  if (Number.isNaN(birthDate.getTime())) {
+    return null
+  }
+
+  const today = new Date()
+  let age = today.getFullYear() - birthDate.getFullYear()
+  const monthDelta = today.getMonth() - birthDate.getMonth()
+
+  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < birthDate.getDate())) {
+    age -= 1
+  }
+
+  return age >= 0 ? age : null
+}
+
+function truncateText(value: string | null, maxLength = 120) {
+  if (!value) {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (trimmed.length <= maxLength) {
+    return trimmed
+  }
+
+  return `${trimmed.slice(0, maxLength - 1).trim()}...`
+}
+
 function getClassificationClasses(value: string) {
   switch (value) {
     case "wealth_plus":
@@ -1220,6 +1275,8 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const [activeFilter, setActiveFilter] = useState<TimelineFilter>("all")
   const [quickAddOpen, setQuickAddOpen] = useState<QuickAddKind | null>(null)
   const [openSectionModal, setOpenSectionModal] = useState<SectionModalKind>(null)
+  const [dependantModalState, setDependantModalState] = useState<DependantModalState>(null)
+  const [dependantDeleteTarget, setDependantDeleteTarget] = useState<ClientHouseholdMember | null>(null)
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0)
   const [isEngagementPanelOpen, setIsEngagementPanelOpen] = useState(false)
   const [isSavingEngagement, setIsSavingEngagement] = useState(false)
@@ -1316,7 +1373,13 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const isTimelineLoading =
     (isLoadingEmailLogs && (activeFilter === "all" || activeFilter === "emails")) ||
     (isLoadingTasks && (activeFilter === "all" || activeFilter === "tasks"))
-  const otherHouseholdMembers = clientData.household?.members.filter((member) => member.id !== clientData.id) ?? []
+  const activeHouseholdMembers = clientData.household?.members.filter((member) => !member.endDate) ?? []
+  const adultHouseholdMembers = activeHouseholdMembers.filter((member) => member.role !== "dependant")
+  const dependantHouseholdMembers = activeHouseholdMembers.filter((member) => member.role === "dependant")
+  const householdAdultMembers = adultHouseholdMembers.map((member) => ({
+    id: member.id,
+    displayName: member.displayName,
+  }))
   const journeyClientScope = clientData.household?.id ? "household" : "party"
   const journeyClientId = journeyClientScope === "household" ? clientData.household!.id : clientData.id
   const lifecycleStage = clientData.classification?.lifecycleStage ?? null
@@ -2088,25 +2151,9 @@ export default function ClientRecord({ client }: ClientRecordProps) {
         throw new Error("Failed to create household")
       }
 
-      const result = await response.json()
-
-      setClientData((current) => ({
-        ...current,
-        household: {
-          id: result.id,
-          name: householdNameInput,
-          role: "primary",
-          members: [
-            {
-              id: current.id,
-              displayName: current.displayName,
-              role: "primary",
-            },
-          ],
-        },
-      }))
       setHouseholdNameInput("")
       setIsLinkingHousehold(false)
+      refreshClientData()
     } catch (error) {
       console.error(error)
     } finally {
@@ -2934,6 +2981,18 @@ export default function ClientRecord({ client }: ClientRecordProps) {
     )
   }
 
+  function openCreateDependantModal() {
+    setDependantModalState({ mode: "create", member: null })
+  }
+
+  function openEditDependantModal(member: ClientHouseholdMember) {
+    setDependantModalState({ mode: "edit", member })
+  }
+
+  function handleDependantSaved() {
+    refreshClientData()
+  }
+
   function handleCancelEngagement() {
     setEngagementForm(buildEngagementForm())
     setIsEngagementPanelOpen(false)
@@ -3093,24 +3152,108 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             )}
           </ExpandableSection>
 
-          <ExpandableSection title="Household" className="order-4">
+          <ExpandableSection
+            title="Household"
+            action={clientData.household ? renderSectionEditButton("household") : undefined}
+            className="order-4"
+          >
             {clientData.household ? (
-              <div className="space-y-[10px]">
+              <div className="space-y-4">
                 <p className="text-[12px] font-medium text-[#113238]">{clientData.household.name}</p>
                 <p className="text-[11px] text-[#9ca3af]">{formatHouseholdRole(clientData.household.role)}</p>
-                {otherHouseholdMembers.length > 0 ? (
-                  <div className="space-y-1">
-                    {otherHouseholdMembers.map((member) => (
-                      <Link
-                        key={member.id}
-                        href={`/clients/${member.id}`}
-                        className="block text-[11px] text-[#113238] underline-offset-2 hover:underline"
-                      >
-                        {member.displayName}
-                      </Link>
-                    ))}
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <DetailField label="Salutation (informal)" value={clientData.household.salutationInformal ?? "—"} />
+                  <DetailField label="Address title (formal)" value={clientData.household.addressTitleFormal ?? "—"} />
+                  <DetailField label="Notes" value={clientData.household.householdNotes ?? "—"} />
+                </div>
+
+                <div className="space-y-2 border-t-[0.5px] border-[#f0f0f0] pt-3">
+                  <h3 className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Adults</h3>
+                  {adultHouseholdMembers.length > 0 ? (
+                    <div className="space-y-1">
+                      {adultHouseholdMembers.map((member) => (
+                        <div key={member.id} className="flex items-center justify-between gap-3 rounded-[8px] bg-[#FAFBFC] px-3 py-2">
+                          <div>
+                            {member.partyId === clientData.id ? (
+                              <p className="text-[12px] font-medium text-[#113238]">{member.displayName}</p>
+                            ) : (
+                              <Link
+                                href={`/clients/${member.partyId}`}
+                                className="text-[12px] font-medium text-[#113238] underline-offset-2 hover:underline"
+                              >
+                                {member.displayName}
+                              </Link>
+                            )}
+                            <p className="text-[11px] text-[#9ca3af]">{formatHouseholdRole(member.role)}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[12px] text-[#9ca3af]">No adult members recorded</p>
+                  )}
+                </div>
+
+                <div className="space-y-2 border-t-[0.5px] border-[#f0f0f0] pt-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Dependants</h3>
+                    <button
+                      type="button"
+                      onClick={openCreateDependantModal}
+                      className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                    >
+                      + Add dependant
+                    </button>
                   </div>
-                ) : null}
+
+                  {dependantHouseholdMembers.length > 0 ? (
+                    <div className="space-y-2">
+                      {dependantHouseholdMembers.map((member) => {
+                        const age = calculateAge(member.dateOfBirth)
+                        const notes = truncateText(member.dependantNotes)
+
+                        return (
+                          <div key={member.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="space-y-1">
+                                <p className="text-[13px] font-medium text-[#113238]">{member.displayName}</p>
+                                <p className="text-[11px] text-[#6b7280]">
+                                  {formatHouseholdRelation(member.relation)}
+                                  {age !== null ? ` - Age ${age}` : " - Age not recorded"}
+                                </p>
+                                <p className="text-[11px] text-[#6b7280]">
+                                  {member.isFinancialDependant
+                                    ? `Financial dependant${member.dependantUntilAge !== null ? ` until ${member.dependantUntilAge}` : ""}`
+                                    : "Not marked financially dependant"}
+                                </p>
+                                {notes ? <p className="text-[11px] text-[#6b7280]">{notes}</p> : null}
+                              </div>
+                              <div className="flex shrink-0 items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditDependantModal(member)}
+                                  className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDependantDeleteTarget(member)}
+                                  className="rounded-[6px] border-[0.5px] border-[#FCA5A5] bg-white px-[8px] py-[4px] text-[10px] text-[#B42318]"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-[12px] text-[#9ca3af]">No dependants recorded</p>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="space-y-[10px]">
@@ -4189,6 +4332,30 @@ export default function ClientRecord({ client }: ClientRecordProps) {
         isOpen={openSectionModal === "contact"}
         onClose={() => setOpenSectionModal(null)}
         onSaved={refreshClientData}
+      />
+      <HouseholdSectionModal
+        householdId={clientData.household?.id ?? ""}
+        clientDetail={clientData}
+        isOpen={openSectionModal === "household" && Boolean(clientData.household)}
+        onClose={() => setOpenSectionModal(null)}
+        onSaved={refreshClientData}
+      />
+      <DependantModal
+        householdId={clientData.household?.id ?? ""}
+        clientId={clientData.id}
+        mode={dependantModalState?.mode ?? "create"}
+        member={dependantModalState?.member ?? null}
+        householdAdultMembers={householdAdultMembers}
+        isOpen={Boolean(dependantModalState) && Boolean(clientData.household)}
+        onClose={() => setDependantModalState(null)}
+        onSaved={handleDependantSaved}
+      />
+      <DependantDeleteConfirm
+        householdId={clientData.household?.id ?? ""}
+        member={dependantDeleteTarget}
+        isOpen={Boolean(dependantDeleteTarget) && Boolean(clientData.household)}
+        onClose={() => setDependantDeleteTarget(null)}
+        onDeleted={handleDependantSaved}
       />
 
       <ClientEmailTemplateModal

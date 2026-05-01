@@ -35,6 +35,22 @@ export type ClientAddress = {
   country: string | null
 }
 
+export type ClientHouseholdMember = {
+  id: string
+  partyId: string
+  displayName: string
+  role: string
+  endDate: string | null
+  relation: string | null
+  isFinancialDependant: boolean
+  dependantUntilAge: number | null
+  dependantNotes: string | null
+  relationToMemberId: string | null
+  dateOfBirth: string | null
+  legalGivenName: string | null
+  legalFamilyName: string | null
+}
+
 export type ClientDetail = {
   id: string
   displayName: string
@@ -47,12 +63,11 @@ export type ClientDetail = {
   household: {
     id: string
     name: string
+    salutationInformal: string | null
+    addressTitleFormal: string | null
+    householdNotes: string | null
     role: string
-    members: {
-      id: string
-      displayName: string
-      role: string
-    }[]
+    members: ClientHouseholdMember[]
   } | null
   classification: {
     serviceTier: string | null
