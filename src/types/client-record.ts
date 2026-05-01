@@ -70,6 +70,15 @@ export type ProfessionalRelationship = {
   updatedAt: string
 }
 
+export type EstateExecutor = {
+  id: string
+  entityType: string
+  firstName: string | null
+  surname: string | null
+  preferredName: string | null
+  notes: string | null
+}
+
 export type ClientDetail = {
   id: string
   displayName: string
@@ -89,6 +98,7 @@ export type ClientDetail = {
     members: ClientHouseholdMember[]
   } | null
   professionalRelationships: ProfessionalRelationship[]
+  estateExecutors: EstateExecutor[]
   classification: {
     serviceTier: string | null
     lifecycleStage: string | null

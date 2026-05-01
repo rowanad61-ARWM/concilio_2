@@ -13,6 +13,9 @@ import DocumentsTab from "@/components/clients/DocumentsTab"
 import ContactSectionModal from "@/components/clients/ContactSectionModal"
 import DependantDeleteConfirm from "@/components/clients/DependantDeleteConfirm"
 import DependantModal from "@/components/clients/DependantModal"
+import EstateExecutorDeleteConfirm from "@/components/clients/EstateExecutorDeleteConfirm"
+import EstateExecutorModal from "@/components/clients/EstateExecutorModal"
+import EstateScalarsModal from "@/components/clients/EstateScalarsModal"
 import EmploymentSectionModal from "@/components/clients/EmploymentSectionModal"
 import HouseholdSectionModal from "@/components/clients/HouseholdSectionModal"
 import PersonalSectionModal from "@/components/clients/PersonalSectionModal"
@@ -36,6 +39,7 @@ import type {
   ClientAddress,
   ClientDetail,
   ClientHouseholdMember,
+  EstateExecutor,
   ProfessionalRelationship,
   TimelineEngagement,
   TimelineNote,
@@ -57,6 +61,10 @@ type DependantModalState =
 type ProfessionalRelationshipModalState =
   | { mode: "create"; relationship: null }
   | { mode: "edit"; relationship: ProfessionalRelationship }
+  | null
+type EstateExecutorModalState =
+  | { mode: "create"; executor: null }
+  | { mode: "edit"; executor: EstateExecutor }
   | null
 type EngagementType = (typeof ENGAGEMENT_TYPE_VALUES)[number]
 type LifecycleStage = "prospect" | "engagement" | "advice" | "implementation" | "client" | "lost" | "ceased"
@@ -999,6 +1007,59 @@ function professionalRelationshipName(relationship: ProfessionalRelationship) {
   return relationship.company?.trim() || "-"
 }
 
+function formatEstateExecutorEntityType(value: string) {
+  switch (value) {
+    case "person":
+      return "Individual person"
+    case "trustee_company":
+      return "Trustee company"
+    case "other":
+      return "Other"
+    default:
+      return formatCategory(value)
+  }
+}
+
+function formatFuneralPlanStatus(value: string | null | undefined) {
+  switch (value) {
+    case "in_place":
+      return "In place"
+    case "pre_paid":
+      return "Pre-paid"
+    case "not_in_place":
+      return "Not in place"
+    case "unknown":
+      return "Unknown"
+    default:
+      return "-"
+  }
+}
+
+function yesNoOrDash(value: boolean | null | undefined) {
+  if (value === true) {
+    return "Yes"
+  }
+
+  if (value === false) {
+    return "No"
+  }
+
+  return "-"
+}
+
+function estateExecutorName(executor: EstateExecutor) {
+  const personName = [executor.firstName, executor.surname]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(" ")
+
+  if (personName) {
+    return personName
+  }
+
+  return executor.preferredName?.trim() || "-"
+}
+
 function calculateAge(dateOfBirth: string | null) {
   if (!dateOfBirth) {
     return null
@@ -1320,6 +1381,9 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const [dependantDeleteTarget, setDependantDeleteTarget] = useState<ClientHouseholdMember | null>(null)
   const [professionalModalState, setProfessionalModalState] = useState<ProfessionalRelationshipModalState>(null)
   const [professionalDeleteTarget, setProfessionalDeleteTarget] = useState<ProfessionalRelationship | null>(null)
+  const [isEstateScalarsModalOpen, setIsEstateScalarsModalOpen] = useState(false)
+  const [estateExecutorModalState, setEstateExecutorModalState] = useState<EstateExecutorModalState>(null)
+  const [estateExecutorDeleteTarget, setEstateExecutorDeleteTarget] = useState<EstateExecutor | null>(null)
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0)
   const [isEngagementPanelOpen, setIsEngagementPanelOpen] = useState(false)
   const [isSavingEngagement, setIsSavingEngagement] = useState(false)
@@ -3048,6 +3112,18 @@ export default function ClientRecord({ client }: ClientRecordProps) {
     refreshClientData()
   }
 
+  function openCreateEstateExecutorModal() {
+    setEstateExecutorModalState({ mode: "create", executor: null })
+  }
+
+  function openEditEstateExecutorModal(executor: EstateExecutor) {
+    setEstateExecutorModalState({ mode: "edit", executor })
+  }
+
+  function handleEstateSaved() {
+    refreshClientData()
+  }
+
   function handleCancelEngagement() {
     setEngagementForm(buildEngagementForm())
     setIsEngagementPanelOpen(false)
@@ -3588,7 +3664,109 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </div>
           </ExpandableSection>
 
-          <ExpandableSection title="Employment" action={renderSectionEditButton("employment")} className="order-6">
+          <ExpandableSection title="Estate" className="order-6">
+            <div className="space-y-5">
+              <section className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Will & funeral</h3>
+                  <button
+                    type="button"
+                    onClick={() => setIsEstateScalarsModalOpen(true)}
+                    className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                  >
+                    Edit
+                  </button>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <DetailField label="Will exists" value={yesNoOrDash(clientData.person?.willExists)} />
+                  {clientData.person?.willExists === true ? (
+                    <>
+                      <DetailField label="Will is current" value={yesNoOrDash(clientData.person?.willIsCurrent)} />
+                      <DetailField label="Will date" value={clientData.person?.willDate ? formatDate(clientData.person.willDate) : "-"} />
+                      <DetailField label="Will location" value={clientData.person?.willLocation ?? "-"} />
+                    </>
+                  ) : null}
+                  <DetailField
+                    label="Estate planning notes"
+                    value={truncateText(clientData.person?.estatePlanningNotes ?? null, 150) ?? "-"}
+                  />
+                  <DetailField
+                    label="Funeral plan status"
+                    value={formatFuneralPlanStatus(clientData.person?.funeralPlanStatus)}
+                  />
+                </div>
+              </section>
+
+              <section className="space-y-3 border-t-[0.5px] border-[#f0f0f0] pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Executors</h3>
+                  <button
+                    type="button"
+                    onClick={openCreateEstateExecutorModal}
+                    className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                  >
+                    + Add executor
+                  </button>
+                </div>
+
+                {clientData.estateExecutors.length > 0 ? (
+                  <div className="space-y-2">
+                    {clientData.estateExecutors.map((executor) => {
+                      const displayName = estateExecutorName(executor)
+                      const preferredName = executor.preferredName?.trim() ?? ""
+                      const showPreferredName = Boolean(preferredName && preferredName !== displayName)
+                      const notes = truncateText(executor.notes, 100)
+
+                      return (
+                        <div key={executor.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                              <p className="text-[13px] font-medium text-[#113238]">
+                                {formatEstateExecutorEntityType(executor.entityType)}
+                              </p>
+                              <p className="text-[13px] text-[#113238]">{displayName}</p>
+                              {showPreferredName ? (
+                                <p className="text-[11px] text-[#6b7280]">Preferred: {preferredName}</p>
+                              ) : null}
+                              {notes ? <p className="text-[11px] text-[#6b7280]">{notes}</p> : null}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openEditEstateExecutorModal(executor)}
+                                className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEstateExecutorDeleteTarget(executor)}
+                                className="rounded-[6px] border-[0.5px] border-[#FCA5A5] bg-white px-[8px] py-[4px] text-[10px] text-[#B42318]"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[12px] text-[#9ca3af]">No executors recorded.</p>
+                )}
+
+                <button
+                  type="button"
+                  onClick={openCreateEstateExecutorModal}
+                  className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                >
+                  + Add executor
+                </button>
+              </section>
+            </div>
+          </ExpandableSection>
+
+          <ExpandableSection title="Employment" action={renderSectionEditButton("employment")} className="order-7">
             {clientData.employment ? (
               <div className="space-y-[10px]">
                 <DetailField
@@ -3616,7 +3794,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             )}
           </ExpandableSection>
 
-          <ExpandableSection title="Risk Profile" className="order-7">
+          <ExpandableSection title="Risk Profile" className="order-8">
 
             {clientData.riskProfile ? (
               <div className="space-y-2">
@@ -3761,7 +3939,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             ) : null}
           </ExpandableSection>
 
-          <ExpandableSection title="Service" className="order-8">
+          <ExpandableSection title="Service" className="order-9">
             <div className="space-y-[10px]">
               <div className="relative space-y-[6px]">
               <p className="text-[11px] text-[#9ca3af]">Lifecycle stage</p>
@@ -3858,7 +4036,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </div>
           </ExpandableSection>
 
-          <ExpandableSection title="Important information" className="order-9">
+          <ExpandableSection title="Important information" className="order-10">
             <p className="text-[12px] text-[#6b7280]">
               Sensitive credentials reveal coming in a future round
             </p>
@@ -4503,6 +4681,29 @@ export default function ClientRecord({ client }: ClientRecordProps) {
         isOpen={Boolean(professionalDeleteTarget)}
         onClose={() => setProfessionalDeleteTarget(null)}
         onConfirmed={handleProfessionalRelationshipSaved}
+      />
+      <EstateScalarsModal
+        clientId={clientData.id}
+        clientDetail={clientData}
+        isOpen={isEstateScalarsModalOpen}
+        onClose={() => setIsEstateScalarsModalOpen(false)}
+        onSaved={handleEstateSaved}
+      />
+      <EstateExecutorModal
+        clientId={clientData.id}
+        mode={estateExecutorModalState?.mode ?? "create"}
+        executor={estateExecutorModalState?.executor ?? null}
+        isOpen={Boolean(estateExecutorModalState)}
+        onClose={() => setEstateExecutorModalState(null)}
+        onSaved={handleEstateSaved}
+      />
+      <EstateExecutorDeleteConfirm
+        clientId={clientData.id}
+        clientDisplayName={clientData.displayName}
+        executor={estateExecutorDeleteTarget}
+        isOpen={Boolean(estateExecutorDeleteTarget)}
+        onClose={() => setEstateExecutorDeleteTarget(null)}
+        onConfirmed={handleEstateSaved}
       />
 
       <ClientEmailTemplateModal

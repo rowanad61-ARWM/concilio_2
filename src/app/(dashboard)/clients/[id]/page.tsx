@@ -60,6 +60,7 @@ export default async function ClientRecordPage({
     employmentProfile,
     riskProfile,
     professionalRelationships,
+    estateExecutors,
   ] = await Promise.all([
     db.party.findUnique({
       where: { id },
@@ -123,6 +124,19 @@ export default async function ClientRecordPage({
       ],
     }),
     db.professional_relationship.findMany({
+      where: {
+        person_id: id,
+      },
+      orderBy: [
+        {
+          created_at: "asc",
+        },
+        {
+          id: "asc",
+        },
+      ],
+    }),
+    db.estate_executor.findMany({
       where: {
         person_id: id,
       },
@@ -245,6 +259,14 @@ export default async function ClientRecordPage({
       notes: relationship.notes,
       createdAt: relationship.created_at.toISOString(),
       updatedAt: relationship.updated_at.toISOString(),
+    })),
+    estateExecutors: estateExecutors.map((executor) => ({
+      id: executor.id,
+      entityType: executor.entity_type,
+      firstName: executor.first_name,
+      surname: executor.surname,
+      preferredName: executor.preferred_name,
+      notes: executor.notes,
     })),
     classification: party.client_classification
       ? {
