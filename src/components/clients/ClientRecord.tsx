@@ -34,6 +34,13 @@ type ServiceTier = "transaction" | "cashflow" | "wealth" | "wealth_plus"
 type VerificationResult = "pass" | "pending" | "fail"
 type VerificationDocumentType = "passport" | "drivers_licence" | "medicare_card" | "birth_certificate" | "other"
 type VerificationCheck = ClientDetail["verificationChecks"][number]
+type StatusTone = "green" | "amber" | "red" | "muted"
+type HeaderIndicator = {
+  label: string
+  value: string
+  tone: StatusTone
+  icon: React.ReactNode
+}
 type IncomeFrequency = "weekly" | "fortnightly" | "monthly" | "annual"
 type LiabilityRepaymentFrequency = "weekly" | "fortnightly" | "monthly"
 type CapacityForLoss = "low" | "medium" | "high"
@@ -585,6 +592,122 @@ function getExpiryTextClass(expiryState: string) {
   }
 }
 
+function getHeaderPillClasses(tone: StatusTone) {
+  switch (tone) {
+    case "green":
+      return "border-[#B8DCCB] bg-[#E6F0EC] text-[#0F5C3A]"
+    case "amber":
+      return "border-[#FCD34D] bg-[#FFFBEB] text-[#92400E]"
+    case "red":
+      return "border-[#F9CACA] bg-[#FCE8E8] text-[#B42318]"
+    default:
+      return "border-[#e5e7eb] bg-[#F3F4F6] text-[#6B7280]"
+  }
+}
+
+function getIdDocumentIndicator(checks: VerificationCheck[]): HeaderIndicator {
+  if (checks.length === 0) {
+    return {
+      label: "ID",
+      value: "Missing",
+      tone: "red",
+      icon: <IdIcon />,
+    }
+  }
+
+  const passedChecks = checks.filter((check) => formatVerificationResult(check.result) === "pass")
+  if (passedChecks.length === 0) {
+    return {
+      label: "ID",
+      value: "Missing",
+      tone: "red",
+      icon: <IdIcon />,
+    }
+  }
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const thirtyDaysFromNow = new Date(today)
+  thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30)
+
+  const datedChecks = passedChecks
+    .map((check) => {
+      if (!check.expiryDate) {
+        return { check, expiry: null }
+      }
+
+      const expiry = new Date(check.expiryDate)
+      expiry.setHours(0, 0, 0, 0)
+      return Number.isNaN(expiry.getTime()) ? { check, expiry: null } : { check, expiry }
+    })
+    .sort((left, right) => {
+      const leftTime = left.expiry?.getTime() ?? Number.MAX_SAFE_INTEGER
+      const rightTime = right.expiry?.getTime() ?? Number.MAX_SAFE_INTEGER
+      return leftTime - rightTime
+    })
+
+  const earliest = datedChecks[0]
+  if (earliest?.expiry && earliest.expiry < today) {
+    return {
+      label: "ID",
+      value: "Expired",
+      tone: "red",
+      icon: <IdIcon />,
+    }
+  }
+
+  if (earliest?.expiry && earliest.expiry <= thirtyDaysFromNow) {
+    return {
+      label: "ID",
+      value: "Expiring",
+      tone: "amber",
+      icon: <IdIcon />,
+    }
+  }
+
+  return {
+    label: "ID",
+    value: "Current",
+    tone: "green",
+    icon: <IdIcon />,
+  }
+}
+
+function getAuthorityIndicator(): HeaderIndicator {
+  return {
+    label: "Authority",
+    value: "Missing",
+    tone: "red",
+    icon: <AuthorityIcon />,
+  }
+}
+
+function getNextEngagementIndicator(engagements: TimelineEngagement[]): HeaderIndicator | null {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const nextEngagement = engagements
+    .map((engagement) => {
+      const candidateDate = engagement.openedAt ?? engagement.startedAt
+      const parsed = candidateDate ? new Date(candidateDate) : null
+      return parsed && !Number.isNaN(parsed.getTime()) ? { engagement, parsed } : null
+    })
+    .filter((item): item is { engagement: TimelineEngagement; parsed: Date } => Boolean(item))
+    .filter((item) => item.parsed >= today)
+    .sort((left, right) => left.parsed.getTime() - right.parsed.getTime())[0]
+
+  if (!nextEngagement) {
+    return null
+  }
+
+  return {
+    label: nextEngagement.engagement.source?.toUpperCase() === "CALENDLY" ? "Next meeting" : "Next review",
+    value: formatDate(nextEngagement.parsed.toISOString()),
+    tone: "muted",
+    icon: <CalendarIcon />,
+  }
+}
+
 function formatTimelineTimestamp(value: string) {
   if (value === "just-now") {
     return "Just now"
@@ -941,6 +1064,156 @@ function EditField({
   )
 }
 
+function HeaderStatusPill({ indicator }: { indicator: HeaderIndicator }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-[5px] rounded-[999px] border-[0.5px] px-[8px] py-[3px] text-[11px] ${getHeaderPillClasses(indicator.tone)}`}
+    >
+      {indicator.icon}
+      <span className="font-medium">{indicator.label}</span>
+      <span>{indicator.value}</span>
+    </span>
+  )
+}
+
+function ExpandableSection({
+  title,
+  action,
+  className = "",
+  children,
+}: {
+  title: string
+  action?: React.ReactNode
+  className?: string
+  children: React.ReactNode
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+
+  return (
+    <section className={`border-b-[0.5px] border-[#e5e7eb] bg-white ${className}`}>
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => setIsOpen((current) => !current)}
+          className="flex min-h-[42px] flex-1 items-center justify-between gap-3 py-[12px] text-left"
+          aria-expanded={isOpen}
+        >
+          <span className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">{title}</span>
+          <ChevronIcon isOpen={isOpen} />
+        </button>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
+      <div
+        className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+          isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+      >
+        <div className="overflow-hidden">
+          <div className="pb-4">{children}</div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ChevronIcon({ isOpen }: { isOpen: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      className={`h-3.5 w-3.5 shrink-0 text-[#9ca3af] transition-transform duration-200 ${
+        isOpen ? "rotate-180" : ""
+      }`}
+    >
+      <path
+        d="M4 6l4 4 4-4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function HeaderMiniIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
+      {children}
+    </svg>
+  )
+}
+
+function PhoneIcon() {
+  return (
+    <HeaderMiniIcon>
+      <path
+        d="M5.2 2.5 6.4 5c.2.4.1.9-.2 1.2l-.7.7a8 8 0 0 0 3.6 3.6l.7-.7c.3-.3.8-.4 1.2-.2l2.5 1.2c.5.2.8.7.7 1.2l-.2 1.2c-.1.5-.5.8-1 .8A11 11 0 0 1 2 3c0-.5.3-.9.8-1l1.2-.2c.5-.1 1 .2 1.2.7Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </HeaderMiniIcon>
+  )
+}
+
+function MeetingIcon() {
+  return (
+    <HeaderMiniIcon>
+      <path
+        d="M3 5.5h10M5 2.5v2m6-2v2M3.5 3.5h9A1.5 1.5 0 0 1 14 5v7a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V5a1.5 1.5 0 0 1 1.5-1.5Zm2 5h2m2 0h2m-6 2.5h2"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </HeaderMiniIcon>
+  )
+}
+
+function IdIcon() {
+  return (
+    <HeaderMiniIcon>
+      <path
+        d="M3 4h10v8H3V4Zm2.5 5.5h2m2-3h2m-2 2h2M5.5 7a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm-1.8 3a2 2 0 0 1 3.6 0"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </HeaderMiniIcon>
+  )
+}
+
+function AuthorityIcon() {
+  return (
+    <HeaderMiniIcon>
+      <path
+        d="M8 2.5 12.5 4v3.5c0 2.8-1.8 5-4.5 6-2.7-1-4.5-3.2-4.5-6V4L8 2.5Zm-2 5 1.4 1.4L10.3 6"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </HeaderMiniIcon>
+  )
+}
+
+function CalendarIcon() {
+  return (
+    <HeaderMiniIcon>
+      <path
+        d="M3.5 3.5h9A1.5 1.5 0 0 1 14 5v7a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V5a1.5 1.5 0 0 1 1.5-1.5Zm.5 3h8M5.5 2.5v2m5-2v2"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </HeaderMiniIcon>
+  )
+}
+
 function NoteIcon() {
   return (
     <div className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-[#FEF0E7] text-[#C45F1A]">
@@ -1129,6 +1402,14 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     Number.isFinite(riskScoreValue) && riskScoreValue >= 0 && riskScoreValue <= 100
       ? scoreToAllocation(riskScoreValue)
       : null
+  const idDocumentIndicator = getIdDocumentIndicator(verificationChecks)
+  const authorityIndicator = getAuthorityIndicator()
+  const nextEngagementIndicator = getNextEngagementIndicator(localEngagements)
+  const headerIndicators = [
+    idDocumentIndicator,
+    authorityIndicator,
+    ...(nextEngagementIndicator ? [nextEngagementIndicator] : []),
+  ]
 
   const loadEmailLogs = useCallback(async () => {
     setIsLoadingEmailLogs(true)
@@ -2934,79 +3215,119 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <header className="flex items-start justify-between border-b-[0.5px] border-[#e5e7eb] bg-white px-5 py-[14px]">
-        <div className="space-y-2">
-          <Link href="/clients" className="inline-flex text-[12px] text-[#9ca3af]">
-            {"\u2190"} Clients
-          </Link>
-          <div className="flex items-center gap-2">
-            <h1 className="text-[17px] font-semibold text-[#113238]">{clientData.displayName}</h1>
-            <span
-              className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${getStatusClasses(clientData.status)}`}
-            >
-              {clientData.status}
-            </span>
+      <header className="border-b-[0.5px] border-[#e5e7eb] bg-white px-5 py-[12px]">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 space-y-2">
+            <Link href="/clients" className="inline-flex text-[12px] text-[#9ca3af]">
+              {"\u2190"} Clients
+            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-[18px] font-semibold leading-tight text-[#113238]">{clientData.displayName}</h1>
+              <span
+                className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${getStatusClasses(clientData.status)}`}
+              >
+                {clientData.status}
+              </span>
+              {serviceTier ? (
+                <span
+                  className={`inline-flex rounded-[999px] px-[8px] py-[3px] text-[11px] ${getClassificationClasses(serviceTier)}`}
+                >
+                  {formatClassificationValue(serviceTier)}
+                </span>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[#6b7280]">
+              <span>{clientData.household?.name ?? "No household"}</span>
+              <span>Lifecycle: {lifecycleStage ? formatClassificationValue(lifecycleStage) : "Not set"}</span>
+              <span>{clientData.resolvedEmail ?? "No email"}</span>
+              <span>{clientData.resolvedMobile ?? "No mobile"}</span>
+              <span>Adviser: Andrew Rowan</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {headerIndicators.map((indicator) => (
+                <HeaderStatusPill key={`${indicator.label}-${indicator.value}`} indicator={indicator} />
+              ))}
+            </div>
           </div>
-          <p className="text-[12px] text-[#6b7280]">Adviser: Andrew Rowan</p>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleStartEditing}
-            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
-          >
-            Edit
-          </button>
-          <DeleteClientButton clientId={clientData.id} clientName={clientData.displayName} />
-          <button
-            type="button"
-            onClick={() => setIsEmailTemplateModalOpen(true)}
-            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
-          >
-            Email
-          </button>
-          <button
-            type="button"
-            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
-          >
-            SMS
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenIncomeDrawer}
-            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
-          >
-            Income
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenAssetsDrawer}
-            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
-          >
-            Assets
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenLiabilitiesDrawer}
-            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
-          >
-            Liabilities
-          </button>
-          <button
-            type="button"
-            onClick={openNotePanel}
-            className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white"
-          >
-            + Note
-          </button>
+          <div className="flex flex-wrap items-center justify-start gap-2 lg:justify-end">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setEmailToast({ kind: "warning", message: "+ Phone Call will be wired in Prompt 5" })
+                }
+                className="inline-flex items-center gap-[6px] rounded-[7px] border-[0.5px] border-[#113238] bg-[#113238] px-[10px] py-[5px] text-[12px] text-white"
+              >
+                <PhoneIcon />
+                + Phone Call
+              </button>
+              <button
+                type="button"
+                onClick={() => setEmailToast({ kind: "warning", message: "+ Meeting will be wired in Prompt 5" })}
+                className="inline-flex items-center gap-[6px] rounded-[7px] border-[0.5px] border-[#113238] bg-[#113238] px-[10px] py-[5px] text-[12px] text-white"
+              >
+                <MeetingIcon />
+                + Meeting
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleStartEditing}
+              className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+            >
+              Edit
+            </button>
+            <DeleteClientButton clientId={clientData.id} clientName={clientData.displayName} />
+            <button
+              type="button"
+              onClick={() => setIsEmailTemplateModalOpen(true)}
+              className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+            >
+              Email
+            </button>
+            <button
+              type="button"
+              className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+            >
+              SMS
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenIncomeDrawer}
+              className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+            >
+              Income
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenAssetsDrawer}
+              className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+            >
+              Assets
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenLiabilitiesDrawer}
+              className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+            >
+              Liabilities
+            </button>
+            <button
+              type="button"
+              onClick={openNotePanel}
+              className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white"
+            >
+              + Note
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="min-h-full w-[250px] overflow-y-auto border-r-[0.5px] border-[#e5e7eb] bg-white p-4">
-          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
-            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Contact</h2>
+      <div className="flex-1 overflow-y-auto bg-[#F7F9FB]">
+        <div className="space-y-4 px-[18px] py-[14px]">
+          <div className="flex flex-col rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white px-4">
+          <ExpandableSection title="Contact" className="order-2">
             <div className="space-y-[10px]">
               {isEditing ? (
                 <>
@@ -3045,10 +3366,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 value={clientData.resolvedPreferredContactMethod ?? null}
               />
             </div>
-          </section>
+          </ExpandableSection>
 
-          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
-            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Address</h2>
+          <ExpandableSection title="Address" className="order-3">
             {isEditing && otherHouseholdMembers.length > 0 ? (
               <div className="mb-[10px] space-y-1">
                 {otherHouseholdMembers.map((member) => (
@@ -3134,10 +3454,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             ) : (
               <p className="text-[11px] text-[#9ca3af]">No address on file</p>
             )}
-          </section>
+          </ExpandableSection>
 
-          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
-            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Household</h2>
+          <ExpandableSection title="Household" className="order-4">
             {clientData.household ? (
               <div className="space-y-[10px]">
                 <p className="text-[12px] font-medium text-[#113238]">{clientData.household.name}</p>
@@ -3185,10 +3504,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 ) : null}
               </div>
             )}
-          </section>
+          </ExpandableSection>
 
-          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
-            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Personal</h2>
+          <ExpandableSection title="Personal details" className="order-1">
             <div className="space-y-[10px]">
               {isEditing ? (
                 <>
@@ -3243,10 +3561,136 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 </>
               )}
             </div>
-          </section>
+            <div className="mt-4 border-t-[0.5px] border-[#f0f0f0] pt-4">
+              <div className="mb-[10px] flex items-center justify-between">
+                <h3 className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Identity</h3>
+                <button
+                  type="button"
+                  onClick={handleOpenAddIdForm}
+                  className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                >
+                  + Add ID
+                </button>
+              </div>
 
-          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
-            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Employment</h2>
+              {isAddIdFormOpen ? (
+                <div className="mb-3 space-y-[10px] rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-[10px]">
+                  <EditField label="Document type">
+                    <select
+                      value={addIdForm.documentType}
+                      onChange={(event) => updateAddIdField("documentType", event.target.value as VerificationDocumentType)}
+                      className={inputClassName}
+                    >
+                      {verificationDocumentTypeOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </EditField>
+
+                  <EditField label="Document reference">
+                    <input
+                      value={addIdForm.documentReference}
+                      onChange={(event) => updateAddIdField("documentReference", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+
+                  <EditField label="Expiry date">
+                    <input
+                      type="date"
+                      value={addIdForm.expiryDate}
+                      onChange={(event) => updateAddIdField("expiryDate", event.target.value)}
+                      className={inputClassName}
+                    />
+                  </EditField>
+
+                  <EditField label="Result">
+                    <select
+                      value={addIdForm.result}
+                      onChange={(event) => updateAddIdField("result", event.target.value as VerificationResult)}
+                      className={inputClassName}
+                    >
+                      {verificationResultOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </EditField>
+
+                  <EditField label="Notes (optional)">
+                    <textarea
+                      value={addIdForm.notes}
+                      onChange={(event) => updateAddIdField("notes", event.target.value)}
+                      className={`${inputClassName} min-h-[70px] resize-y`}
+                    />
+                  </EditField>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveVerificationCheck}
+                      disabled={isSavingIdVerification}
+                      className="rounded-[7px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white disabled:opacity-60"
+                    >
+                      {isSavingIdVerification ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelAddIdForm}
+                      className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {verificationChecks.length === 0 ? (
+                <p className="text-[12px] text-[#9ca3af]">No ID documents on file</p>
+              ) : (
+                <div className="space-y-2">
+                  {verificationChecks.map((check) => {
+                    const result = formatVerificationResult(check.result)
+                    const expiryState = getExpiryState(check.expiryDate)
+
+                    return (
+                      <div key={check.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-[10px]">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[12px] font-medium text-[#113238]">{formatDocumentType(check.documentType)}</p>
+                          <span
+                            className={`inline-flex rounded-[999px] px-[8px] py-[2px] text-[10px] uppercase ${getVerificationResultBadgeClasses(result)}`}
+                          >
+                            {result}
+                          </span>
+                        </div>
+
+                        <p className="mt-1 text-[12px] text-[#6b7280]">
+                          {check.documentReference?.trim()
+                            ? `Reference: ${check.documentReference}`
+                            : "Reference not provided"}
+                        </p>
+
+                        {check.expiryDate ? (
+                          <p className={`mt-1 text-[12px] ${getExpiryTextClass(expiryState)}`}>
+                            Expires {formatDate(check.expiryDate)}
+                          </p>
+                        ) : null}
+
+                        <p className="mt-1 text-[11px] text-[#9ca3af]">verified {formatDate(check.verifiedAt)}</p>
+
+                        {check.notes ? <p className="mt-1 text-[11px] text-[#6b7280]">{check.notes}</p> : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </ExpandableSection>
+
+          <ExpandableSection title="Employment" className="order-5">
             {isEditing ? (
               <div className="space-y-[10px]">
                 <EditField label="Employment status">
@@ -3328,10 +3772,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             ) : (
               <p className="text-[12px] text-[#9ca3af]">No employment on file</p>
             )}
-          </section>
+          </ExpandableSection>
 
-          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
-            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Risk Profile</h2>
+          <ExpandableSection title="Risk Profile" className="order-6">
 
             {clientData.riskProfile ? (
               <div className="space-y-2">
@@ -3474,138 +3917,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 </div>
               </div>
             ) : null}
-          </section>
+          </ExpandableSection>
 
-          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
-            <div className="mb-[10px] flex items-center justify-between">
-              <h2 className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Identity</h2>
-              <button
-                type="button"
-                onClick={handleOpenAddIdForm}
-                className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
-              >
-                + Add ID
-              </button>
-            </div>
-
-            {isAddIdFormOpen ? (
-              <div className="mb-3 space-y-[10px] rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-[10px]">
-                <EditField label="Document type">
-                  <select
-                    value={addIdForm.documentType}
-                    onChange={(event) => updateAddIdField("documentType", event.target.value as VerificationDocumentType)}
-                    className={inputClassName}
-                  >
-                    {verificationDocumentTypeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </EditField>
-
-                <EditField label="Document reference">
-                  <input
-                    value={addIdForm.documentReference}
-                    onChange={(event) => updateAddIdField("documentReference", event.target.value)}
-                    className={inputClassName}
-                  />
-                </EditField>
-
-                <EditField label="Expiry date">
-                  <input
-                    type="date"
-                    value={addIdForm.expiryDate}
-                    onChange={(event) => updateAddIdField("expiryDate", event.target.value)}
-                    className={inputClassName}
-                  />
-                </EditField>
-
-                <EditField label="Result">
-                  <select
-                    value={addIdForm.result}
-                    onChange={(event) => updateAddIdField("result", event.target.value as VerificationResult)}
-                    className={inputClassName}
-                  >
-                    {verificationResultOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </EditField>
-
-                <EditField label="Notes (optional)">
-                  <textarea
-                    value={addIdForm.notes}
-                    onChange={(event) => updateAddIdField("notes", event.target.value)}
-                    className={`${inputClassName} min-h-[70px] resize-y`}
-                  />
-                </EditField>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSaveVerificationCheck}
-                    disabled={isSavingIdVerification}
-                    className="rounded-[7px] border-[0.5px] border-[#FF8C42] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white disabled:opacity-60"
-                  >
-                    {isSavingIdVerification ? "Saving..." : "Save"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCancelAddIdForm}
-                    className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {verificationChecks.length === 0 ? (
-              <p className="text-[12px] text-[#9ca3af]">No ID documents on file</p>
-            ) : (
-              <div className="space-y-2">
-                {verificationChecks.map((check) => {
-                  const result = formatVerificationResult(check.result)
-                  const expiryState = getExpiryState(check.expiryDate)
-
-                  return (
-                    <div key={check.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-[10px]">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[12px] font-medium text-[#113238]">{formatDocumentType(check.documentType)}</p>
-                        <span
-                          className={`inline-flex rounded-[999px] px-[8px] py-[2px] text-[10px] uppercase ${getVerificationResultBadgeClasses(result)}`}
-                        >
-                          {result}
-                        </span>
-                      </div>
-
-                      <p className="mt-1 text-[12px] text-[#6b7280]">
-                        {check.documentReference?.trim()
-                          ? `Reference: ${check.documentReference}`
-                          : "Reference not provided"}
-                      </p>
-
-                      {check.expiryDate ? (
-                        <p className={`mt-1 text-[12px] ${getExpiryTextClass(expiryState)}`}>
-                          Expires {formatDate(check.expiryDate)}
-                        </p>
-                      ) : null}
-
-                      <p className="mt-1 text-[11px] text-[#9ca3af]">verified {formatDate(check.verifiedAt)}</p>
-
-                      {check.notes ? <p className="mt-1 text-[11px] text-[#6b7280]">{check.notes}</p> : null}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </section>
-
-          <section className="mb-6 border-b-[0.5px] border-[#f0f0f0] pb-6">
-            <h2 className="mb-[10px] text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Service</h2>
+          <ExpandableSection title="Service" className="order-7">
             <div className="space-y-[10px]">
               <div className="relative space-y-[6px]">
               <p className="text-[11px] text-[#9ca3af]">Lifecycle stage</p>
@@ -3700,10 +4014,16 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
                 ) : null}
               </div>
             </div>
-          </section>
+          </ExpandableSection>
+
+          <ExpandableSection title="Important information" className="order-8">
+            <p className="text-[12px] text-[#6b7280]">
+              Sensitive credentials reveal coming in a future round
+            </p>
+          </ExpandableSection>
 
           {isEditing ? (
-            <div className="mt-6">
+            <div className="order-9 mt-4 rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-[#FAFBFC] p-3">
               <button
                 type="button"
                 onClick={handleSaveChanges}
@@ -3721,9 +4041,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               </button>
             </div>
           ) : null}
-        </aside>
+        </div>
 
-        <section className="flex flex-1 flex-col overflow-y-auto bg-[#F7F9FB] px-[18px] py-[14px]">
+        <section className="flex min-h-[560px] flex-col">
           <ClientJourney
             clientId={journeyClientId}
             clientScope={journeyClientScope}
@@ -4316,6 +4636,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             <DocumentsTab clientId={clientData.id} />
           )}
         </section>
+      </div>
       </div>
 
       <div
