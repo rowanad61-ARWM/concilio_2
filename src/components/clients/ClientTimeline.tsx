@@ -502,7 +502,7 @@ function TimelineExpansion({
   )
 }
 
-export default function ClientTimeline({ party_id }: { party_id: string }) {
+export default function ClientTimeline({ party_id, refreshKey = 0 }: { party_id: string; refreshKey?: number }) {
   const [activeFilter, setActiveFilter] = useState<TimelineFilterValue>("all")
   const [searchInput, setSearchInput] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
@@ -601,7 +601,7 @@ export default function ClientTimeline({ party_id }: { party_id: string }) {
 
   useEffect(() => {
     void loadTimeline()
-  }, [loadTimeline])
+  }, [loadTimeline, refreshKey])
 
   async function loadEntryDetail(entryId: string) {
     if (detailsById[entryId]) {

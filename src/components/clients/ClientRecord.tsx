@@ -8,6 +8,9 @@ import ClientTimeline from "@/components/clients/ClientTimeline"
 import DeleteClientButton from "@/components/clients/DeleteClientButton"
 import ClientEmailTemplateModal from "@/components/clients/ClientEmailTemplateModal"
 import DocumentsTab from "@/components/clients/DocumentsTab"
+import QuickAddMeetingModal from "@/components/clients/QuickAddMeetingModal"
+import QuickAddNoteModal from "@/components/clients/QuickAddNoteModal"
+import QuickAddPhoneCallModal from "@/components/clients/QuickAddPhoneCallModal"
 import TaskModal, {
   TASK_STATUS_OPTIONS,
   type EditableTaskEntry,
@@ -28,7 +31,7 @@ type ClientRecordProps = {
 
 type TimelineFilter = "all" | "emails" | "tasks" | "notes" | "docs"
 type ClientDetailTab = "timeline" | "documents"
-type NoteCategory = "general" | "meeting" | "phone_call" | "email" | "compliance" | "other"
+type QuickAddKind = "phone_call" | "meeting" | "file_note"
 type EngagementType = (typeof ENGAGEMENT_TYPE_VALUES)[number]
 type LifecycleStage = "prospect" | "engagement" | "advice" | "implementation" | "client" | "lost" | "ceased"
 type ServiceTier = "transaction" | "cashflow" | "wealth" | "wealth_plus"
@@ -222,15 +225,6 @@ const timelineFilters: { label: string; value: TimelineFilter }[] = [
   { label: "Tasks", value: "tasks" },
   { label: "Notes", value: "notes" },
   { label: "Docs", value: "docs" },
-]
-
-const noteCategories: { label: string; value: NoteCategory }[] = [
-  { label: "General", value: "general" },
-  { label: "Meeting", value: "meeting" },
-  { label: "Phone Call", value: "phone_call" },
-  { label: "Email", value: "email" },
-  { label: "Compliance", value: "compliance" },
-  { label: "Other", value: "other" },
 ]
 
 const relationshipOptions = ["single", "married", "de_facto", "separated", "divorced", "widowed"]
@@ -1173,6 +1167,20 @@ function MeetingIcon() {
   )
 }
 
+function NoteHeaderIcon() {
+  return (
+    <HeaderMiniIcon>
+      <path
+        d="M5 2.5h4l2 2v7A1.5 1.5 0 0 1 9.5 13h-4A1.5 1.5 0 0 1 4 11.5v-7A1.5 1.5 0 0 1 5.5 3H9m0-.5V5h2.5M6 8h4M6 10.5h3"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </HeaderMiniIcon>
+  )
+}
+
 function IdIcon() {
   return (
     <HeaderMiniIcon>
@@ -1279,23 +1287,20 @@ function TaskIcon() {
   )
 }
 
-export default function ClientRecord({ client, notes }: ClientRecordProps) {
+export default function ClientRecord({ client }: ClientRecordProps) {
   const [clientData, setClientData] = useState(client)
   const [activeDetailTab, setActiveDetailTab] = useState<ClientDetailTab>("timeline")
   const [verificationChecks, setVerificationChecks] = useState<VerificationCheck[]>(client.verificationChecks)
   const [activeFilter, setActiveFilter] = useState<TimelineFilter>("all")
-  const [isNotePanelOpen, setIsNotePanelOpen] = useState(false)
+  const [quickAddOpen, setQuickAddOpen] = useState<QuickAddKind | null>(null)
+  const [timelineRefreshKey, setTimelineRefreshKey] = useState(0)
   const [isEngagementPanelOpen, setIsEngagementPanelOpen] = useState(false)
-  const [noteCategory, setNoteCategory] = useState<NoteCategory>("general")
-  const [noteBody, setNoteBody] = useState("")
-  const [isSaving, setIsSaving] = useState(false)
   const [isSavingEngagement, setIsSavingEngagement] = useState(false)
   const [isSavingIncome, setIsSavingIncome] = useState(false)
   const [isSavingProperty, setIsSavingProperty] = useState(false)
   const [isSavingAccount, setIsSavingAccount] = useState(false)
   const [isSavingLiability, setIsSavingLiability] = useState(false)
   const [isSavingRiskProfile, setIsSavingRiskProfile] = useState(false)
-  const [localNotes, setLocalNotes] = useState(notes)
   const [localEngagements, setLocalEngagements] = useState<TimelineEngagement[]>(client.engagements)
   const [incomeItems, setIncomeItems] = useState<IncomeItem[]>([])
   const [isIncomeDrawerOpen, setIsIncomeDrawerOpen] = useState(false)
@@ -1355,7 +1360,6 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     ? `${clientData.person.legalGivenName} ${clientData.person.legalFamilyName}`.trim()
     : null
 
-  const visibleNotes = activeFilter === "all" || activeFilter === "notes" ? localNotes : []
   const visibleEngagements = activeFilter === "all" ? localEngagements : []
   const visibleEmails = activeFilter === "all" || activeFilter === "emails" ? emailLogs : []
   const visibleTasks = activeFilter === "all" || activeFilter === "tasks" ? tasks : []
@@ -1365,12 +1369,6 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
       id: `engagement-${engagement.id}`,
       timestamp: engagement.startedAt,
       engagement,
-    })),
-    ...visibleNotes.map((note) => ({
-      kind: "note" as const,
-      id: `note-${note.id}`,
-      timestamp: note.createdAt,
-      note,
     })),
     ...visibleEmails.map((log) => ({
       kind: "email" as const,
@@ -2029,52 +2027,6 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     value: RiskProfileFormState[Key],
   ) {
     setRiskProfileForm((current) => ({ ...current, [key]: value }))
-  }
-
-  async function handleSaveNote() {
-    if (!noteBody.trim()) {
-      return
-    }
-
-    setIsSaving(true)
-
-    try {
-      const response = await fetch("/api/notes", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          partyId: clientData.id,
-          body: noteBody,
-          category: noteCategory,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to save note")
-      }
-
-      const createdNote = await response.json()
-
-      setLocalNotes((currentNotes) => [
-        {
-          id: createdNote.id,
-          noteType: createdNote.note_type,
-          text: createdNote.text,
-          createdAt: "just-now",
-        },
-        ...currentNotes,
-      ])
-      setNoteBody("")
-      setNoteCategory("general")
-      setIsNotePanelOpen(false)
-      setActiveFilter("notes")
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setIsSaving(false)
-    }
   }
 
   async function handleSaveEngagement() {
@@ -2935,30 +2887,15 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
     }
   }
 
-  function openNotePanel() {
-    setActiveDetailTab("timeline")
-    setIsNotePanelOpen(true)
-    setIsEngagementPanelOpen(false)
-    setActiveFilter("notes")
-  }
-
-  function handleCancelNote() {
-    setNoteBody("")
-    setNoteCategory("general")
-    setIsNotePanelOpen(false)
-  }
-
   function openEngagementPanel() {
     setActiveDetailTab("timeline")
     setIsEngagementPanelOpen(true)
-    setIsNotePanelOpen(false)
     setActiveFilter("all")
   }
 
   function openTaskModalForCreate() {
     setActiveDetailTab("timeline")
     setIsEngagementPanelOpen(false)
-    setIsNotePanelOpen(false)
     setTaskModalMode("create")
     setEditingTask(null)
     setIsTaskModalOpen(true)
@@ -3175,10 +3112,19 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
   function openDocumentsTab() {
     setActiveDetailTab("documents")
     setIsEngagementPanelOpen(false)
-    setIsNotePanelOpen(false)
   }
 
   function openTimelineTab() {
+    setActiveDetailTab("timeline")
+  }
+
+  function openQuickAdd(kind: QuickAddKind) {
+    setActiveDetailTab("timeline")
+    setQuickAddOpen(kind)
+  }
+
+  function handleQuickAddSuccess() {
+    setTimelineRefreshKey((current) => current + 1)
     setActiveDetailTab("timeline")
   }
 
@@ -3247,9 +3193,7 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() =>
-                  setEmailToast({ kind: "warning", message: "+ Phone Call will be wired in Prompt 5" })
-                }
+                onClick={() => openQuickAdd("phone_call")}
                 className="inline-flex items-center gap-[6px] rounded-[7px] border-[0.5px] border-[#113238] bg-[#113238] px-[10px] py-[5px] text-[12px] text-white"
               >
                 <PhoneIcon />
@@ -3257,11 +3201,19 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               </button>
               <button
                 type="button"
-                onClick={() => setEmailToast({ kind: "warning", message: "+ Meeting will be wired in Prompt 5" })}
+                onClick={() => openQuickAdd("meeting")}
                 className="inline-flex items-center gap-[6px] rounded-[7px] border-[0.5px] border-[#113238] bg-[#113238] px-[10px] py-[5px] text-[12px] text-white"
               >
                 <MeetingIcon />
                 + Meeting
+              </button>
+              <button
+                type="button"
+                onClick={() => openQuickAdd("file_note")}
+                className="inline-flex items-center gap-[6px] rounded-[7px] border-[0.5px] border-[#113238] bg-[#113238] px-[10px] py-[5px] text-[12px] text-white"
+              >
+                <NoteHeaderIcon />
+                + Note
               </button>
             </div>
             <button
@@ -3305,13 +3257,6 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
               className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-white px-[10px] py-[5px] text-[12px] text-[#113238]"
             >
               Liabilities
-            </button>
-            <button
-              type="button"
-              onClick={() => setEmailToast({ kind: "warning", message: "+ Note will be wired in Prompt 5" })}
-              className="rounded-[7px] border-[0.5px] border-[#e5e7eb] bg-[#FF8C42] px-[10px] py-[5px] text-[12px] text-white"
-            >
-              + Note
             </button>
           </div>
         </div>
@@ -4071,7 +4016,9 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
             </button>
           </div>
 
-          {activeDetailTab === "timeline" && <ClientTimeline party_id={clientData.id} />}
+          {activeDetailTab === "timeline" && (
+            <ClientTimeline party_id={clientData.id} refreshKey={timelineRefreshKey} />
+          )}
 
           {activeDetailTab === "documents" && (
             <DocumentsTab clientId={clientData.id} />
@@ -4611,6 +4558,28 @@ export default function ClientRecord({ client, notes }: ClientRecordProps) {
         clientName={clientData.displayName}
         onToast={setEmailToast}
         onSent={() => undefined}
+      />
+
+      <QuickAddPhoneCallModal
+        partyId={clientData.id}
+        clientDisplayName={clientData.displayName}
+        isOpen={quickAddOpen === "phone_call"}
+        onClose={() => setQuickAddOpen(null)}
+        onSuccess={handleQuickAddSuccess}
+      />
+      <QuickAddMeetingModal
+        partyId={clientData.id}
+        clientDisplayName={clientData.displayName}
+        isOpen={quickAddOpen === "meeting"}
+        onClose={() => setQuickAddOpen(null)}
+        onSuccess={handleQuickAddSuccess}
+      />
+      <QuickAddNoteModal
+        partyId={clientData.id}
+        clientDisplayName={clientData.displayName}
+        isOpen={quickAddOpen === "file_note"}
+        onClose={() => setQuickAddOpen(null)}
+        onSuccess={handleQuickAddSuccess}
       />
 
       <TaskModal
