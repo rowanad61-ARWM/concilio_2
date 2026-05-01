@@ -79,6 +79,27 @@ export type EstateExecutor = {
   notes: string | null
 }
 
+export type EstateBeneficiary = {
+  id: string
+  entityType: string
+  firstName: string | null
+  surname: string | null
+  preferredName: string | null
+  ageOfEntitlement: number | null
+  notes: string | null
+}
+
+export type PowerOfAttorney = {
+  id: string
+  poaType: string
+  entityType: string
+  location: string | null
+  firstName: string | null
+  surname: string | null
+  preferredName: string | null
+  notes: string | null
+}
+
 export type ClientDetail = {
   id: string
   displayName: string
@@ -99,6 +120,8 @@ export type ClientDetail = {
   } | null
   professionalRelationships: ProfessionalRelationship[]
   estateExecutors: EstateExecutor[]
+  estateBeneficiaries: EstateBeneficiary[]
+  powersOfAttorney: PowerOfAttorney[]
   classification: {
     serviceTier: string | null
     lifecycleStage: string | null

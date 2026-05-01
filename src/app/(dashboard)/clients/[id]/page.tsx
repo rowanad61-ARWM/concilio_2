@@ -61,6 +61,8 @@ export default async function ClientRecordPage({
     riskProfile,
     professionalRelationships,
     estateExecutors,
+    estateBeneficiaries,
+    powersOfAttorney,
   ] = await Promise.all([
     db.party.findUnique({
       where: { id },
@@ -137,6 +139,32 @@ export default async function ClientRecordPage({
       ],
     }),
     db.estate_executor.findMany({
+      where: {
+        person_id: id,
+      },
+      orderBy: [
+        {
+          created_at: "asc",
+        },
+        {
+          id: "asc",
+        },
+      ],
+    }),
+    db.estate_beneficiary.findMany({
+      where: {
+        person_id: id,
+      },
+      orderBy: [
+        {
+          created_at: "asc",
+        },
+        {
+          id: "asc",
+        },
+      ],
+    }),
+    db.power_of_attorney.findMany({
       where: {
         person_id: id,
       },
@@ -267,6 +295,25 @@ export default async function ClientRecordPage({
       surname: executor.surname,
       preferredName: executor.preferred_name,
       notes: executor.notes,
+    })),
+    estateBeneficiaries: estateBeneficiaries.map((beneficiary) => ({
+      id: beneficiary.id,
+      entityType: beneficiary.entity_type,
+      firstName: beneficiary.first_name,
+      surname: beneficiary.surname,
+      preferredName: beneficiary.preferred_name,
+      ageOfEntitlement: beneficiary.age_of_entitlement,
+      notes: beneficiary.notes,
+    })),
+    powersOfAttorney: powersOfAttorney.map((powerOfAttorney) => ({
+      id: powerOfAttorney.id,
+      poaType: powerOfAttorney.poa_type,
+      entityType: powerOfAttorney.entity_type,
+      location: powerOfAttorney.location,
+      firstName: powerOfAttorney.first_name,
+      surname: powerOfAttorney.surname,
+      preferredName: powerOfAttorney.preferred_name,
+      notes: powerOfAttorney.notes,
     })),
     classification: party.client_classification
       ? {

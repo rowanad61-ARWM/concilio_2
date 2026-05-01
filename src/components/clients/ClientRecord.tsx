@@ -13,12 +13,16 @@ import DocumentsTab from "@/components/clients/DocumentsTab"
 import ContactSectionModal from "@/components/clients/ContactSectionModal"
 import DependantDeleteConfirm from "@/components/clients/DependantDeleteConfirm"
 import DependantModal from "@/components/clients/DependantModal"
+import EstateBeneficiaryDeleteConfirm from "@/components/clients/EstateBeneficiaryDeleteConfirm"
+import EstateBeneficiaryModal from "@/components/clients/EstateBeneficiaryModal"
 import EstateExecutorDeleteConfirm from "@/components/clients/EstateExecutorDeleteConfirm"
 import EstateExecutorModal from "@/components/clients/EstateExecutorModal"
 import EstateScalarsModal from "@/components/clients/EstateScalarsModal"
 import EmploymentSectionModal from "@/components/clients/EmploymentSectionModal"
 import HouseholdSectionModal from "@/components/clients/HouseholdSectionModal"
 import PersonalSectionModal from "@/components/clients/PersonalSectionModal"
+import PowerOfAttorneyDeleteConfirm from "@/components/clients/PowerOfAttorneyDeleteConfirm"
+import PowerOfAttorneyModal from "@/components/clients/PowerOfAttorneyModal"
 import ProfessionalRelationshipDeleteConfirm from "@/components/clients/ProfessionalRelationshipDeleteConfirm"
 import ProfessionalRelationshipModal from "@/components/clients/ProfessionalRelationshipModal"
 import QuickAddMeetingModal from "@/components/clients/QuickAddMeetingModal"
@@ -39,7 +43,9 @@ import type {
   ClientAddress,
   ClientDetail,
   ClientHouseholdMember,
+  EstateBeneficiary,
   EstateExecutor,
+  PowerOfAttorney,
   ProfessionalRelationship,
   TimelineEngagement,
   TimelineNote,
@@ -65,6 +71,14 @@ type ProfessionalRelationshipModalState =
 type EstateExecutorModalState =
   | { mode: "create"; executor: null }
   | { mode: "edit"; executor: EstateExecutor }
+  | null
+type EstateBeneficiaryModalState =
+  | { mode: "create"; beneficiary: null }
+  | { mode: "edit"; beneficiary: EstateBeneficiary }
+  | null
+type PowerOfAttorneyModalState =
+  | { mode: "create"; powerOfAttorney: null }
+  | { mode: "edit"; powerOfAttorney: PowerOfAttorney }
   | null
 type EngagementType = (typeof ENGAGEMENT_TYPE_VALUES)[number]
 type LifecycleStage = "prospect" | "engagement" | "advice" | "implementation" | "client" | "lost" | "ceased"
@@ -1020,6 +1034,40 @@ function formatEstateExecutorEntityType(value: string) {
   }
 }
 
+function formatEstateBeneficiaryEntityType(value: string) {
+  switch (value) {
+    case "person":
+      return "Individual person"
+    case "charity":
+      return "Charity"
+    case "trust":
+      return "Trust"
+    case "estate":
+      return "Estate"
+    case "other":
+      return "Other"
+    default:
+      return formatCategory(value)
+  }
+}
+
+function formatPowerOfAttorneyType(value: string) {
+  switch (value) {
+    case "enduring":
+      return "Enduring"
+    case "general":
+      return "General"
+    case "medical":
+      return "Medical"
+    case "financial":
+      return "Financial"
+    case "other":
+      return "Other"
+    default:
+      return formatCategory(value)
+  }
+}
+
 function formatFuneralPlanStatus(value: string | null | undefined) {
   switch (value) {
     case "in_place":
@@ -1058,6 +1106,32 @@ function estateExecutorName(executor: EstateExecutor) {
   }
 
   return executor.preferredName?.trim() || "-"
+}
+
+function estateBeneficiaryName(beneficiary: EstateBeneficiary) {
+  const personName = [beneficiary.firstName, beneficiary.surname]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(" ")
+
+  if (personName) {
+    return personName
+  }
+
+  return beneficiary.preferredName?.trim() || "-"
+}
+
+function powerOfAttorneyName(powerOfAttorney: PowerOfAttorney) {
+  const personName = [powerOfAttorney.firstName, powerOfAttorney.surname]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(" ")
+
+  if (personName) {
+    return personName
+  }
+
+  return powerOfAttorney.preferredName?.trim() || "-"
 }
 
 function calculateAge(dateOfBirth: string | null) {
@@ -1384,6 +1458,10 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const [isEstateScalarsModalOpen, setIsEstateScalarsModalOpen] = useState(false)
   const [estateExecutorModalState, setEstateExecutorModalState] = useState<EstateExecutorModalState>(null)
   const [estateExecutorDeleteTarget, setEstateExecutorDeleteTarget] = useState<EstateExecutor | null>(null)
+  const [estateBeneficiaryModalState, setEstateBeneficiaryModalState] = useState<EstateBeneficiaryModalState>(null)
+  const [estateBeneficiaryDeleteTarget, setEstateBeneficiaryDeleteTarget] = useState<EstateBeneficiary | null>(null)
+  const [powerOfAttorneyModalState, setPowerOfAttorneyModalState] = useState<PowerOfAttorneyModalState>(null)
+  const [powerOfAttorneyDeleteTarget, setPowerOfAttorneyDeleteTarget] = useState<PowerOfAttorney | null>(null)
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0)
   const [isEngagementPanelOpen, setIsEngagementPanelOpen] = useState(false)
   const [isSavingEngagement, setIsSavingEngagement] = useState(false)
@@ -3120,6 +3198,22 @@ export default function ClientRecord({ client }: ClientRecordProps) {
     setEstateExecutorModalState({ mode: "edit", executor })
   }
 
+  function openCreateEstateBeneficiaryModal() {
+    setEstateBeneficiaryModalState({ mode: "create", beneficiary: null })
+  }
+
+  function openEditEstateBeneficiaryModal(beneficiary: EstateBeneficiary) {
+    setEstateBeneficiaryModalState({ mode: "edit", beneficiary })
+  }
+
+  function openCreatePowerOfAttorneyModal() {
+    setPowerOfAttorneyModalState({ mode: "create", powerOfAttorney: null })
+  }
+
+  function openEditPowerOfAttorneyModal(powerOfAttorney: PowerOfAttorney) {
+    setPowerOfAttorneyModalState({ mode: "edit", powerOfAttorney })
+  }
+
   function handleEstateSaved() {
     refreshClientData()
   }
@@ -3761,6 +3855,151 @@ export default function ClientRecord({ client }: ClientRecordProps) {
                   className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
                 >
                   + Add executor
+                </button>
+              </section>
+
+              <section className="space-y-3 border-t-[0.5px] border-[#f0f0f0] pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Beneficiaries</h3>
+                  <button
+                    type="button"
+                    onClick={openCreateEstateBeneficiaryModal}
+                    className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                  >
+                    + Add beneficiary
+                  </button>
+                </div>
+
+                {clientData.estateBeneficiaries.length > 0 ? (
+                  <div className="space-y-2">
+                    {clientData.estateBeneficiaries.map((beneficiary) => {
+                      const displayName = estateBeneficiaryName(beneficiary)
+                      const preferredName = beneficiary.preferredName?.trim() ?? ""
+                      const showPreferredName = Boolean(preferredName && preferredName !== displayName)
+                      const notes = truncateText(beneficiary.notes, 100)
+
+                      return (
+                        <div key={beneficiary.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                              <p className="text-[13px] font-medium text-[#113238]">
+                                {formatEstateBeneficiaryEntityType(beneficiary.entityType)}
+                              </p>
+                              <p className="text-[13px] text-[#113238]">{displayName}</p>
+                              {showPreferredName ? (
+                                <p className="text-[11px] text-[#6b7280]">Preferred: {preferredName}</p>
+                              ) : null}
+                              {beneficiary.ageOfEntitlement !== null ? (
+                                <p className="text-[11px] text-[#6b7280]">
+                                  Entitled at age {beneficiary.ageOfEntitlement}
+                                </p>
+                              ) : null}
+                              {notes ? <p className="text-[11px] text-[#6b7280]">{notes}</p> : null}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openEditEstateBeneficiaryModal(beneficiary)}
+                                className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEstateBeneficiaryDeleteTarget(beneficiary)}
+                                className="rounded-[6px] border-[0.5px] border-[#FCA5A5] bg-white px-[8px] py-[4px] text-[10px] text-[#B42318]"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[12px] text-[#9ca3af]">No beneficiaries recorded.</p>
+                )}
+
+                <button
+                  type="button"
+                  onClick={openCreateEstateBeneficiaryModal}
+                  className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                >
+                  + Add beneficiary
+                </button>
+              </section>
+
+              <section className="space-y-3 border-t-[0.5px] border-[#f0f0f0] pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Powers of attorney</h3>
+                  <button
+                    type="button"
+                    onClick={openCreatePowerOfAttorneyModal}
+                    className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                  >
+                    + Add power of attorney
+                  </button>
+                </div>
+
+                {clientData.powersOfAttorney.length > 0 ? (
+                  <div className="space-y-2">
+                    {clientData.powersOfAttorney.map((powerOfAttorney) => {
+                      const displayName = powerOfAttorneyName(powerOfAttorney)
+                      const preferredName = powerOfAttorney.preferredName?.trim() ?? ""
+                      const showPreferredName = Boolean(preferredName && preferredName !== displayName)
+                      const notes = truncateText(powerOfAttorney.notes, 100)
+
+                      return (
+                        <div key={powerOfAttorney.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                              <p className="text-[13px] font-medium text-[#113238]">
+                                {formatPowerOfAttorneyType(powerOfAttorney.poaType)} -{" "}
+                                {formatEstateExecutorEntityType(powerOfAttorney.entityType)}
+                              </p>
+                              <p className="text-[13px] text-[#113238]">{displayName}</p>
+                              {showPreferredName ? (
+                                <p className="text-[11px] text-[#6b7280]">Preferred: {preferredName}</p>
+                              ) : null}
+                              {powerOfAttorney.location ? (
+                                <p className="text-[11px] text-[#6b7280]">
+                                  Document location: {powerOfAttorney.location}
+                                </p>
+                              ) : null}
+                              {notes ? <p className="text-[11px] text-[#6b7280]">{notes}</p> : null}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openEditPowerOfAttorneyModal(powerOfAttorney)}
+                                className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPowerOfAttorneyDeleteTarget(powerOfAttorney)}
+                                className="rounded-[6px] border-[0.5px] border-[#FCA5A5] bg-white px-[8px] py-[4px] text-[10px] text-[#B42318]"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[12px] text-[#9ca3af]">No powers of attorney recorded.</p>
+                )}
+
+                <button
+                  type="button"
+                  onClick={openCreatePowerOfAttorneyModal}
+                  className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                >
+                  + Add power of attorney
                 </button>
               </section>
             </div>
@@ -4703,6 +4942,38 @@ export default function ClientRecord({ client }: ClientRecordProps) {
         executor={estateExecutorDeleteTarget}
         isOpen={Boolean(estateExecutorDeleteTarget)}
         onClose={() => setEstateExecutorDeleteTarget(null)}
+        onConfirmed={handleEstateSaved}
+      />
+      <EstateBeneficiaryModal
+        clientId={clientData.id}
+        mode={estateBeneficiaryModalState?.mode ?? "create"}
+        beneficiary={estateBeneficiaryModalState?.beneficiary ?? null}
+        isOpen={Boolean(estateBeneficiaryModalState)}
+        onClose={() => setEstateBeneficiaryModalState(null)}
+        onSaved={handleEstateSaved}
+      />
+      <EstateBeneficiaryDeleteConfirm
+        clientId={clientData.id}
+        clientDisplayName={clientData.displayName}
+        beneficiary={estateBeneficiaryDeleteTarget}
+        isOpen={Boolean(estateBeneficiaryDeleteTarget)}
+        onClose={() => setEstateBeneficiaryDeleteTarget(null)}
+        onConfirmed={handleEstateSaved}
+      />
+      <PowerOfAttorneyModal
+        clientId={clientData.id}
+        mode={powerOfAttorneyModalState?.mode ?? "create"}
+        powerOfAttorney={powerOfAttorneyModalState?.powerOfAttorney ?? null}
+        isOpen={Boolean(powerOfAttorneyModalState)}
+        onClose={() => setPowerOfAttorneyModalState(null)}
+        onSaved={handleEstateSaved}
+      />
+      <PowerOfAttorneyDeleteConfirm
+        clientId={clientData.id}
+        clientDisplayName={clientData.displayName}
+        powerOfAttorney={powerOfAttorneyDeleteTarget}
+        isOpen={Boolean(powerOfAttorneyDeleteTarget)}
+        onClose={() => setPowerOfAttorneyDeleteTarget(null)}
         onConfirmed={handleEstateSaved}
       />
 
