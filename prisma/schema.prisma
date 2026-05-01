@@ -270,6 +270,7 @@ model document {
   household_group   household_group?   @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   party             party?             @relation(fields: [owner_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   document_version  document_version[]
+  timeline_attachment timeline_attachment[]
 
   @@index([engagement_id], map: "idx_doc_engagement")
   @@index([household_id], map: "idx_doc_household")
@@ -553,6 +554,7 @@ model household_group {
   file_note             file_note[]
   user_account          user_account?           @relation(fields: [primary_adviser_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_hg_adviser")
   household_member      household_member[]
+  timeline_entry        timeline_entry[]
   workflow_instance     workflow_instance[]
 }
 
@@ -735,6 +737,7 @@ model party {
   relationship_relationship_to_party_idToparty                   relationship[]           @relation("relationship_to_party_idToparty")
   risk_profile                                                   risk_profile[]
   tax_residency                                                  tax_residency[]
+  timeline_entry                                                 timeline_entry[]
   verification_check                                             verification_check[]
   workflow_instance                                              workflow_instance[]
 
@@ -776,6 +779,11 @@ model person {
   mobile_phone             String?
   email_primary            String?
   email_alternate          String?
+  emergency_contact_name   String?
+  emergency_contact_relationship String?
+  emergency_contact_phone  String?
+  emergency_contact_email  String?
+  emergency_contact_notes  String?
   address_residential      Json?
   address_postal           Json?
   preferred_contact_method String?
@@ -978,6 +986,49 @@ model tax_residency {
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model timeline_entry {
+  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id             String                @db.Uuid
+  household_id         String?               @db.Uuid
+  kind                 String
+  source               String                @default("native")
+  external_ref         String?
+  external_designation String?
+  title                String
+  body                 String?
+  actor_user_id        String?               @db.Uuid
+  related_entity_type  String?
+  related_entity_id    String?
+  occurred_at          DateTime              @default(now()) @db.Timestamptz(6)
+  inserted_at          DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime              @default(now()) @updatedAt @db.Timestamptz(6)
+  metadata             Json?
+  party                party                 @relation(fields: [party_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  household_group      household_group?      @relation(fields: [household_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  actor_user           user_account?         @relation(fields: [actor_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  timeline_attachment  timeline_attachment[]
+
+  @@index([party_id, occurred_at(sort: Desc)], map: "idx_timeline_entry_party_occurred_desc")
+  @@index([kind], map: "idx_timeline_entry_kind")
+  @@index([source, external_ref], map: "idx_timeline_entry_source_external_ref")
+  @@index([related_entity_type, related_entity_id], map: "idx_timeline_entry_related_entity")
+}
+
+model timeline_attachment {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timeline_entry_id String         @db.Uuid
+  document_id       String?        @db.Uuid
+  filename          String
+  mime_type         String?
+  size_bytes        Int?
+  inserted_at       DateTime       @default(now()) @db.Timestamptz(6)
+  timeline_entry    timeline_entry @relation(fields: [timeline_entry_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  document          document?      @relation(fields: [document_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([timeline_entry_id], map: "idx_timeline_attachment_entry_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model user_account {
   id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   practice_id           String                  @db.Uuid
@@ -1000,6 +1051,7 @@ model user_account {
   workflow_spawned_task workflow_spawned_task[] @relation("workflow_spawned_task_outcome_set_by")
   taskNotes             TaskNote[]
   acknowledged_alerts   alert_instance[]        @relation("alert_instance_acknowledged_by_user")
+  timeline_entry        timeline_entry[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
