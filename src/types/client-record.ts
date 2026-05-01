@@ -51,6 +51,25 @@ export type ClientHouseholdMember = {
   legalFamilyName: string | null
 }
 
+export type ProfessionalRelationship = {
+  id: string
+  relationshipType: string
+  isAuthorised: boolean
+  authorisationExpiry: string | null
+  firstName: string | null
+  surname: string | null
+  company: string | null
+  phone: string | null
+  email: string | null
+  addressLine: string | null
+  addressSuburb: string | null
+  addressState: string | null
+  addressPostcode: string | null
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export type ClientDetail = {
   id: string
   displayName: string
@@ -69,6 +88,7 @@ export type ClientDetail = {
     role: string
     members: ClientHouseholdMember[]
   } | null
+  professionalRelationships: ProfessionalRelationship[]
   classification: {
     serviceTier: string | null
     lifecycleStage: string | null

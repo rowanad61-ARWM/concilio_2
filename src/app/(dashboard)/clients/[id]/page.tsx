@@ -52,7 +52,15 @@ export default async function ClientRecordPage({
 }) {
   const { id } = await params
 
-  const [party, fileNotes, householdMembership, verificationChecks, employmentProfile, riskProfile] = await Promise.all([
+  const [
+    party,
+    fileNotes,
+    householdMembership,
+    verificationChecks,
+    employmentProfile,
+    riskProfile,
+    professionalRelationships,
+  ] = await Promise.all([
     db.party.findUnique({
       where: { id },
       include: {
@@ -111,6 +119,19 @@ export default async function ClientRecordPage({
         },
         {
           created_at: "desc",
+        },
+      ],
+    }),
+    db.professional_relationship.findMany({
+      where: {
+        person_id: id,
+      },
+      orderBy: [
+        {
+          created_at: "asc",
+        },
+        {
+          id: "asc",
         },
       ],
     }),
@@ -205,8 +226,26 @@ export default async function ClientRecordPage({
             legalGivenName: member.party.person?.legal_given_name ?? null,
             legalFamilyName: member.party.person?.legal_family_name ?? null,
           })),
-        }
+      }
       : null,
+    professionalRelationships: professionalRelationships.map((relationship) => ({
+      id: relationship.id,
+      relationshipType: relationship.relationship_type,
+      isAuthorised: relationship.is_authorised,
+      authorisationExpiry: relationship.authorisation_expiry?.toISOString() ?? null,
+      firstName: relationship.first_name,
+      surname: relationship.surname,
+      company: relationship.company,
+      phone: relationship.phone,
+      email: relationship.email,
+      addressLine: relationship.address_line,
+      addressSuburb: relationship.address_suburb,
+      addressState: relationship.address_state,
+      addressPostcode: relationship.address_postcode,
+      notes: relationship.notes,
+      createdAt: relationship.created_at.toISOString(),
+      updatedAt: relationship.updated_at.toISOString(),
+    })),
     classification: party.client_classification
       ? {
           serviceTier: party.client_classification.service_segment ?? party.client_classification.service_tier,

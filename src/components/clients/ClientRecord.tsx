@@ -16,6 +16,8 @@ import DependantModal from "@/components/clients/DependantModal"
 import EmploymentSectionModal from "@/components/clients/EmploymentSectionModal"
 import HouseholdSectionModal from "@/components/clients/HouseholdSectionModal"
 import PersonalSectionModal from "@/components/clients/PersonalSectionModal"
+import ProfessionalRelationshipDeleteConfirm from "@/components/clients/ProfessionalRelationshipDeleteConfirm"
+import ProfessionalRelationshipModal from "@/components/clients/ProfessionalRelationshipModal"
 import QuickAddMeetingModal from "@/components/clients/QuickAddMeetingModal"
 import QuickAddNoteModal from "@/components/clients/QuickAddNoteModal"
 import QuickAddPhoneCallModal from "@/components/clients/QuickAddPhoneCallModal"
@@ -34,6 +36,7 @@ import type {
   ClientAddress,
   ClientDetail,
   ClientHouseholdMember,
+  ProfessionalRelationship,
   TimelineEngagement,
   TimelineNote,
 } from "@/types/client-record"
@@ -50,6 +53,10 @@ type SectionModalKind = "personal" | "address" | "employment" | "contact" | "hou
 type DependantModalState =
   | { mode: "create"; member: null }
   | { mode: "edit"; member: ClientHouseholdMember }
+  | null
+type ProfessionalRelationshipModalState =
+  | { mode: "create"; relationship: null }
+  | { mode: "edit"; relationship: ProfessionalRelationship }
   | null
 type EngagementType = (typeof ENGAGEMENT_TYPE_VALUES)[number]
 type LifecycleStage = "prospect" | "engagement" | "advice" | "implementation" | "client" | "lost" | "ceased"
@@ -958,6 +965,40 @@ function formatHouseholdRelation(value: string | null) {
   return formatCategory(value)
 }
 
+function formatProfessionalRelationshipType(value: string) {
+  switch (value) {
+    case "doctor":
+      return "Doctor"
+    case "solicitor":
+      return "Solicitor"
+    case "accountant":
+      return "Accountant"
+    case "banker":
+      return "Banker"
+    case "mortgage_broker":
+      return "Mortgage broker"
+    case "other_adviser":
+      return "Other adviser"
+    case "other_professional":
+      return "Other professional"
+    default:
+      return formatCategory(value)
+  }
+}
+
+function professionalRelationshipName(relationship: ProfessionalRelationship) {
+  const personName = [relationship.firstName, relationship.surname]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(" ")
+
+  if (personName) {
+    return personName
+  }
+
+  return relationship.company?.trim() || "-"
+}
+
 function calculateAge(dateOfBirth: string | null) {
   if (!dateOfBirth) {
     return null
@@ -1277,6 +1318,8 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const [openSectionModal, setOpenSectionModal] = useState<SectionModalKind>(null)
   const [dependantModalState, setDependantModalState] = useState<DependantModalState>(null)
   const [dependantDeleteTarget, setDependantDeleteTarget] = useState<ClientHouseholdMember | null>(null)
+  const [professionalModalState, setProfessionalModalState] = useState<ProfessionalRelationshipModalState>(null)
+  const [professionalDeleteTarget, setProfessionalDeleteTarget] = useState<ProfessionalRelationship | null>(null)
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0)
   const [isEngagementPanelOpen, setIsEngagementPanelOpen] = useState(false)
   const [isSavingEngagement, setIsSavingEngagement] = useState(false)
@@ -2993,6 +3036,18 @@ export default function ClientRecord({ client }: ClientRecordProps) {
     refreshClientData()
   }
 
+  function openCreateProfessionalModal() {
+    setProfessionalModalState({ mode: "create", relationship: null })
+  }
+
+  function openEditProfessionalModal(relationship: ProfessionalRelationship) {
+    setProfessionalModalState({ mode: "edit", relationship })
+  }
+
+  function handleProfessionalRelationshipSaved() {
+    refreshClientData()
+  }
+
   function handleCancelEngagement() {
     setEngagementForm(buildEngagementForm())
     setIsEngagementPanelOpen(false)
@@ -3113,7 +3168,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
       <div className="flex-1 overflow-y-auto bg-[#F7F9FB]">
         <div className="space-y-4 px-[18px] py-[14px]">
           <div className="flex flex-col rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white px-4">
-          <ExpandableSection title="Contact" action={renderSectionEditButton("contact")} className="order-2">
+          <ExpandableSection title="Contact" action={renderSectionEditButton("contact")} className="order-1">
             <div className="space-y-[10px]">
               <DetailField label="Email" value={clientData.resolvedEmail ?? null} />
               <DetailField label="Alternate email" value={clientData.person?.emailAlternate ?? null} />
@@ -3125,7 +3180,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </div>
           </ExpandableSection>
 
-          <ExpandableSection title="Address" action={renderSectionEditButton("address")} className="order-3">
+          <ExpandableSection title="Address" action={renderSectionEditButton("address")} className="order-2">
             {residentialAddressLines.length > 0 ? (
               <div className="space-y-[10px]">
                 <div className="space-y-1">
@@ -3155,7 +3210,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
           <ExpandableSection
             title="Household"
             action={clientData.household ? renderSectionEditButton("household") : undefined}
-            className="order-4"
+            className="order-3"
           >
             {clientData.household ? (
               <div className="space-y-4">
@@ -3286,7 +3341,83 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             )}
           </ExpandableSection>
 
-          <ExpandableSection title="Personal details" action={renderSectionEditButton("personal")} className="order-1">
+          <ExpandableSection title="Professional relationships" className="order-4">
+            <div className="space-y-3">
+              {clientData.professionalRelationships.length > 0 ? (
+                <div className="space-y-2">
+                  {clientData.professionalRelationships.map((relationship) => {
+                    const personName = [relationship.firstName, relationship.surname]
+                      .map((part) => part?.trim())
+                      .filter(Boolean)
+                      .join(" ")
+                    const displayName = professionalRelationshipName(relationship)
+                    const showCompany = Boolean(personName && relationship.company?.trim())
+                    const notes = truncateText(relationship.notes, 100)
+
+                    return (
+                      <div key={relationship.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-[13px] font-medium text-[#113238]">
+                                {formatProfessionalRelationshipType(relationship.relationshipType)}
+                              </p>
+                              {relationship.isAuthorised ? (
+                                <span className="rounded-[999px] border-[0.5px] border-[#BBF7D0] bg-[#F0FDF4] px-[8px] py-[2px] text-[10px] text-[#166534]">
+                                  {relationship.authorisationExpiry
+                                    ? `Authorised - expires ${formatDate(relationship.authorisationExpiry)}`
+                                    : "Authorised"}
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="text-[13px] text-[#113238]">{displayName}</p>
+                            {showCompany ? (
+                              <p className="text-[11px] text-[#6b7280]">{relationship.company}</p>
+                            ) : null}
+                            {relationship.phone ? (
+                              <p className="text-[11px] text-[#6b7280]">Phone: {relationship.phone}</p>
+                            ) : null}
+                            {relationship.email ? (
+                              <p className="text-[11px] text-[#6b7280]">Email: {relationship.email}</p>
+                            ) : null}
+                            {notes ? <p className="text-[11px] text-[#6b7280]">{notes}</p> : null}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openEditProfessionalModal(relationship)}
+                              className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setProfessionalDeleteTarget(relationship)}
+                              className="rounded-[6px] border-[0.5px] border-[#FCA5A5] bg-white px-[8px] py-[4px] text-[10px] text-[#B42318]"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-[12px] text-[#9ca3af]">No professional relationships recorded.</p>
+              )}
+
+              <button
+                type="button"
+                onClick={openCreateProfessionalModal}
+                className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+              >
+                + Add professional relationship
+              </button>
+            </div>
+          </ExpandableSection>
+
+          <ExpandableSection title="Personal details" action={renderSectionEditButton("personal")} className="order-5">
             <div className="space-y-[10px]">
               <DetailField label="Full legal name" value={fullLegalName} />
               <DetailField label="Title" value={clientData.person?.title ?? null} />
@@ -3457,7 +3588,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </div>
           </ExpandableSection>
 
-          <ExpandableSection title="Employment" action={renderSectionEditButton("employment")} className="order-5">
+          <ExpandableSection title="Employment" action={renderSectionEditButton("employment")} className="order-6">
             {clientData.employment ? (
               <div className="space-y-[10px]">
                 <DetailField
@@ -3485,7 +3616,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             )}
           </ExpandableSection>
 
-          <ExpandableSection title="Risk Profile" className="order-6">
+          <ExpandableSection title="Risk Profile" className="order-7">
 
             {clientData.riskProfile ? (
               <div className="space-y-2">
@@ -3630,7 +3761,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             ) : null}
           </ExpandableSection>
 
-          <ExpandableSection title="Service" className="order-7">
+          <ExpandableSection title="Service" className="order-8">
             <div className="space-y-[10px]">
               <div className="relative space-y-[6px]">
               <p className="text-[11px] text-[#9ca3af]">Lifecycle stage</p>
@@ -3727,7 +3858,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </div>
           </ExpandableSection>
 
-          <ExpandableSection title="Important information" className="order-8">
+          <ExpandableSection title="Important information" className="order-9">
             <p className="text-[12px] text-[#6b7280]">
               Sensitive credentials reveal coming in a future round
             </p>
@@ -4356,6 +4487,22 @@ export default function ClientRecord({ client }: ClientRecordProps) {
         isOpen={Boolean(dependantDeleteTarget) && Boolean(clientData.household)}
         onClose={() => setDependantDeleteTarget(null)}
         onDeleted={handleDependantSaved}
+      />
+      <ProfessionalRelationshipModal
+        clientId={clientData.id}
+        mode={professionalModalState?.mode ?? "create"}
+        relationship={professionalModalState?.relationship ?? null}
+        isOpen={Boolean(professionalModalState)}
+        onClose={() => setProfessionalModalState(null)}
+        onSaved={handleProfessionalRelationshipSaved}
+      />
+      <ProfessionalRelationshipDeleteConfirm
+        clientId={clientData.id}
+        clientDisplayName={clientData.displayName}
+        relationship={professionalDeleteTarget}
+        isOpen={Boolean(professionalDeleteTarget)}
+        onClose={() => setProfessionalDeleteTarget(null)}
+        onConfirmed={handleProfessionalRelationshipSaved}
       />
 
       <ClientEmailTemplateModal
