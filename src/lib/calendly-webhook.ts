@@ -4,6 +4,7 @@ import { db } from "@/lib/db"
 import { sendMailAsAdviser } from "@/lib/graphMail"
 import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
 import { resolveEmailForParty } from "@/lib/party-contact"
+import { writeTimelineEntry } from "@/lib/timeline"
 import {
   advanceEngagementToNextPhase,
   completeWorkflowInstanceWithOutcome,
@@ -627,7 +628,8 @@ async function createEngagementTimelineNote(params: {
     return
   }
 
-  await db.file_note.create({
+  const now = new Date()
+  const note = await db.file_note.create({
     data: {
       party_id: params.partyId,
       household_id: params.householdId,
@@ -635,10 +637,43 @@ async function createEngagementTimelineNote(params: {
       note_type: "general",
       text: params.note,
       author_user_id: authorId,
-      created_at: new Date(),
-      updated_at: new Date(),
+      created_at: now,
+      updated_at: now,
     },
   })
+
+  const targets = params.partyId
+    ? [{ party_id: params.partyId, household_id: params.householdId }]
+    : params.householdId
+      ? await db.household_member.findMany({
+          where: {
+            household_id: params.householdId,
+            end_date: null,
+          },
+          select: {
+            party_id: true,
+            household_id: true,
+          },
+        })
+      : []
+
+  for (const target of targets) {
+    await writeTimelineEntry({
+      party_id: target.party_id,
+      household_id: target.household_id,
+      kind: "workflow_event",
+      title: params.note,
+      body: params.note,
+      actor_user_id: authorId,
+      related_entity_type: "file_note",
+      related_entity_id: note.id,
+      occurred_at: now,
+      metadata: {
+        engagement_id: params.engagementId,
+        source: "calendly",
+      },
+    })
+  }
 }
 
 async function handleInitialMeetingWorkflowForCreatedEngagement(params: {
@@ -961,6 +996,7 @@ export async function triggerPostBookingSideEffects(
         },
         user_account: {
           select: {
+            id: true,
             name: true,
             email: true,
           },
@@ -1054,7 +1090,7 @@ export async function triggerPostBookingSideEffects(
     })
 
     if (engagement.party_id) {
-      await db.emailLog.create({
+      const emailLog = await db.emailLog.create({
         data: {
           clientId: engagement.party_id,
           templateId: template.id,
@@ -1063,6 +1099,26 @@ export async function triggerPostBookingSideEffects(
           sentBy: normalizeString(engagement.user_account?.email) ?? "system@concilio.local",
           status: "sent",
           graphMessageId: messageId || null,
+        },
+      })
+
+      await writeTimelineEntry({
+        party_id: engagement.party_id,
+        kind: "email_out",
+        title: `Email sent: ${subject}`,
+        body: renderedBodyHtml,
+        actor_user_id: engagement.user_account?.id ?? null,
+        related_entity_type: "EmailLog",
+        related_entity_id: emailLog.id,
+        occurred_at: emailLog.sentAt,
+        metadata: {
+          status: emailLog.status,
+          template_id: template.id,
+          graph_message_id: messageId || null,
+          sent_by: emailLog.sentBy,
+          source: "calendly",
+          engagement_id: engagement.id,
+          calendly_event_uuid: context.id,
         },
       })
     } else {

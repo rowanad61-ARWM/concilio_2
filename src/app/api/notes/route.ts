@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
+import { writeTimelineEntry } from "@/lib/timeline"
 import {
   loadFileNoteSnapshot,
   responseFileNoteId,
@@ -37,6 +38,20 @@ async function createFileNote(request: Request) {
         text: body,
         author_user_id: PLACEHOLDER_AUTHOR_ID,
         created_at: new Date(),
+      },
+    })
+
+    await writeTimelineEntry({
+      party_id: partyId,
+      kind: "file_note",
+      title: `File note: ${noteType}`,
+      body,
+      actor_user_id: PLACEHOLDER_AUTHOR_ID,
+      related_entity_type: "file_note",
+      related_entity_id: note.id,
+      occurred_at: note.created_at,
+      metadata: {
+        note_type: noteType,
       },
     })
 

@@ -7,6 +7,7 @@ import { STATUS_LABEL_TO_STATUS_MAP } from "@/lib/monday-mapping"
 import { getBoardColumns, getMondayUserEmailById } from "@/lib/monday"
 import { maybeCreateNextRecurringTask } from "@/lib/task-enrichment"
 import { syncTaskToMonday } from "@/lib/task-sync"
+import { writeTimelineEntry } from "@/lib/timeline"
 
 const ECHO_DEBOUNCE_MS = 3000
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -414,6 +415,27 @@ async function applyStatusChange(task: MondayTaskWithOwners, event: MondayEvent,
       },
     })
 
+    await writeTimelineEntry(
+      {
+        party_id: updatedTask.clientId,
+        kind: "task",
+        title: `Task updated: ${updatedTask.title}`,
+        body: updatedTask.description,
+        actor_user_id: null,
+        related_entity_type: "Task",
+        related_entity_id: updatedTask.id,
+        occurred_at: updatedTask.updatedAt,
+        metadata: {
+          status: updatedTask.status,
+          previous_status: task.status,
+          source: "monday",
+          monday_user_email: actorEmail,
+          recurring_task_id_created: recurringTaskId,
+        },
+      },
+      { tx },
+    )
+
     return {
       recurringTaskId,
     }
@@ -447,7 +469,7 @@ async function applyTimelineChange(task: MondayTaskWithOwners, event: MondayEven
   const nextDescription = describeTimelineRange(nextRange)
 
   await db.$transaction(async (tx) => {
-    await tx.task.update({
+    const updatedTask = await tx.task.update({
       where: {
         id: task.id,
       },
@@ -465,6 +487,28 @@ async function applyTimelineChange(task: MondayTaskWithOwners, event: MondayEven
         body: `Timeline changed from ${previousDescription} to ${nextDescription} via Monday by ${formatActorEmail(actorEmail)}.`,
       },
     })
+
+    await writeTimelineEntry(
+      {
+        party_id: updatedTask.clientId,
+        kind: "task",
+        title: `Task updated: ${updatedTask.title}`,
+        body: updatedTask.description,
+        actor_user_id: null,
+        related_entity_type: "Task",
+        related_entity_id: updatedTask.id,
+        occurred_at: updatedTask.updatedAt,
+        metadata: {
+          due_date_start: updatedTask.dueDateStart?.toISOString() ?? null,
+          due_date_end: updatedTask.dueDateEnd?.toISOString() ?? null,
+          previous_timeline: previousDescription,
+          next_timeline: nextDescription,
+          source: "monday",
+          monday_user_email: actorEmail,
+        },
+      },
+      { tx },
+    )
   })
 }
 
@@ -575,6 +619,25 @@ async function applyOwnerChange(task: MondayTaskWithOwners, event: MondayEvent, 
         body: `Owners updated via Monday by ${formatActorEmail(actorEmail)}. Added: ${addedLabels}. Removed: ${removedLabels}.`,
       },
     })
+
+    await writeTimelineEntry(
+      {
+        party_id: task.clientId,
+        kind: "task",
+        title: `Task updated: ${task.title}`,
+        body: task.description,
+        actor_user_id: null,
+        related_entity_type: "Task",
+        related_entity_id: task.id,
+        metadata: {
+          added_owner_user_ids: addedOwnerIds,
+          removed_owner_user_ids: removedOwnerIds,
+          source: "monday",
+          monday_user_email: actorEmail,
+        },
+      },
+      { tx },
+    )
   })
 }
 
@@ -650,7 +713,7 @@ export async function handleItemDeleted(event: MondayEvent): Promise<void> {
     const deletedAt = new Date().toISOString()
 
     await db.$transaction(async (tx) => {
-      await tx.task.update({
+      const updatedTask = await tx.task.update({
         where: {
           id: task.id,
         },
@@ -669,6 +732,28 @@ export async function handleItemDeleted(event: MondayEvent): Promise<void> {
           body: `Task deleted in Monday by ${formatActorEmail(mondayUserEmail)}. Marked as cancelled in Concilio.`,
         },
       })
+
+      await writeTimelineEntry(
+        {
+          party_id: updatedTask.clientId,
+          kind: "task",
+          title: `Task updated: ${updatedTask.title}`,
+          body: updatedTask.description,
+          actor_user_id: null,
+          related_entity_type: "Task",
+          related_entity_id: updatedTask.id,
+          occurred_at: updatedTask.updatedAt,
+          metadata: {
+            status: updatedTask.status,
+            source: "monday",
+            monday_user_id: mondayUserId ? String(mondayUserId) : null,
+            monday_user_email: mondayUserEmail,
+            monday_pulse_id: String(pulseId),
+            deleted_at: deletedAt,
+          },
+        },
+        { tx },
+      )
 
       if (!UUID_REGEX.test(task.id)) {
         console.error(

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
+import { writeTimelineEntry } from "@/lib/timeline"
 import {
   loadEmailLogSnapshotByMessageId,
   responseEmailLogIdByMessageId,
@@ -38,6 +39,19 @@ function toClientDisplayName(client: {
   const first = client.person?.preferred_name || client.person?.legal_given_name || ""
   const last = client.person?.legal_family_name || ""
   return `${first} ${last}`.trim() || client.display_name
+}
+
+async function resolveActorUserId(email: string) {
+  if (!email) {
+    return null
+  }
+
+  const user = await db.user_account.findUnique({
+    where: { email },
+    select: { id: true },
+  })
+
+  return user?.id ?? null
 }
 
 async function sendEmail(request: Request) {
@@ -81,6 +95,7 @@ async function sendEmail(request: Request) {
   }
 
   const sentBy = session.user?.email?.trim() || "system@concilio.local"
+  const actorUserId = await resolveActorUserId(sentBy)
   const clientName = toClientDisplayName(client)
 
   try {
@@ -91,7 +106,7 @@ async function sendEmail(request: Request) {
       htmlBody: body,
     })
 
-    await db.emailLog.create({
+    const emailLog = await db.emailLog.create({
       data: {
         clientId,
         templateId,
@@ -103,12 +118,29 @@ async function sendEmail(request: Request) {
       },
     })
 
+    await writeTimelineEntry({
+      party_id: clientId,
+      kind: "email_out",
+      title: `Email sent: ${subject}`,
+      body,
+      actor_user_id: actorUserId,
+      related_entity_type: "EmailLog",
+      related_entity_id: emailLog.id,
+      occurred_at: emailLog.sentAt,
+      metadata: {
+        status: emailLog.status,
+        template_id: templateId,
+        graph_message_id: messageId || null,
+        sent_by: sentBy,
+      },
+    })
+
     return NextResponse.json({ ok: true, messageId })
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "failed to send email"
     const failedBody = `${body}\n\n<!-- send-error: ${errorMessage} -->`
 
-    await db.emailLog.create({
+    const emailLog = await db.emailLog.create({
       data: {
         clientId,
         templateId,
@@ -117,6 +149,24 @@ async function sendEmail(request: Request) {
         sentBy,
         status: "failed",
         graphMessageId: null,
+      },
+    })
+
+    await writeTimelineEntry({
+      party_id: clientId,
+      kind: "email_out",
+      title: `Email failed: ${subject}`,
+      body: failedBody,
+      actor_user_id: actorUserId,
+      related_entity_type: "EmailLog",
+      related_entity_id: emailLog.id,
+      occurred_at: emailLog.sentAt,
+      metadata: {
+        status: emailLog.status,
+        template_id: templateId,
+        graph_message_id: null,
+        sent_by: sentBy,
+        error_message: errorMessage,
       },
     })
 

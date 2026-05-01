@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { withAuditTrail } from "@/lib/audit-middleware"
 import { deleteFile } from "@/lib/graph"
 import { normalizeClientDocumentFolder } from "@/lib/documents"
+import { writeTimelineEntry } from "@/lib/timeline"
 import {
   documentFileRouteParams,
   type DocumentFileRouteContext,
@@ -31,6 +32,18 @@ async function deleteDocument(
 
   try {
     await deleteFile(resolvedFileId)
+    await writeTimelineEntry({
+      party_id: resolvedClientId,
+      kind: "document",
+      title: `Document deleted: ${resolvedFileId}`,
+      body: null,
+      related_entity_type: "SharePointFile",
+      related_entity_id: resolvedFileId,
+      metadata: {
+        folder: resolvedFolder,
+        sharepoint_drive_item_id: resolvedFileId,
+      },
+    })
     return new NextResponse(null, { status: 204 })
   } catch (error) {
     console.error("[documents delete error]", error)

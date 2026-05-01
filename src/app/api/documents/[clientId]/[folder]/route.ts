@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { withAuditTrail } from "@/lib/audit-middleware"
+import { writeTimelineEntry } from "@/lib/timeline"
 import {
   ensureFolder,
   listFiles,
@@ -74,6 +75,23 @@ async function uploadDocument(
     const fileBuffer = Buffer.from(await fileValue.arrayBuffer())
     await ensureFolder(resolvedClientId, resolvedFolder)
     const uploaded = await uploadFile(resolvedClientId, resolvedFolder, fileValue.name, fileBuffer)
+
+    await writeTimelineEntry({
+      party_id: resolvedClientId,
+      kind: "document",
+      title: `Document uploaded: ${uploaded.name}`,
+      body: null,
+      related_entity_type: "SharePointFile",
+      related_entity_id: uploaded.id,
+      metadata: {
+        folder: resolvedFolder,
+        filename: uploaded.name,
+        mime_type: fileValue.type || null,
+        size_bytes: uploaded.size,
+        sharepoint_drive_item_id: uploaded.id,
+        web_url: uploaded.webUrl,
+      },
+    })
 
     return NextResponse.json(uploaded)
   } catch (error) {

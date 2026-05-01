@@ -5,6 +5,7 @@ import { auth } from "@/auth"
 import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 import { syncTaskToMonday } from "@/lib/task-sync"
+import { writeTimelineEntry } from "@/lib/timeline"
 import {
   loadTaskSnapshot,
   responseTaskId,
@@ -64,6 +65,30 @@ function uniqueStrings(values: string[]) {
 
 function isUuid(value: string) {
   return UUID_REGEX.test(value)
+}
+
+async function resolveSessionActorUserId(session: { user?: { id?: unknown; email?: unknown } }) {
+  const sessionUserId = typeof session.user?.id === "string" ? session.user.id : null
+  if (sessionUserId && isUuid(sessionUserId)) {
+    return sessionUserId
+  }
+
+  const email = typeof session.user?.email === "string" ? session.user.email.trim() : ""
+  if (!email && !sessionUserId) {
+    return null
+  }
+
+  const user = await db.user_account.findFirst({
+    where: {
+      OR: [
+        ...(email ? [{ email }] : []),
+        ...(sessionUserId ? [{ auth_subject: sessionUserId }] : []),
+      ],
+    },
+    select: { id: true },
+  })
+
+  return user?.id ?? null
 }
 
 async function buildOwnerMap(ownerUserIds: string[]) {
@@ -394,6 +419,7 @@ async function createTask(request: Request) {
   }
 
   const parentTaskId = recurrenceParsed.parentTaskId
+  const actorUserId = await resolveSessionActorUserId(session)
 
   try {
     if (recurrenceParsed.isRecurring && isLiveSeriesStatus(statusRaw)) {
@@ -492,8 +518,10 @@ async function createTask(request: Request) {
         include: taskInclude,
       })
 
+      let taskForTimeline = created
+
       if (recurrenceParsed.isRecurring && !parentTaskId) {
-        return tx.task.update({
+        taskForTimeline = await tx.task.update({
           where: {
             id: created.id,
           },
@@ -504,7 +532,32 @@ async function createTask(request: Request) {
         })
       }
 
-      return created
+      await writeTimelineEntry(
+        {
+          party_id: taskForTimeline.clientId,
+          kind: "task",
+          title: `Task created: ${taskForTimeline.title}`,
+          body: taskForTimeline.description,
+          actor_user_id: actorUserId,
+          related_entity_type: "Task",
+          related_entity_id: taskForTimeline.id,
+          occurred_at: taskForTimeline.createdAt,
+          metadata: {
+            status: taskForTimeline.status,
+            type: taskForTimeline.type,
+            subtype: taskForTimeline.subtype,
+            due_date_start: taskForTimeline.dueDateStart?.toISOString() ?? null,
+            due_date_end: taskForTimeline.dueDateEnd?.toISOString() ?? null,
+            owner_user_ids: ownerIds,
+            is_recurring: taskForTimeline.isRecurring,
+            recurrence_cadence: taskForTimeline.recurrenceCadence,
+            parent_task_id: taskForTimeline.parentTaskId,
+          },
+        },
+        { tx },
+      )
+
+      return taskForTimeline
     })
 
     const ownerMap = await buildOwnerMap(uniqueStrings(task.owners.map((owner) => owner.userId)))

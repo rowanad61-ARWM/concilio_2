@@ -1,4 +1,5 @@
 import { normalizeClientDocumentFolder, type ClientDocumentFolder } from "@/lib/documents"
+import { writeTimelineEntry } from "@/lib/timeline"
 import type { Prisma, TaskStatus } from "@prisma/client"
 
 export const TASK_STATUSES = [
@@ -319,6 +320,27 @@ export async function maybeCreateNextRecurringTask(
           : undefined,
     },
   })
+
+  await writeTimelineEntry(
+    {
+      party_id: recurringTask.clientId,
+      kind: "task",
+      title: `Recurring task created: ${recurringTask.title}`,
+      body: recurringTask.description,
+      actor_user_id: null,
+      related_entity_type: "Task",
+      related_entity_id: recurringTask.id,
+      occurred_at: recurringTask.createdAt,
+      metadata: {
+        parent_task_id: recurrenceRootId,
+        previous_task_id: task.id,
+        recurrence_cadence: recurringTask.recurrenceCadence,
+        due_date_start: recurringTask.dueDateStart?.toISOString() ?? null,
+        due_date_end: recurringTask.dueDateEnd?.toISOString() ?? null,
+      },
+    },
+    { tx },
+  )
 
   return recurringTask.id
 }

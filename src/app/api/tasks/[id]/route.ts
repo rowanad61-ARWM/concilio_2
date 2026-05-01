@@ -6,6 +6,7 @@ import { withAuditTrail } from "@/lib/audit-middleware"
 import { db } from "@/lib/db"
 import { archiveMondayItem } from "@/lib/monday"
 import { syncTaskToMonday } from "@/lib/task-sync"
+import { writeTimelineEntry } from "@/lib/timeline"
 import {
   loadTaskSnapshot,
   responseTaskId,
@@ -67,6 +68,30 @@ function uniqueStrings(values: string[]) {
 
 function isUuid(value: string) {
   return UUID_REGEX.test(value)
+}
+
+async function resolveSessionActorUserId(session: { user?: { id?: unknown; email?: unknown } }) {
+  const sessionUserId = typeof session.user?.id === "string" ? session.user.id : null
+  if (sessionUserId && isUuid(sessionUserId)) {
+    return sessionUserId
+  }
+
+  const email = typeof session.user?.email === "string" ? session.user.email.trim() : ""
+  if (!email && !sessionUserId) {
+    return null
+  }
+
+  const user = await db.user_account.findFirst({
+    where: {
+      OR: [
+        ...(email ? [{ email }] : []),
+        ...(sessionUserId ? [{ auth_subject: sessionUserId }] : []),
+      ],
+    },
+    select: { id: true },
+  })
+
+  return user?.id ?? null
 }
 
 function isPrismaNotFoundError(error: unknown) {
@@ -536,6 +561,8 @@ async function updateTask(
     }
   }
 
+  const actorUserId = await resolveSessionActorUserId(session)
+
   try {
     const result = await db.$transaction(async (tx) => {
       if (effectiveParentTaskId) {
@@ -589,6 +616,33 @@ async function updateTask(
         task: updatedTask,
       })
 
+      await writeTimelineEntry(
+        {
+          party_id: updatedTask.clientId,
+          kind: "task",
+          title: `Task updated: ${updatedTask.title}`,
+          body: updatedTask.description,
+          actor_user_id: actorUserId,
+          related_entity_type: "Task",
+          related_entity_id: updatedTask.id,
+          occurred_at: updatedTask.updatedAt,
+          metadata: {
+            status: updatedTask.status,
+            type: updatedTask.type,
+            subtype: updatedTask.subtype,
+            due_date_start: updatedTask.dueDateStart?.toISOString() ?? null,
+            due_date_end: updatedTask.dueDateEnd?.toISOString() ?? null,
+            completed_at: updatedTask.completedAt?.toISOString() ?? null,
+            owner_user_ids: updatedTask.owners.map((owner) => owner.userId),
+            is_recurring: updatedTask.isRecurring,
+            recurrence_cadence: updatedTask.recurrenceCadence,
+            parent_task_id: updatedTask.parentTaskId,
+            recurring_task_id_created: recurringTaskId,
+          },
+        },
+        { tx },
+      )
+
       return {
         updatedTask,
         recurringTaskId,
@@ -627,11 +681,19 @@ async function deleteTask(
   }
 
   const { id } = await params
+  const actorUserId = await resolveSessionActorUserId(session)
 
   try {
     const existingTask = await db.task.findUnique({
       where: { id },
       select: {
+        id: true,
+        clientId: true,
+        title: true,
+        description: true,
+        type: true,
+        subtype: true,
+        status: true,
         mondayItemId: true,
       },
     })
@@ -639,6 +701,24 @@ async function deleteTask(
     await db.task.delete({
       where: { id },
     })
+
+    if (existingTask) {
+      await writeTimelineEntry({
+        party_id: existingTask.clientId,
+        kind: "task",
+        title: `Task deleted: ${existingTask.title}`,
+        body: existingTask.description,
+        actor_user_id: actorUserId,
+        related_entity_type: "Task",
+        related_entity_id: existingTask.id,
+        metadata: {
+          status: existingTask.status,
+          type: existingTask.type,
+          subtype: existingTask.subtype,
+          monday_item_id: existingTask.mondayItemId,
+        },
+      })
+    }
 
     if (existingTask?.mondayItemId) {
       const mondayItemId = existingTask.mondayItemId

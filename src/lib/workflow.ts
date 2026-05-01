@@ -7,6 +7,7 @@ import { sendMailAsAdviser } from "@/lib/graphMail"
 import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
 import { resolveEmailForParty, resolveMobileForParty } from "@/lib/party-contact"
 import { syncTaskToMonday } from "@/lib/task-sync"
+import { writeTimelineEntry } from "@/lib/timeline"
 import {
   ADVICE_TEMPLATE_KEY,
   deriveDecisionState,
@@ -604,16 +605,54 @@ async function createSpawnedTaskFromTemplate(
     },
     select: {
       id: true,
+      clientId: true,
+      title: true,
+      description: true,
+      type: true,
+      subtype: true,
+      status: true,
+      dueDateStart: true,
+      dueDateEnd: true,
+      createdAt: true,
     },
   })
 
-  await client.workflow_spawned_task.create({
+  const spawnedTask = await client.workflow_spawned_task.create({
+    select: {
+      id: true,
+    },
     data: {
       workflow_instance_id: workflowInstanceId,
       workflow_task_template_id: taskTemplate.id,
       task_id: task.id,
     },
   })
+
+  await writeTimelineEntry(
+    {
+      party_id: task.clientId,
+      household_id: engagement.household_id,
+      kind: "task",
+      title: `Workflow task created: ${task.title}`,
+      body: task.description,
+      actor_user_id: ownerUserId,
+      related_entity_type: "Task",
+      related_entity_id: task.id,
+      occurred_at: task.createdAt,
+      metadata: {
+        status: task.status,
+        type: task.type,
+        subtype: task.subtype,
+        due_date_start: task.dueDateStart?.toISOString() ?? null,
+        due_date_end: task.dueDateEnd?.toISOString() ?? null,
+        workflow_instance_id: workflowInstanceId,
+        workflow_spawned_task_id: spawnedTask.id,
+        workflow_task_template_id: taskTemplate.id,
+        source: "workflow",
+      },
+    },
+    { tx: client as Prisma.TransactionClient },
+  )
 
   return task.id
 }
@@ -707,6 +746,28 @@ async function spawnWorkflowWithTemplate(
 
     createdTaskIds.push(createdTaskId)
   }
+
+  await writeTimelineEntry(
+    {
+      party_id: engagement.party_id,
+      household_id: engagement.household_id,
+      kind: "workflow_event",
+      title: `Workflow started: ${template.name}`,
+      body: template.description,
+      actor_user_id: engagement.primary_adviser_id,
+      related_entity_type: "workflow_instance",
+      related_entity_id: createdInstance.id,
+      occurred_at: createdInstance.started_at,
+      metadata: {
+        engagement_id: engagement.id,
+        workflow_template_id: template.id,
+        workflow_template_key: template.key,
+        template_version: template.version,
+        created_task_ids: createdTaskIds,
+      },
+    },
+    { tx: client as Prisma.TransactionClient },
+  )
 
   return {
     instance: createdInstance,
@@ -900,7 +961,7 @@ export async function createJourneyTimelineEvent(
     return
   }
 
-  await tx.file_note.create({
+  const note = await tx.file_note.create({
     data: {
       party_id: params.partyId,
       household_id: params.householdId,
@@ -912,6 +973,47 @@ export async function createJourneyTimelineEvent(
       updated_at: params.at,
     },
   })
+
+  const targets = params.partyId
+    ? [{ party_id: params.partyId, household_id: params.householdId }]
+    : params.householdId
+      ? await tx.household_member.findMany({
+          where: {
+            household_id: params.householdId,
+            end_date: null,
+          },
+          select: {
+            party_id: true,
+            household_id: true,
+          },
+        })
+      : []
+
+  if (targets.length === 0) {
+    console.info(`[workflow] timeline-entry-skipped missing-party ${params.engagementId}`)
+    return
+  }
+
+  for (const target of targets) {
+    await writeTimelineEntry(
+      {
+        party_id: target.party_id,
+        household_id: target.household_id,
+        kind: "workflow_event",
+        title: params.note,
+        body: params.note,
+        actor_user_id: authorId,
+        related_entity_type: "file_note",
+        related_entity_id: note.id,
+        occurred_at: params.at,
+        metadata: {
+          engagement_id: params.engagementId,
+          note_type: "general",
+        },
+      },
+      { tx: tx as Prisma.TransactionClient },
+    )
+  }
 }
 
 async function markDriverActionAndTimeline(
@@ -1093,7 +1195,7 @@ export async function sendWorkflowTemplateToClient(
       htmlBody: bodyHtml,
     })
 
-    await client.emailLog.create({
+    const emailLog = await client.emailLog.create({
       data: {
         clientId: party.id,
         templateId: template.id,
@@ -1105,6 +1207,28 @@ export async function sendWorkflowTemplateToClient(
       },
     })
 
+    await writeTimelineEntry(
+      {
+        party_id: party.id,
+        kind: "email_out",
+        title: `Email sent: ${subject}`,
+        body: bodyHtml,
+        actor_user_id: actor.id,
+        related_entity_type: "EmailLog",
+        related_entity_id: emailLog.id,
+        occurred_at: emailLog.sentAt,
+        metadata: {
+          status: emailLog.status,
+          template_id: template.id,
+          template_channel: template.channel,
+          graph_message_id: messageId || null,
+          sent_by: actor.email,
+          source: "workflow",
+        },
+      },
+      { tx: client as Prisma.TransactionClient },
+    )
+
     return {
       templateId: template.id,
       channel: template.channel,
@@ -1112,7 +1236,7 @@ export async function sendWorkflowTemplateToClient(
     }
   } catch (error) {
     const errorMessage = toErrorMessage(error)
-    await client.emailLog.create({
+    const emailLog = await client.emailLog.create({
       data: {
         clientId: party.id,
         templateId: template.id,
@@ -1123,6 +1247,29 @@ export async function sendWorkflowTemplateToClient(
         graphMessageId: null,
       },
     })
+
+    await writeTimelineEntry(
+      {
+        party_id: party.id,
+        kind: "email_out",
+        title: `Email failed: ${subject}`,
+        body: `${bodyHtml}\n\n<!-- send-error: ${errorMessage} -->`,
+        actor_user_id: actor.id,
+        related_entity_type: "EmailLog",
+        related_entity_id: emailLog.id,
+        occurred_at: emailLog.sentAt,
+        metadata: {
+          status: emailLog.status,
+          template_id: template.id,
+          template_channel: template.channel,
+          graph_message_id: null,
+          sent_by: actor.email,
+          source: "workflow",
+          error_message: errorMessage,
+        },
+      },
+      { tx: client as Prisma.TransactionClient },
+    )
 
     throw new WorkflowCommunicationError(errorMessage)
   }
