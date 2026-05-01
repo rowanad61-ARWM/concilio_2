@@ -1,5 +1,6 @@
 import "server-only"
 
+import { createDefaultHousehold, createPersonFromName } from "@/lib/clientCreate"
 import { db } from "@/lib/db"
 import { sendMailAsAdviser } from "@/lib/graphMail"
 import { applyMergeFields, type ClientMergeData } from "@/lib/mergeFields"
@@ -271,6 +272,22 @@ function extractFirstNameFromDisplayName(displayName: string | null | undefined)
   return firstWord ?? ""
 }
 
+function splitDisplayNameForPerson(displayName: string) {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) {
+    return { firstName: "Calendly", lastName: "Prospect" }
+  }
+
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: "Prospect" }
+  }
+
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" "),
+  }
+}
+
 function formatMeetingDuration(startTime: string | null, endTime: string | null) {
   const startDate = parseDate(startTime)
   const endDate = parseDate(endTime)
@@ -363,6 +380,7 @@ async function createProspectPartyFromCalendly(params: {
   const displayName = params.inviteeName.trim() || params.inviteeEmail.trim() || "Calendly Prospect"
   const email = params.inviteeEmail.trim().toLowerCase()
   const phone = params.phone?.trim() ?? null
+  const { firstName, lastName } = splitDisplayNameForPerson(displayName)
 
   // TODO(task-42a): route party auto-create through shared helper when one is extracted.
   const createdParty = await db.$transaction(async (tx) => {
@@ -376,6 +394,18 @@ async function createProspectPartyFromCalendly(params: {
         id: true,
         display_name: true,
       },
+    })
+
+    await createPersonFromName({
+      party_id: party.id,
+      first_name: firstName,
+      last_name: lastName,
+      tx,
+    })
+    const household = await createDefaultHousehold({
+      party_id: party.id,
+      last_name: lastName,
+      tx,
     })
 
     await tx.client_classification.create({
@@ -408,13 +438,13 @@ async function createProspectPartyFromCalendly(params: {
       })
     }
 
-    return party
+    return {
+      ...party,
+      household_id: household.household_id,
+    }
   })
 
-  return {
-    ...createdParty,
-    household_id: null,
-  }
+  return createdParty
 }
 
 function getInviteeCreatedTimestamp(payload: CalendlyInviteeCreatedWebhookPayload) {
