@@ -40,6 +40,9 @@ type TimelineEntryRow = {
   inserted_at: Date
   updated_at: Date
   metadata: Prisma.JsonValue | null
+  actor_user?: {
+    name: string | null
+  } | null
 }
 
 type TimelineAttachmentRow = {
@@ -144,6 +147,7 @@ export function serializeTimelineEntry(entry: TimelineEntryRow) {
     title: entry.title,
     body: entry.body,
     actor_user_id: entry.actor_user_id,
+    actor_name: entry.actor_user?.name ?? null,
     related_entity_type: entry.related_entity_type,
     related_entity_id: entry.related_entity_id,
     occurred_at: entry.occurred_at.toISOString(),

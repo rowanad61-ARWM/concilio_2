@@ -24,6 +24,11 @@ export async function GET(_request: Request, { params }: TimelineRouteContext) {
   const entry = await db.timeline_entry.findUnique({
     where: { id },
     include: {
+      actor_user: {
+        select: {
+          name: true,
+        },
+      },
       timeline_attachment: {
         orderBy: {
           inserted_at: "asc",

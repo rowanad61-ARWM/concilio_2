@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { humanEntityName } from "@/lib/timeline-display"
+
 type TimelineKind =
   | "email_in"
   | "email_out"
@@ -40,6 +42,7 @@ type TimelineEntry = {
   title: string
   body: string | null
   actor_user_id: string | null
+  actor_name: string | null
   related_entity_type: string | null
   related_entity_id: string | null
   occurred_at: string
@@ -203,6 +206,10 @@ function formatKind(value: string) {
 }
 
 function actorLabel(entry: TimelineEntry) {
+  if (typeof entry.actor_name === "string" && entry.actor_name.trim()) {
+    return entry.actor_name.trim()
+  }
+
   const metadataActor = entry.metadata?.actor_name
   if (typeof metadataActor === "string" && metadataActor.trim()) {
     return metadataActor.trim()
@@ -429,14 +436,13 @@ function TimelineExpansion({
   const body = textFromBody(detail?.body ?? entry.body)
   const rows = metadataRows(detail?.metadata ?? entry.metadata)
   const attachments = detail?.attachments ?? []
+  const [showInternalDetails, setShowInternalDetails] = useState(false)
 
   return (
     <div className="mt-2 rounded-[10px] border-[0.5px] border-[#eef2f7] bg-[#FAFBFC] p-3">
       {body ? (
         <pre className="whitespace-pre-wrap font-sans text-[12px] leading-[1.6] text-[#374151]">{body}</pre>
-      ) : (
-        <p className="text-[12px] text-[#9ca3af]">No body text</p>
-      )}
+      ) : null}
 
       <div className="mt-3 grid gap-2 text-[11px] text-[#6b7280] md:grid-cols-2">
         <p>Actor: {actorLabel(entry)}</p>
@@ -463,6 +469,16 @@ function TimelineExpansion({
       ) : null}
 
       {rows.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => setShowInternalDetails((current) => !current)}
+          className="mt-3 text-[12px] font-medium text-[#6b7280] underline-offset-2 hover:underline"
+        >
+          {showInternalDetails ? "Hide internal details" : "Show internal details"}
+        </button>
+      ) : null}
+
+      {showInternalDetails && rows.length > 0 ? (
         <dl className="mt-3 grid gap-x-4 gap-y-1 rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white p-2 text-[11px] md:grid-cols-[140px_1fr]">
           {rows.map(([key, value]) => (
             <div key={key} className="contents">
@@ -747,7 +763,7 @@ export default function ClientTimeline({ party_id }: { party_id: string }) {
                                   {entry.source}
                                 </span>
                               ) : null}
-                              <span className="text-[11px] text-[#9ca3af]">{formatKind(entry.kind)}</span>
+                              <span className="text-[11px] text-[#9ca3af]">{humanEntityName(entry.kind)}</span>
                             </div>
                           </div>
                         </button>

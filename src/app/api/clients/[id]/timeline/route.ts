@@ -83,6 +83,13 @@ export async function GET(request: Request, { params }: TimelineRouteContext) {
   try {
     const entries = await db.timeline_entry.findMany({
       where,
+      include: {
+        actor_user: {
+          select: {
+            name: true,
+          },
+        },
+      },
       orderBy: {
         occurred_at: "desc",
       },

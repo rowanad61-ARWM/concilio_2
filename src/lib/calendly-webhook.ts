@@ -637,6 +637,7 @@ async function createEngagementTimelineNote(params: {
   householdId: string | null
   primaryAdviserId: string | null
   note: string
+  title?: string
 }) {
   const authorId = await resolveTimelineAuthorUserId(params.primaryAdviserId)
   if (!authorId) {
@@ -692,7 +693,7 @@ async function createEngagementTimelineNote(params: {
       party_id: target.party_id,
       household_id: target.household_id,
       kind: "workflow_event",
-      title: params.note,
+      title: params.title ?? "Calendly: workflow note",
       body: params.note,
       actor_user_id: authorId,
       related_entity_type: "file_note",
@@ -760,6 +761,7 @@ async function handleInitialMeetingWorkflowForCreatedEngagement(params: {
       householdId: params.householdId,
       primaryAdviserId: params.primaryAdviserId,
       note: `Initial Meeting booked while ${laterPhaseInstance.workflow_template.name} is already active. No workflow state change was applied.`,
+      title: "Calendly: meeting booked",
     })
     return
   }
@@ -873,6 +875,7 @@ async function handleDiscoveryWorkflowForCreatedEngagement(params: {
       householdId: params.householdId,
       primaryAdviserId: params.primaryAdviserId,
       note: "Discovery Meeting booked, but no active Initial Meeting awaiting Discovery booking was found.",
+      title: "Calendly: meeting booked",
     })
     return
   }
@@ -946,6 +949,7 @@ async function handleAdviceWorkflowForCreatedEngagement(params: {
       householdId: params.householdId,
       primaryAdviserId: params.primaryAdviserId,
       note: "Advice Meeting booked, but no active Advice phase awaiting booking was found.",
+      title: "Calendly: meeting booked",
     })
     return
   }
@@ -968,6 +972,7 @@ async function handleAdviceWorkflowForCreatedEngagement(params: {
     householdId: adviceInstance.engagement?.household_id ?? params.householdId,
     primaryAdviserId: adviceInstance.engagement?.primary_adviser_id ?? params.primaryAdviserId,
     note: "Advice Meeting booked via Calendly.",
+    title: "Calendly: meeting booked",
   })
 
   console.info(`[calendly] advice workflow scheduled ${adviceInstance.id} ${params.scheduledStartAt.toISOString()}`)
@@ -1401,7 +1406,10 @@ export async function handleInviteeCanceled(payload: CalendlyInviteeCanceledWebh
       partyId: engagement.party_id,
       householdId: engagement.household_id,
       primaryAdviserId: engagement.primary_adviser_id,
-      note: "Initial Meeting cancelled by client - adviser follow-up required.",
+      note: rescheduled
+        ? "Initial Meeting rescheduled by client - awaiting new booking."
+        : "Initial Meeting cancelled by client - adviser follow-up required.",
+      title: rescheduled ? "Calendly: meeting rescheduled" : "Calendly: meeting cancelled",
     })
   }
 

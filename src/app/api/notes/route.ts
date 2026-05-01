@@ -44,7 +44,10 @@ async function createFileNote(request: Request) {
     await writeTimelineEntry({
       party_id: partyId,
       kind: "file_note",
-      title: `File note: ${noteType}`,
+      title:
+        noteType === "general"
+          ? "File note added"
+          : `${noteType.replace(/_/g, " ")} note added`,
       body,
       actor_user_id: PLACEHOLDER_AUTHOR_ID,
       related_entity_type: "file_note",

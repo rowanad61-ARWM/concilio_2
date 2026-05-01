@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import type { Prisma } from '@prisma/client'
 import type { AuditAction, AuditEventInput, AuditSnapshot } from '@/lib/audit'
+import {
+  describeFieldChange,
+  humanAction,
+  humanEntityName,
+  humanFieldName,
+} from '@/lib/timeline-display'
 import type { TimelineEntryInput, TimelineKind } from '@/lib/timeline'
 
 type MaybePromise<T> = T | Promise<T>
@@ -622,49 +628,151 @@ function auditTimelineKind(entityType: string, action: AuditAction): TimelineKin
   return 'system'
 }
 
-function labelForEntityType(entityType: string): string {
-  const labels: Record<string, string> = {
-    centrelink_detail: 'Centrelink detail',
-    client_classification: 'Client classification',
-    engagement: 'Engagement',
-    estate_beneficiary: 'Estate beneficiary',
-    estate_executor: 'Estate executor',
-    financial_account: 'Financial account',
-    household_group: 'Household',
-    household_member: 'Household member',
-    income_item: 'Income item',
-    liability: 'Liability',
-    person: 'Client',
-    power_of_attorney: 'Power of attorney',
-    professional_relationship: 'Professional relationship',
-    property_asset: 'Property asset',
-    risk_profile: 'Risk profile',
-    super_pension_account: 'Super/pension account',
-    verification_check: 'Verification check',
-    workflow_instance: 'Workflow',
-  }
-
-  const normalized = normalizeEntityType(entityType)
-  return labels[normalized] ?? entityType.replace(/_/g, ' ')
+function readSnapshotRecord(snapshot: AuditSnapshot | null): Record<string, unknown> | null {
+  return isRecord(snapshot) ? snapshot : null
 }
 
-function titleForAuditTimeline(entityType: string, action: AuditAction): string {
-  const label = labelForEntityType(entityType)
-  const actionLabels: Partial<Record<AuditAction, string>> = {
-    CREATE: 'created',
-    UPDATE: 'updated',
-    DELETE: 'deleted',
-    ARCHIVE: 'archived',
-    OUTCOME_SET: 'outcome set',
-    WORKFLOW_ADVANCED: 'advanced',
-    WORKFLOW_STOPPED: 'stopped',
-    DRIVER_ACTION_RECORDED: 'driver action recorded',
-    WORKFLOW_SPAWNED: 'started',
-    NUDGE_FIRED: 'nudge fired',
-    SEND_COMMS: 'communication sent',
+function parseDateValue(value: unknown): Date | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value
   }
 
-  return `${label} ${actionLabels[action] ?? action.toLowerCase()}`
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function formatMelbourneDate(value: Date | null): string | null {
+  if (!value) {
+    return null
+  }
+
+  return new Intl.DateTimeFormat('en-AU', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Australia/Melbourne',
+  }).format(value)
+}
+
+function formatMelbourneDateTime(value: Date | null): string | null {
+  if (!value) {
+    return null
+  }
+
+  return new Intl.DateTimeFormat('en-AU', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'Australia/Melbourne',
+    timeZoneName: 'short',
+  }).format(value)
+}
+
+function calendlyNoteValue(notes: string | null, label: string): string | null {
+  if (!notes) {
+    return null
+  }
+
+  const prefix = `${label}:`
+  const line = notes
+    .split(/\r?\n/)
+    .find((candidate) => candidate.trim().startsWith(prefix))
+
+  return line ? line.trim().slice(prefix.length).trim() || null : null
+}
+
+function meetingTypeLabel(snapshot: Record<string, unknown> | null): string {
+  const notes = maybeString(snapshot?.notes)
+  const fromNotes = calendlyNoteValue(notes, 'Meeting type')
+  if (fromNotes) {
+    return fromNotes.replace(/\s*\([^)]*\)\s*$/, '').trim() || fromNotes
+  }
+
+  return humanEntityName(maybeString(snapshot?.meeting_type_key) ?? 'meeting')
+}
+
+function inviteeFirstName(snapshot: Record<string, unknown> | null): string {
+  const notes = maybeString(snapshot?.notes)
+  const invitee = calendlyNoteValue(notes, 'Invitee')
+    ?.replace(/<[^>]+>/g, '')
+    .trim()
+  const source = invitee || maybeString(snapshot?.invitee_email) || 'client'
+  return source.split(/\s+/).find(Boolean) ?? 'client'
+}
+
+function calendlyTimelineText(params: {
+  action: AuditAction
+  beforeSnapshot: AuditSnapshot | null
+  afterSnapshot: AuditSnapshot | null
+  metadata: Record<string, unknown> | null
+}): { title: string; body: string | null } | null {
+  const snapshot = readSnapshotRecord(params.afterSnapshot) ?? readSnapshotRecord(params.beforeSnapshot)
+  const source = maybeString(snapshot?.source)?.toUpperCase()
+  const metadataSource = maybeString(params.metadata?.source)?.toLowerCase()
+  if (source !== 'CALENDLY' && metadataSource !== 'calendly') {
+    return null
+  }
+
+  const notes = maybeString(snapshot?.notes)
+  const meetingType = meetingTypeLabel(snapshot)
+  const firstName = inviteeFirstName(snapshot)
+  const startAt = parseDateValue(snapshot?.opened_at)
+  const dateLabel = formatMelbourneDate(startAt) ?? 'the booked date'
+  const eventType = maybeString(params.metadata?.event_type)
+  const rescheduled =
+    maybeString(snapshot?.calendly_rescheduled_from) ||
+    notes?.toLowerCase().includes('rescheduled')
+  const cancelled =
+    eventType === 'invitee.canceled' ||
+    maybeString(snapshot?.status) === 'cancelled' ||
+    notes?.toLowerCase().includes('cancelled')
+
+  const title =
+    params.action === 'CREATE'
+      ? `Calendly: ${meetingType} booked with ${firstName} for ${dateLabel}`
+      : rescheduled
+        ? 'Calendly: meeting rescheduled'
+        : cancelled
+          ? 'Calendly: meeting cancelled'
+          : `Calendly: ${humanEntityName('engagement')} ${humanAction(params.action)}`
+
+  const bodyLines = [
+    `Meeting type: ${meetingType}`,
+    `Start time: ${formatMelbourneDateTime(startAt) ?? 'Unknown'}`,
+    `Duration: ${calendlyNoteValue(notes, 'Duration') ?? 'Unknown'}`,
+    `Location: ${calendlyNoteValue(notes, 'Location') ?? 'Unknown'}`,
+  ]
+
+  return {
+    title,
+    body: bodyLines.join('\n'),
+  }
+}
+
+function textForAuditTimeline(params: {
+  entityType: string
+  action: AuditAction
+  beforeSnapshot: AuditSnapshot | null
+  afterSnapshot: AuditSnapshot | null
+  metadata: Record<string, unknown> | null
+}): { title: string; body: string | null } {
+  if (normalizeEntityType(params.entityType) === 'engagement') {
+    const calendlyText = calendlyTimelineText(params)
+    if (calendlyText) {
+      return calendlyText
+    }
+  }
+
+  return {
+    title: `${humanEntityName(params.entityType)} ${humanAction(params.action)}`,
+    body: null,
+  }
 }
 
 async function writeAuditTimelineFallback(params: {
@@ -695,13 +803,21 @@ async function writeAuditTimelineFallback(params: {
       metadata: params.metadata,
     })
 
+    const timelineText = textForAuditTimeline({
+      entityType: params.entityType,
+      action: params.action,
+      beforeSnapshot: params.beforeSnapshot,
+      afterSnapshot: params.afterSnapshot,
+      metadata: params.metadata,
+    })
+
     for (const target of targets) {
       await writeTimeline({
         party_id: target.party_id,
         household_id: target.household_id,
         kind: auditTimelineKind(params.entityType, params.action),
-        title: titleForAuditTimeline(params.entityType, params.action),
-        body: null,
+        title: timelineText.title,
+        body: timelineText.body,
         actor_user_id: params.actorUserId,
         related_entity_type: 'audit_event',
         related_entity_id: params.auditEventId,
@@ -741,14 +857,19 @@ async function writeAlertTimelineEntry(params: {
       typeof params.input.payload.field === 'string'
         ? params.input.payload.field
         : params.input.entity_type
+    const qualifiedField = `${params.input.entity_type}.${field}`
+    const fieldChange = describeFieldChange(
+      params.input.payload.old,
+      params.input.payload.new,
+    )
 
     for (const target of targets) {
       await writeTimeline({
         party_id: target.party_id,
         household_id: target.household_id,
         kind: 'alert',
-        title: `Alert: ${params.input.entity_type}.${field} changed`,
-        body: null,
+        title: `${humanFieldName(qualifiedField)} ${fieldChange.verb}`,
+        body: fieldChange.summary,
         actor_user_id: params.actorUserId,
         related_entity_type: 'alert_instance',
         related_entity_id: params.alertId,
