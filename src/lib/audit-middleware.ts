@@ -100,6 +100,7 @@ const DOMAIN_TIMELINE_ENTITY_TYPES = new Set([
   'sharepointfolder',
   'task',
   'alert_instance',
+  'timeline_entry',
 ])
 
 type TimelineTarget = {

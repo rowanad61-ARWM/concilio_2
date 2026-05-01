@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client'
 
 import { db } from '@/lib/db'
 
-const TIMELINE_KINDS = [
+export const TIMELINE_KINDS = [
   'email_in',
   'email_out',
   'sms_in',
@@ -20,7 +20,7 @@ const TIMELINE_KINDS = [
 
 export type TimelineKind = (typeof TIMELINE_KINDS)[number]
 
-const TIMELINE_SOURCES = ['native', 'xplan', 'manual_import'] as const
+export const TIMELINE_SOURCES = ['native', 'xplan', 'manual_import'] as const
 
 export type TimelineSource = (typeof TIMELINE_SOURCES)[number]
 
@@ -64,7 +64,7 @@ function isValidSource(source: string): source is TimelineSource {
 export async function writeTimelineEntry(
   input: TimelineEntryInput,
   opts?: { tx?: Prisma.TransactionClient },
-): Promise<void> {
+) {
   const source = input.source ?? 'native'
 
   if (!isValidKind(input.kind)) {
@@ -74,7 +74,7 @@ export async function writeTimelineEntry(
       related_entity_type: input.related_entity_type,
       related_entity_id: input.related_entity_id,
     })
-    return
+    return null
   }
 
   if (!isValidSource(source)) {
@@ -85,12 +85,12 @@ export async function writeTimelineEntry(
       related_entity_type: input.related_entity_type,
       related_entity_id: input.related_entity_id,
     })
-    return
+    return null
   }
 
   try {
     const client: TimelineDbClient = opts?.tx ?? db
-    await client.timeline_entry.create({
+    return await client.timeline_entry.create({
       data: {
         party_id: input.party_id,
         household_id: input.household_id ?? null,
@@ -115,5 +115,6 @@ export async function writeTimelineEntry(
       related_entity_type: input.related_entity_type,
       related_entity_id: input.related_entity_id,
     })
+    return null
   }
 }
