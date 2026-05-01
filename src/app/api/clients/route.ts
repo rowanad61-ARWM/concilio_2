@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { loadClientRecordSnapshot, responseId } from "@/lib/client-audit-snapshots"
+import { createDefaultHousehold } from "@/lib/clientCreate"
 import { db } from "@/lib/db"
 import { withAuditTrail } from "@/lib/audit-middleware"
 import {
@@ -58,6 +59,11 @@ async function createClient(request: Request) {
 
     await db.person.create({
       data: personData,
+    })
+
+    await createDefaultHousehold({
+      party_id: party.id,
+      last_name: lastName,
     })
 
     const classificationData = coerceEmptyToNull(
