@@ -147,19 +147,36 @@ async function uploadRecording(
       .filter(Boolean)
       .join("\n")
 
-    const note = await db.file_note.create({
-      data: {
-        party_id: party.id,
-        household_id: householdId,
-        engagement_id: engagementId,
-        note_type: "meeting",
-        text: noteText,
-        recording_url: recordingUrl,
-        source_type: "transcript",
-        review_state: "draft",
-        author_user_id: actorUserId ?? PLACEHOLDER_AUTHOR_ID,
-        created_at: new Date(),
-      },
+    const { note, processingJob } = await db.$transaction(async (tx) => {
+      const createdNote = await tx.file_note.create({
+        data: {
+          party_id: party.id,
+          household_id: householdId,
+          engagement_id: engagementId,
+          note_type: "meeting",
+          text: noteText,
+          recording_url: recordingUrl,
+          source_type: "transcript",
+          review_state: "draft",
+          author_user_id: actorUserId ?? PLACEHOLDER_AUTHOR_ID,
+          created_at: new Date(),
+        },
+      })
+
+      const createdJob = await tx.processing_job.create({
+        data: {
+          job_type: "transcribe_recording",
+          payload: {
+            file_note_id: createdNote.id,
+            recording_url: recordingUrl,
+            party_id: party.id,
+            engagement_id: engagementId,
+            sharepoint_drive_item_id: uploaded.id,
+          },
+        },
+      })
+
+      return { note: createdNote, processingJob: createdJob }
     })
 
     await writeTimelineEntry({
@@ -183,6 +200,7 @@ async function uploadRecording(
         duration_seconds: durationSeconds,
         engagement_id: engagementId,
         is_partial: isPartial,
+        processing_job_id: processingJob.id,
       },
     })
 
@@ -191,6 +209,7 @@ async function uploadRecording(
         id: note.id,
         fileNote: note,
         recording: uploaded,
+        processingJob,
       },
       { status: 201 },
     )
