@@ -832,6 +832,8 @@ model parked_fact {
   party               party         @relation(fields: [party_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([party_id, status], map: "idx_parked_fact_party_status")
+  @@index([status], map: "idx_parked_fact_status")
+  @@index([category, status], map: "idx_parked_fact_category_status")
   @@index([source_file_note_id], map: "idx_parked_fact_source_file_note")
 }
 
