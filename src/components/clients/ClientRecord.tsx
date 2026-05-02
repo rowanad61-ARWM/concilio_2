@@ -28,6 +28,8 @@ import ProfessionalRelationshipModal from "@/components/clients/ProfessionalRela
 import QuickAddMeetingModal from "@/components/clients/QuickAddMeetingModal"
 import QuickAddNoteModal from "@/components/clients/QuickAddNoteModal"
 import QuickAddPhoneCallModal from "@/components/clients/QuickAddPhoneCallModal"
+import SuperPensionAccountDeleteConfirm from "@/components/clients/SuperPensionAccountDeleteConfirm"
+import SuperPensionAccountModal from "@/components/clients/SuperPensionAccountModal"
 import TaskModal, {
   TASK_STATUS_OPTIONS,
   type EditableTaskEntry,
@@ -47,6 +49,7 @@ import type {
   EstateExecutor,
   PowerOfAttorney,
   ProfessionalRelationship,
+  SuperPensionAccount,
   TimelineEngagement,
   TimelineNote,
 } from "@/types/client-record"
@@ -79,6 +82,10 @@ type EstateBeneficiaryModalState =
 type PowerOfAttorneyModalState =
   | { mode: "create"; powerOfAttorney: null }
   | { mode: "edit"; powerOfAttorney: PowerOfAttorney }
+  | null
+type SuperPensionAccountModalState =
+  | { mode: "create"; account: null }
+  | { mode: "edit"; account: SuperPensionAccount }
   | null
 type EngagementType = (typeof ENGAGEMENT_TYPE_VALUES)[number]
 type LifecycleStage = "prospect" | "engagement" | "advice" | "implementation" | "client" | "lost" | "ceased"
@@ -1068,6 +1075,58 @@ function formatPowerOfAttorneyType(value: string) {
   }
 }
 
+function formatSuperAccountType(value: string) {
+  switch (value) {
+    case "super":
+      return "Super (accumulation)"
+    case "pension":
+      return "Pension"
+    case "ttr":
+      return "Transition to retirement (TTR)"
+    case "defined_benefit":
+      return "Defined benefit"
+    case "smsf":
+      return "SMSF"
+    default:
+      return formatCategory(value)
+  }
+}
+
+function formatSuperNominationType(value: string | null | undefined) {
+  switch (value) {
+    case "binding":
+      return "Binding"
+    case "non_binding":
+      return "Non-binding"
+    case "reversionary":
+      return "Reversionary"
+    case "none":
+      return "None"
+    case "unknown":
+      return "Unknown"
+    default:
+      return null
+  }
+}
+
+function formatCurrencyAmount(value: string | number | null | undefined) {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  const raw = String(value).trim()
+  const match = raw.match(/^(\d+)(?:\.(\d{1,2}))?$/)
+  if (!match) {
+    return null
+  }
+
+  const whole = match[1].replace(/^0+(?=\d)/, "") || "0"
+  const cents = (match[2] ?? "").padEnd(2, "0")
+  const withCommas = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+
+  return `$${withCommas}.${cents}`
+}
+
 function formatFuneralPlanStatus(value: string | null | undefined) {
   switch (value) {
     case "in_place":
@@ -1462,6 +1521,8 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const [estateBeneficiaryDeleteTarget, setEstateBeneficiaryDeleteTarget] = useState<EstateBeneficiary | null>(null)
   const [powerOfAttorneyModalState, setPowerOfAttorneyModalState] = useState<PowerOfAttorneyModalState>(null)
   const [powerOfAttorneyDeleteTarget, setPowerOfAttorneyDeleteTarget] = useState<PowerOfAttorney | null>(null)
+  const [superModalState, setSuperModalState] = useState<SuperPensionAccountModalState>(null)
+  const [superDeleteTarget, setSuperDeleteTarget] = useState<SuperPensionAccount | null>(null)
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0)
   const [isEngagementPanelOpen, setIsEngagementPanelOpen] = useState(false)
   const [isSavingEngagement, setIsSavingEngagement] = useState(false)
@@ -3214,6 +3275,14 @@ export default function ClientRecord({ client }: ClientRecordProps) {
     setPowerOfAttorneyModalState({ mode: "edit", powerOfAttorney })
   }
 
+  function openCreateSuperModal() {
+    setSuperModalState({ mode: "create", account: null })
+  }
+
+  function openEditSuperModal(account: SuperPensionAccount) {
+    setSuperModalState({ mode: "edit", account })
+  }
+
   function handleEstateSaved() {
     refreshClientData()
   }
@@ -4005,7 +4074,92 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </div>
           </ExpandableSection>
 
-          <ExpandableSection title="Employment" action={renderSectionEditButton("employment")} className="order-7">
+          <ExpandableSection title="Super & pensions" className="order-7">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">Accounts</p>
+                <button
+                  type="button"
+                  onClick={openCreateSuperModal}
+                  className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                >
+                  + Add super/pension account
+                </button>
+              </div>
+
+              {clientData.superPensionAccounts.length > 0 ? (
+                <div className="space-y-2">
+                  {clientData.superPensionAccounts.map((account) => {
+                    const balance = formatCurrencyAmount(account.currentBalance)
+                    const nomination = formatSuperNominationType(account.beneficiaryNominationType)
+                    const notes = truncateText(account.notes, 100)
+                    const hasBpay = Boolean(account.bpayBillerCode || account.bpayReference)
+
+                    return (
+                      <div key={account.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-white p-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <p className="text-[13px] font-medium text-[#113238]">
+                              {formatSuperAccountType(account.accountType)} - {account.providerName}
+                            </p>
+                            {account.productName ? (
+                              <p className="text-[12px] text-[#6b7280]">{account.productName}</p>
+                            ) : null}
+                            {balance ? (
+                              <p className="text-[12px] text-[#113238]">
+                                {balance}
+                                {account.balanceAsAt ? ` as at ${formatDate(account.balanceAsAt)}` : ""}
+                              </p>
+                            ) : null}
+                            {account.memberNumber ? (
+                              <p className="text-[11px] text-[#6b7280]">Member: {account.memberNumber}</p>
+                            ) : null}
+                            {nomination ? (
+                              <p className="text-[11px] text-[#6b7280]">Nomination: {nomination}</p>
+                            ) : null}
+                            {hasBpay ? (
+                              <p className="text-[11px] text-[#6b7280]">
+                                BPAY: {account.bpayBillerCode ?? "-"} / {account.bpayReference ?? "-"}
+                              </p>
+                            ) : null}
+                            {notes ? <p className="text-[11px] text-[#6b7280]">{notes}</p> : null}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openEditSuperModal(account)}
+                              className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSuperDeleteTarget(account)}
+                              className="rounded-[6px] border-[0.5px] border-[#FCA5A5] bg-white px-[8px] py-[4px] text-[10px] text-[#B42318]"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-[12px] text-[#9ca3af]">No super or pension accounts recorded.</p>
+              )}
+
+              <button
+                type="button"
+                onClick={openCreateSuperModal}
+                className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+              >
+                + Add super/pension account
+              </button>
+            </div>
+          </ExpandableSection>
+
+          <ExpandableSection title="Employment" action={renderSectionEditButton("employment")} className="order-8">
             {clientData.employment ? (
               <div className="space-y-[10px]">
                 <DetailField
@@ -4033,7 +4187,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             )}
           </ExpandableSection>
 
-          <ExpandableSection title="Risk Profile" className="order-8">
+          <ExpandableSection title="Risk Profile" className="order-9">
 
             {clientData.riskProfile ? (
               <div className="space-y-2">
@@ -4178,7 +4332,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             ) : null}
           </ExpandableSection>
 
-          <ExpandableSection title="Service" className="order-9">
+          <ExpandableSection title="Service" className="order-10">
             <div className="space-y-[10px]">
               <div className="relative space-y-[6px]">
               <p className="text-[11px] text-[#9ca3af]">Lifecycle stage</p>
@@ -4275,7 +4429,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </div>
           </ExpandableSection>
 
-          <ExpandableSection title="Important information" className="order-10">
+          <ExpandableSection title="Important information" className="order-11">
             <p className="text-[12px] text-[#6b7280]">
               Sensitive credentials reveal coming in a future round
             </p>
@@ -4975,6 +5129,22 @@ export default function ClientRecord({ client }: ClientRecordProps) {
         isOpen={Boolean(powerOfAttorneyDeleteTarget)}
         onClose={() => setPowerOfAttorneyDeleteTarget(null)}
         onConfirmed={handleEstateSaved}
+      />
+      <SuperPensionAccountModal
+        clientId={clientData.id}
+        mode={superModalState?.mode ?? "create"}
+        account={superModalState?.account ?? null}
+        isOpen={Boolean(superModalState)}
+        onClose={() => setSuperModalState(null)}
+        onSaved={refreshClientData}
+      />
+      <SuperPensionAccountDeleteConfirm
+        clientId={clientData.id}
+        clientDisplayName={clientData.displayName}
+        account={superDeleteTarget}
+        isOpen={Boolean(superDeleteTarget)}
+        onClose={() => setSuperDeleteTarget(null)}
+        onConfirmed={refreshClientData}
       />
 
       <ClientEmailTemplateModal

@@ -45,6 +45,26 @@ function mapVerificationResult(value: string) {
   }
 }
 
+function decimalToString(value: unknown) {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value === "string") {
+    return value
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value.toFixed(2) : null
+  }
+
+  if (typeof value === "object" && "toString" in value && typeof value.toString === "function") {
+    return value.toString()
+  }
+
+  return null
+}
+
 export default async function ClientRecordPage({
   params,
 }: {
@@ -63,6 +83,7 @@ export default async function ClientRecordPage({
     estateExecutors,
     estateBeneficiaries,
     powersOfAttorney,
+    superPensionAccounts,
   ] = await Promise.all([
     db.party.findUnique({
       where: { id },
@@ -165,6 +186,19 @@ export default async function ClientRecordPage({
       ],
     }),
     db.power_of_attorney.findMany({
+      where: {
+        person_id: id,
+      },
+      orderBy: [
+        {
+          created_at: "asc",
+        },
+        {
+          id: "asc",
+        },
+      ],
+    }),
+    db.super_pension_account.findMany({
       where: {
         person_id: id,
       },
@@ -314,6 +348,23 @@ export default async function ClientRecordPage({
       surname: powerOfAttorney.surname,
       preferredName: powerOfAttorney.preferred_name,
       notes: powerOfAttorney.notes,
+    })),
+    superPensionAccounts: superPensionAccounts.map((account) => ({
+      id: account.id,
+      accountType: account.account_type,
+      providerName: account.provider_name,
+      productName: account.product_name,
+      memberNumber: account.member_number,
+      currentBalance: decimalToString(account.current_balance),
+      balanceAsAt: account.balance_as_at?.toISOString() ?? null,
+      contributionsYtd: decimalToString(account.contributions_ytd),
+      investmentOption: account.investment_option,
+      insuranceInFundSummary: account.insurance_in_fund_summary,
+      beneficiaryNominationType: account.beneficiary_nomination_type,
+      beneficiaryNominationNotes: account.beneficiary_nomination_notes,
+      bpayBillerCode: account.bpay_biller_code,
+      bpayReference: account.bpay_reference,
+      notes: account.notes,
     })),
     classification: party.client_classification
       ? {

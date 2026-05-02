@@ -100,6 +100,24 @@ export type PowerOfAttorney = {
   notes: string | null
 }
 
+export type SuperPensionAccount = {
+  id: string
+  accountType: string
+  providerName: string
+  productName: string | null
+  memberNumber: string | null
+  currentBalance: string | null
+  balanceAsAt: string | null
+  contributionsYtd: string | null
+  investmentOption: string | null
+  insuranceInFundSummary: string | null
+  beneficiaryNominationType: string | null
+  beneficiaryNominationNotes: string | null
+  bpayBillerCode: string | null
+  bpayReference: string | null
+  notes: string | null
+}
+
 export type ClientDetail = {
   id: string
   displayName: string
@@ -122,6 +140,7 @@ export type ClientDetail = {
   estateExecutors: EstateExecutor[]
   estateBeneficiaries: EstateBeneficiary[]
   powersOfAttorney: PowerOfAttorney[]
+  superPensionAccounts: SuperPensionAccount[]
   classification: {
     serviceTier: string | null
     lifecycleStage: string | null
