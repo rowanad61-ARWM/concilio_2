@@ -118,6 +118,17 @@ export type SuperPensionAccount = {
   notes: string | null
 }
 
+export type CentrelinkDetail = {
+  id: string
+  isEligible: boolean | null
+  benefitType: string | null
+  crn: string | null
+  hasConcessionCard: boolean
+  concessionCardType: string | null
+  hasGiftedAssets: boolean
+  notes: string | null
+}
+
 export type ClientDetail = {
   id: string
   displayName: string
@@ -141,6 +152,7 @@ export type ClientDetail = {
   estateBeneficiaries: EstateBeneficiary[]
   powersOfAttorney: PowerOfAttorney[]
   superPensionAccounts: SuperPensionAccount[]
+  centrelink: CentrelinkDetail | null
   classification: {
     serviceTier: string | null
     lifecycleStage: string | null

@@ -84,6 +84,7 @@ export default async function ClientRecordPage({
     estateBeneficiaries,
     powersOfAttorney,
     superPensionAccounts,
+    centrelinkDetail,
   ] = await Promise.all([
     db.party.findUnique({
       where: { id },
@@ -210,6 +211,11 @@ export default async function ClientRecordPage({
           id: "asc",
         },
       ],
+    }),
+    db.centrelink_detail.findUnique({
+      where: {
+        person_id: id,
+      },
     }),
   ])
 
@@ -366,6 +372,18 @@ export default async function ClientRecordPage({
       bpayReference: account.bpay_reference,
       notes: account.notes,
     })),
+    centrelink: centrelinkDetail
+      ? {
+          id: centrelinkDetail.id,
+          isEligible: centrelinkDetail.is_eligible,
+          benefitType: centrelinkDetail.benefit_type,
+          crn: centrelinkDetail.crn,
+          hasConcessionCard: centrelinkDetail.has_concession_card,
+          concessionCardType: centrelinkDetail.concession_card_type,
+          hasGiftedAssets: centrelinkDetail.has_gifted_assets,
+          notes: centrelinkDetail.notes,
+        }
+      : null,
     classification: party.client_classification
       ? {
           serviceTier: party.client_classification.service_segment ?? party.client_classification.service_tier,

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useState } from "react"
 
 import AddressSectionModal from "@/components/clients/AddressSectionModal"
+import CentrelinkSectionModal from "@/components/clients/CentrelinkSectionModal"
 import ClientJourney from "@/components/clients/ClientJourney"
 import ClientTimeline from "@/components/clients/ClientTimeline"
 import DeleteClientButton from "@/components/clients/DeleteClientButton"
@@ -45,6 +46,7 @@ import type {
   ClientAddress,
   ClientDetail,
   ClientHouseholdMember,
+  CentrelinkDetail,
   EstateBeneficiary,
   EstateExecutor,
   PowerOfAttorney,
@@ -1109,6 +1111,58 @@ function formatSuperNominationType(value: string | null | undefined) {
   }
 }
 
+function formatCentrelinkBenefitType(value: string | null | undefined) {
+  switch (value) {
+    case "age_pension":
+      return "Age pension"
+    case "disability_support":
+      return "Disability support"
+    case "family_payments":
+      return "Family payments"
+    case "carer_payment":
+      return "Carer payment"
+    case "jobseeker":
+      return "JobSeeker"
+    case "none":
+      return "None"
+    case "other":
+      return "Other"
+    default:
+      return null
+  }
+}
+
+function formatConcessionCardType(value: string | null | undefined) {
+  switch (value) {
+    case "pensioner_concession_card":
+      return "Pensioner Concession Card"
+    case "cshc":
+      return "Commonwealth Seniors Health Card"
+    case "hcc":
+      return "Health Care Card"
+    case "other":
+      return "Other"
+    default:
+      return null
+  }
+}
+
+function hasMeaningfulCentrelinkDetail(centrelink: CentrelinkDetail | null) {
+  if (!centrelink) {
+    return false
+  }
+
+  return (
+    centrelink.isEligible !== null ||
+    Boolean(centrelink.benefitType) ||
+    Boolean(centrelink.crn?.trim()) ||
+    centrelink.hasConcessionCard ||
+    Boolean(centrelink.concessionCardType) ||
+    centrelink.hasGiftedAssets ||
+    Boolean(centrelink.notes?.trim())
+  )
+}
+
 function formatCurrencyAmount(value: string | number | null | undefined) {
   if (value === null || value === undefined) {
     return null
@@ -1523,6 +1577,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const [powerOfAttorneyDeleteTarget, setPowerOfAttorneyDeleteTarget] = useState<PowerOfAttorney | null>(null)
   const [superModalState, setSuperModalState] = useState<SuperPensionAccountModalState>(null)
   const [superDeleteTarget, setSuperDeleteTarget] = useState<SuperPensionAccount | null>(null)
+  const [isCentrelinkModalOpen, setIsCentrelinkModalOpen] = useState(false)
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0)
   const [isEngagementPanelOpen, setIsEngagementPanelOpen] = useState(false)
   const [isSavingEngagement, setIsSavingEngagement] = useState(false)
@@ -1635,6 +1690,14 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const residentialAddressLines = formatAddressLines(residentialAddress)
   const postalAddressLines = formatAddressLines(postalAddress)
   const showPostalAddress = postalAddressLines.length > 0 && !addressesEqual(residentialAddress, postalAddress)
+  const hasCentrelinkDetails = hasMeaningfulCentrelinkDetail(clientData.centrelink)
+  const centrelinkBenefitType = formatCentrelinkBenefitType(clientData.centrelink?.benefitType)
+  const centrelinkConcessionCard =
+    clientData.centrelink && (clientData.centrelink.hasConcessionCard || clientData.centrelink.concessionCardType)
+      ? formatConcessionCardType(clientData.centrelink.concessionCardType) ??
+        (clientData.centrelink.hasConcessionCard ? "Yes (type not recorded)" : null)
+      : null
+  const centrelinkNotes = truncateText(clientData.centrelink?.notes ?? null, 150)
   const hasEmergencyContact = Boolean(
     clientData.person?.emergencyContactName ||
       clientData.person?.emergencyContactRelationship ||
@@ -4159,7 +4222,49 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </div>
           </ExpandableSection>
 
-          <ExpandableSection title="Employment" action={renderSectionEditButton("employment")} className="order-8">
+          <ExpandableSection
+            title="Centrelink"
+            action={
+              hasCentrelinkDetails ? (
+                <button
+                  type="button"
+                  onClick={() => setIsCentrelinkModalOpen(true)}
+                  className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                >
+                  Edit
+                </button>
+              ) : undefined
+            }
+            className="order-8"
+          >
+            {hasCentrelinkDetails && clientData.centrelink ? (
+              <div className="space-y-[10px]">
+                {clientData.centrelink.isEligible !== null ? (
+                  <DetailField label="Eligibility" value={clientData.centrelink.isEligible ? "Yes" : "No"} />
+                ) : null}
+                {centrelinkBenefitType ? <DetailField label="Benefit type" value={centrelinkBenefitType} /> : null}
+                {clientData.centrelink.crn ? <DetailField label="CRN" value={clientData.centrelink.crn} /> : null}
+                {centrelinkConcessionCard ? (
+                  <DetailField label="Concession card" value={centrelinkConcessionCard} />
+                ) : null}
+                {clientData.centrelink.hasGiftedAssets ? <DetailField label="Gifted assets" value="Yes" /> : null}
+                {centrelinkNotes ? <DetailField label="Notes" value={centrelinkNotes} /> : null}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-[12px] text-[#9ca3af]">No Centrelink details recorded.</p>
+                <button
+                  type="button"
+                  onClick={() => setIsCentrelinkModalOpen(true)}
+                  className="rounded-[6px] border-[0.5px] border-[#e5e7eb] bg-white px-[8px] py-[4px] text-[10px] text-[#113238]"
+                >
+                  Edit Centrelink details
+                </button>
+              </div>
+            )}
+          </ExpandableSection>
+
+          <ExpandableSection title="Employment" action={renderSectionEditButton("employment")} className="order-9">
             {clientData.employment ? (
               <div className="space-y-[10px]">
                 <DetailField
@@ -4187,7 +4292,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             )}
           </ExpandableSection>
 
-          <ExpandableSection title="Risk Profile" className="order-9">
+          <ExpandableSection title="Risk Profile" className="order-10">
 
             {clientData.riskProfile ? (
               <div className="space-y-2">
@@ -4332,7 +4437,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             ) : null}
           </ExpandableSection>
 
-          <ExpandableSection title="Service" className="order-10">
+          <ExpandableSection title="Service" className="order-11">
             <div className="space-y-[10px]">
               <div className="relative space-y-[6px]">
               <p className="text-[11px] text-[#9ca3af]">Lifecycle stage</p>
@@ -4429,7 +4534,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
             </div>
           </ExpandableSection>
 
-          <ExpandableSection title="Important information" className="order-11">
+          <ExpandableSection title="Important information" className="order-12">
             <p className="text-[12px] text-[#6b7280]">
               Sensitive credentials reveal coming in a future round
             </p>
@@ -5145,6 +5250,13 @@ export default function ClientRecord({ client }: ClientRecordProps) {
         isOpen={Boolean(superDeleteTarget)}
         onClose={() => setSuperDeleteTarget(null)}
         onConfirmed={refreshClientData}
+      />
+      <CentrelinkSectionModal
+        clientId={clientData.id}
+        clientDetail={clientData}
+        isOpen={isCentrelinkModalOpen}
+        onClose={() => setIsCentrelinkModalOpen(false)}
+        onSaved={refreshClientData}
       />
 
       <ClientEmailTemplateModal
