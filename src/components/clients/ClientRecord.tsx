@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react"
 import AddressSectionModal from "@/components/clients/AddressSectionModal"
 import CentrelinkSectionModal from "@/components/clients/CentrelinkSectionModal"
 import ClientJourney from "@/components/clients/ClientJourney"
+import ClientRecordingControls from "@/components/clients/ClientRecordingControls"
 import ClientTimeline from "@/components/clients/ClientTimeline"
 import DeleteClientButton from "@/components/clients/DeleteClientButton"
 import ClientEmailTemplateModal from "@/components/clients/ClientEmailTemplateModal"
@@ -677,6 +678,34 @@ function getNextEngagementIndicator(engagements: TimelineEngagement[]): HeaderIn
     tone: "muted",
     icon: <CalendarIcon />,
   }
+}
+
+function getActiveRecordingEngagement(engagements: TimelineEngagement[]): TimelineEngagement | null {
+  const nowMs = Date.now()
+  const preStartWindowMs = 15 * 60 * 1000
+  const postStartWindowMs = 4 * 60 * 60 * 1000
+
+  return (
+    engagements
+      .map((engagement) => {
+        const candidateDate = engagement.openedAt ?? engagement.startedAt
+        const parsed = candidateDate ? new Date(candidateDate) : null
+        return parsed && !Number.isNaN(parsed.getTime()) ? { engagement, parsed } : null
+      })
+      .filter((item): item is { engagement: TimelineEngagement; parsed: Date } => Boolean(item))
+      .filter(({ engagement, parsed }) => {
+        const status = engagement.status.toLowerCase()
+        return (
+          engagement.source?.toUpperCase() === "CALENDLY" &&
+          status !== "completed" &&
+          status !== "cancelled" &&
+          parsed.getTime() - preStartWindowMs <= nowMs &&
+          nowMs <= parsed.getTime() + postStartWindowMs
+        )
+      })
+      .sort((left, right) => Math.abs(left.parsed.getTime() - nowMs) - Math.abs(right.parsed.getTime() - nowMs))[0]
+      ?.engagement ?? null
+  )
 }
 
 function formatTimelineTimestamp(value: string) {
@@ -1450,6 +1479,15 @@ function NoteHeaderIcon() {
   )
 }
 
+function RecordHeaderIcon() {
+  return (
+    <HeaderMiniIcon>
+      <circle cx="8" cy="8" r="3.2" fill="currentColor" />
+      <circle cx="8" cy="8" r="5.8" stroke="currentColor" strokeWidth="1.1" />
+    </HeaderMiniIcon>
+  )
+}
+
 function IdIcon() {
   return (
     <HeaderMiniIcon>
@@ -1579,6 +1617,7 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const [superDeleteTarget, setSuperDeleteTarget] = useState<SuperPensionAccount | null>(null)
   const [isCentrelinkModalOpen, setIsCentrelinkModalOpen] = useState(false)
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0)
+  const [isRecorderPanelOpen, setIsRecorderPanelOpen] = useState(false)
   const [isEngagementPanelOpen, setIsEngagementPanelOpen] = useState(false)
   const [isSavingEngagement, setIsSavingEngagement] = useState(false)
   const [isSavingIncome, setIsSavingIncome] = useState(false)
@@ -1713,6 +1752,8 @@ export default function ClientRecord({ client }: ClientRecordProps) {
   const idDocumentIndicator = getIdDocumentIndicator(verificationChecks)
   const authorityIndicator = getAuthorityIndicator()
   const nextEngagementIndicator = getNextEngagementIndicator(localEngagements)
+  const activeRecordingEngagement = getActiveRecordingEngagement(localEngagements)
+  const isRecorderVisible = Boolean(activeRecordingEngagement) || isRecorderPanelOpen
   const headerIndicators = [
     idDocumentIndicator,
     authorityIndicator,
@@ -3274,6 +3315,12 @@ export default function ClientRecord({ client }: ClientRecordProps) {
     setActiveDetailTab("timeline")
   }
 
+  function handleRecordingSaved() {
+    setTimelineRefreshKey((current) => current + 1)
+    setActiveDetailTab("timeline")
+    refreshClientData()
+  }
+
   function refreshClientData() {
     router.refresh()
   }
@@ -3427,6 +3474,14 @@ export default function ClientRecord({ client }: ClientRecordProps) {
                 <NoteHeaderIcon />
                 + Note
               </button>
+              <button
+                type="button"
+                onClick={() => setIsRecorderPanelOpen(true)}
+                className="inline-flex items-center gap-[6px] rounded-[7px] border-[0.5px] border-[#E24B4A] bg-white px-[10px] py-[5px] text-[12px] text-[#B42318]"
+              >
+                <RecordHeaderIcon />
+                + Record
+              </button>
             </div>
             <DeleteClientButton clientId={clientData.id} clientName={clientData.displayName} />
             <button
@@ -3469,6 +3524,23 @@ export default function ClientRecord({ client }: ClientRecordProps) {
 
       <div className="flex-1 overflow-y-auto bg-[#F7F9FB]">
         <div className="space-y-4 px-[18px] py-[14px]">
+          <ClientRecordingControls
+            partyId={clientData.id}
+            clientDisplayName={clientData.displayName}
+            isVisible={isRecorderVisible}
+            engagement={
+              activeRecordingEngagement
+                ? {
+                    id: activeRecordingEngagement.id,
+                    title: activeRecordingEngagement.title,
+                    startsAt: activeRecordingEngagement.openedAt ?? activeRecordingEngagement.startedAt,
+                  }
+                : null
+            }
+            onClose={() => setIsRecorderPanelOpen(false)}
+            onSaved={handleRecordingSaved}
+            onToast={(message, kind = "success") => setEmailToast({ kind, message })}
+          />
           <div className="flex flex-col rounded-[8px] border-[0.5px] border-[#e5e7eb] bg-white px-4">
           <ExpandableSection title="Contact" action={renderSectionEditButton("contact")} className="order-1">
             <div className="space-y-[10px]">
