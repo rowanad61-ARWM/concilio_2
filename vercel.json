@@ -7,7 +7,7 @@
     },
     {
       "path": "/api/jobs/process",
-      "schedule": "0 23 * * *"
+      "schedule": "* * * * *"
     }
   ]
 }
