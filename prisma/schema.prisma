@@ -337,6 +337,7 @@ model engagement {
   calendly_reschedule_url   String?
   calendly_rescheduled_from String?
   meeting_type_key          String?
+  meeting_modality          String?
   primary_adviser_id        String?              @db.Uuid
   opened_at                 DateTime             @default(now()) @db.Timestamptz(6)
   completed_at              DateTime?            @db.Timestamptz(6)
@@ -351,12 +352,48 @@ model engagement {
   user_account              user_account?        @relation(fields: [primary_adviser_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   file_note                 file_note[]
   goal                      goal[]
+  meeting_attendee          meeting_attendee[]
+  meeting_transcript        meeting_transcript[]
   review_cycle              review_cycle[]
   workflow_instance         workflow_instance[]
 
   @@index([household_id], map: "idx_engagement_household")
   @@index([status], map: "idx_engagement_status")
   @@index([engagement_type], map: "idx_engagement_type")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model meeting_attendee {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  engagement_id String     @db.Uuid
+  attendee_type String     @default("other")
+  party_id      String?    @db.Uuid
+  display_name  String
+  email         String?
+  role          String?
+  created_at    DateTime   @default(now()) @db.Timestamptz(6)
+  engagement    engagement @relation(fields: [engagement_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  party         party?     @relation(fields: [party_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([engagement_id], map: "idx_meeting_attendee_engagement")
+}
+
+model meeting_transcript {
+  id                  String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transcript_text     String
+  speaker_segments    Json        @default("[]")
+  speaker_name_map    Json        @default("{}")
+  recording_url       String
+  transcription_model String
+  transcription_at    DateTime    @default(now()) @db.Timestamptz(6)
+  calendly_event_uuid String?
+  engagement_id       String?     @db.Uuid
+  created_at          DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime    @default(now()) @updatedAt @db.Timestamptz(6)
+  engagement          engagement? @relation(fields: [engagement_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  file_note           file_note[]
+
+  @@index([engagement_id], map: "idx_meeting_transcript_engagement")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -474,20 +511,29 @@ model fee_disclosure_event {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model file_note {
-  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  party_id        String?          @db.Uuid
-  household_id    String?          @db.Uuid
-  engagement_id   String?          @db.Uuid
-  note_type       String?          @default("general")
-  text            String
-  audio_ref       String?
-  author_user_id  String           @db.Uuid
-  created_at      DateTime         @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime         @default(now()) @db.Timestamptz(6)
-  user_account    user_account     @relation(fields: [author_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  engagement      engagement?      @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  household_group household_group? @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  party           party?           @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                        String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  party_id                  String?             @db.Uuid
+  household_id              String?             @db.Uuid
+  engagement_id             String?             @db.Uuid
+  note_type                 String?             @default("general")
+  text                      String
+  recording_url             String?
+  source_type               String              @default("manual")
+  transcript_id             String?             @db.Uuid
+  generation_model          String?
+  generation_prompt_version String?
+  generation_at             DateTime?           @db.Timestamptz(6)
+  review_state              String              @default("published")
+  ai_draft_content          String?
+  author_user_id            String              @db.Uuid
+  created_at                DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime            @default(now()) @db.Timestamptz(6)
+  user_account              user_account        @relation(fields: [author_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  engagement                engagement?         @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  household_group           household_group?    @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party                     party?              @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  meeting_transcript        meeting_transcript? @relation(fields: [transcript_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  source_tasks              Task[]
 
   @@index([household_id], map: "idx_fn_household")
   @@index([party_id], map: "idx_fn_party")
@@ -728,6 +774,7 @@ model party {
   insurance_policy_insurance_policy_life_insured_party_idToparty insurance_policy[]       @relation("insurance_policy_life_insured_party_idToparty")
   insurance_policy_insurance_policy_owner_party_idToparty        insurance_policy[]       @relation("insurance_policy_owner_party_idToparty")
   liability                                                      liability[]
+  meeting_attendee                                               meeting_attendee[]
   organisation_organisation_idToparty                            organisation?            @relation("organisation_idToparty")
   organisation_organisation_primary_contact_party_idToparty      organisation[]           @relation("organisation_primary_contact_party_idToparty")
   ownership_interest                                             ownership_interest[]
@@ -757,6 +804,26 @@ model permission_grant {
   start_date      DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
   end_date        DateTime? @db.Date
   created_at      DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model processing_job {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  job_type      String
+  status        String    @default("queued")
+  payload       Json      @default("{}")
+  result        Json?
+  error_message String?
+  attempts      Int       @default(0)
+  max_attempts  Int       @default(3)
+  scheduled_at  DateTime  @default(now()) @db.Timestamptz(6)
+  started_at    DateTime? @db.Timestamptz(6)
+  completed_at  DateTime? @db.Timestamptz(6)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@index([status, scheduled_at], map: "idx_processing_job_status_scheduled")
+  @@index([job_type, status], map: "idx_processing_job_type_status")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -1270,8 +1337,10 @@ model Task {
   mondayItemId          String?
   mondayLastSyncAt      DateTime?
   parentTaskId          String?
+  source_file_note_id   String?                 @db.Uuid
   parent                Task?                   @relation("TaskRecurrence", fields: [parentTaskId], references: [id])
   children              Task[]                  @relation("TaskRecurrence")
+  source_file_note      file_note?              @relation(fields: [source_file_note_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   owners                TaskOwner[]
   documentLinks         TaskDocumentLink[]
   notes                 TaskNote[]
@@ -1282,6 +1351,7 @@ model Task {
   @@index([clientId])
   @@index([status])
   @@index([parentTaskId])
+  @@index([source_file_note_id], map: "idx_task_source_file_note")
 }
 
 enum TaskNoteSource {
