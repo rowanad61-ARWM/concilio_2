@@ -11,6 +11,7 @@ import {
   resolveReviewActor,
 } from "@/lib/file-note-review"
 import { db } from "@/lib/db"
+import { PARK_ONLY_CATEGORIES } from "@/lib/extractable-facts"
 
 export default async function FileNoteReviewPage({
   params,
@@ -44,6 +45,11 @@ export default async function FileNoteReviewPage({
       task_extraction_model: true,
       task_extraction_prompt_version: true,
       task_publish_decisions: true,
+      extracted_facts: true,
+      fact_extraction_at: true,
+      fact_extraction_model: true,
+      fact_extraction_prompt_version: true,
+      fact_publish_decisions: true,
       author_user_id: true,
       party: {
         select: {
@@ -173,6 +179,12 @@ export default async function FileNoteReviewPage({
       taskExtractionModel={fileNote.task_extraction_model}
       taskExtractionPromptVersion={fileNote.task_extraction_prompt_version}
       taskPublishDecisions={fileNote.task_publish_decisions}
+      extractedFacts={fileNote.extracted_facts}
+      factExtractionAt={fileNote.fact_extraction_at?.toISOString() ?? null}
+      factExtractionModel={fileNote.fact_extraction_model}
+      factExtractionPromptVersion={fileNote.fact_extraction_prompt_version}
+      factPublishDecisions={fileNote.fact_publish_decisions}
+      parkOnlyCategories={PARK_ONLY_CATEGORIES}
       publishedTasks={fileNote.source_tasks.map((task) => ({
         id: task.id,
         title: task.title,

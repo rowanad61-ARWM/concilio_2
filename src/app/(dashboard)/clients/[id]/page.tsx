@@ -85,6 +85,7 @@ export default async function ClientRecordPage({
     powersOfAttorney,
     superPensionAccounts,
     centrelinkDetail,
+    parkedFactsCount,
   ] = await Promise.all([
     db.party.findUnique({
       where: { id },
@@ -217,6 +218,12 @@ export default async function ClientRecordPage({
         person_id: id,
       },
     }),
+    db.parked_fact.count({
+      where: {
+        party_id: id,
+        status: "parked",
+      },
+    }),
   ])
 
   if (!party) {
@@ -285,6 +292,7 @@ export default async function ClientRecordPage({
     resolvedEmail: resolveEmailForParty(party),
     resolvedMobile: resolveMobileForParty(party),
     resolvedPreferredContactMethod: resolvePreferredContactMethodForParty(party),
+    parkedFactsCount,
     household: householdMembership
       ? {
           id: householdMembership.household_group.id,

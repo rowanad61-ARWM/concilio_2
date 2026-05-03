@@ -532,6 +532,11 @@ model file_note {
   task_extraction_model          String?
   task_extraction_prompt_version String?
   task_publish_decisions         Json?
+  extracted_facts                Json?
+  fact_extraction_at             DateTime?           @db.Timestamptz(6)
+  fact_extraction_model          String?
+  fact_extraction_prompt_version String?
+  fact_publish_decisions         Json?
   author_user_id                 String              @db.Uuid
   created_at                     DateTime            @default(now()) @db.Timestamptz(6)
   updated_at                     DateTime            @default(now()) @db.Timestamptz(6)

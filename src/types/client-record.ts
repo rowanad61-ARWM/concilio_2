@@ -138,6 +138,7 @@ export type ClientDetail = {
   resolvedEmail: string | null
   resolvedMobile: string | null
   resolvedPreferredContactMethod: string | null
+  parkedFactsCount: number
   household: {
     id: string
     name: string

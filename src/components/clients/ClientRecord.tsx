@@ -3445,6 +3445,13 @@ export default function ClientRecord({ client }: ClientRecordProps) {
               {headerIndicators.map((indicator) => (
                 <HeaderStatusPill key={`${indicator.label}-${indicator.value}`} indicator={indicator} />
               ))}
+              <Link
+                href={`/clients/${clientData.id}/parked-facts`}
+                className="inline-flex items-center gap-[5px] rounded-[999px] border-[0.5px] border-[#dbe3e8] bg-white px-[8px] py-[3px] text-[11px] text-[#6b7280] hover:bg-[#f7fafb]"
+              >
+                <span className="font-medium">{clientData.parkedFactsCount}</span>
+                <span>parked facts</span>
+              </Link>
             </div>
           </div>
 

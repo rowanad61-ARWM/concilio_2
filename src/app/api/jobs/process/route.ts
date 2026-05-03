@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client"
 import { NextResponse } from "next/server"
 
 import { db } from "@/lib/db"
+import { extractFactsJob } from "@/lib/jobs/extractFacts"
 import { extractTasksJob } from "@/lib/jobs/extractTasks"
 import { generateFileNoteJob } from "@/lib/jobs/generateFileNote"
 import { transcribeRecordingJob } from "@/lib/jobs/transcribeRecording"
@@ -100,6 +101,10 @@ async function dispatchJob(job: ProcessingJobClaim) {
 
   if (job.job_type === "extract_tasks") {
     return extractTasksJob(job.payload)
+  }
+
+  if (job.job_type === "extract_facts") {
+    return extractFactsJob(job.payload)
   }
 
   throw new Error(`unsupported processing job type: ${job.job_type}`)

@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 
+import FileNoteFactsSection, {
+  parseExtractedFacts,
+  type ParkOnlyCategoryOption,
+  type ReviewFactRow,
+} from "@/components/clients/FileNoteFactsSection"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,6 +54,12 @@ type FileNoteReviewClientProps = {
   taskExtractionModel: string | null
   taskExtractionPromptVersion: string | null
   taskPublishDecisions: unknown
+  extractedFacts: unknown
+  factExtractionAt: string | null
+  factExtractionModel: string | null
+  factExtractionPromptVersion: string | null
+  factPublishDecisions: unknown
+  parkOnlyCategories: ParkOnlyCategoryOption[]
   publishedTasks: PublishedTaskSummary[]
   taskTypeOptions: TaskTypeOptionRow[]
   attendeeSuggestions: AttendeeSuggestion[]
@@ -258,6 +269,12 @@ export default function FileNoteReviewClient({
   taskExtractionModel,
   taskExtractionPromptVersion,
   taskPublishDecisions,
+  extractedFacts,
+  factExtractionAt,
+  factExtractionModel,
+  factExtractionPromptVersion,
+  factPublishDecisions,
+  parkOnlyCategories,
   publishedTasks,
   taskTypeOptions,
   attendeeSuggestions,
@@ -277,8 +294,11 @@ export default function FileNoteReviewClient({
   const [isPublishing, setIsPublishing] = useState(false)
   const [jobMessage, setJobMessage] = useState<string | null>(null)
   const extractedTasksKey = JSON.stringify(extractedTasks ?? null)
+  const extractedFactsKey = JSON.stringify(extractedFacts ?? null)
   const initialTaskRows = useMemo(() => parseExtractedTasks(extractedTasks), [extractedTasksKey])
+  const initialFactRows = useMemo(() => parseExtractedFacts(extractedFacts, parkOnlyCategories), [extractedFactsKey, parkOnlyCategories])
   const [taskRows, setTaskRows] = useState<ReviewTaskRow[] | null>(initialTaskRows)
+  const [factRows, setFactRows] = useState<ReviewFactRow[] | null>(initialFactRows)
 
   const speakerIds = useMemo(() => uniqueSpeakerIds(speakerSegments, speakerNameMap), [speakerNameMap, speakerSegments])
   const attendeeListId = `attendee-suggestions-${fileNoteId}`
@@ -304,6 +324,11 @@ export default function FileNoteReviewClient({
         taskExtractionPromptVersion ? ` (${taskExtractionPromptVersion})` : ""
       }.`
     : "Review AI-suggested follow-up tasks before publishing."
+  const factExtractionDescription = factExtractionAt
+    ? `Extracted ${formatDateTime(factExtractionAt)}${factExtractionModel ? ` by ${factExtractionModel}` : ""}${
+        factExtractionPromptVersion ? ` (${factExtractionPromptVersion})` : ""
+      }.`
+    : "Review AI-suggested client facts before publishing."
 
   useEffect(() => {
     if (isPublished) {
@@ -311,16 +336,17 @@ export default function FileNoteReviewClient({
     }
 
     setTaskRows(initialTaskRows)
-  }, [fileNoteId, initialTaskRows, isPublished])
+    setFactRows(initialFactRows)
+  }, [fileNoteId, initialFactRows, initialTaskRows, isPublished])
 
   useEffect(() => {
-    if (isPublished || extractedTasks !== null) {
+    if (isPublished || (extractedTasks !== null && extractedFacts !== null)) {
       return
     }
 
     const timer = window.setInterval(() => router.refresh(), 10_000)
     return () => window.clearInterval(timer)
-  }, [extractedTasks, isPublished, router])
+  }, [extractedFacts, extractedTasks, isPublished, router])
 
   function updateSpeakerName(speakerId: string, value: string) {
     setSpeakerNameMap((current) => ({
@@ -470,6 +496,7 @@ export default function FileNoteReviewClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...(taskRows ? { tasks: taskRows } : {}),
+          ...(factRows ? { facts: factRows } : {}),
         }),
       })
       const payload = (await response.json().catch(() => ({}))) as { error?: string }
@@ -811,6 +838,16 @@ export default function FileNoteReviewClient({
         )}
       </Section>
 
+      <FileNoteFactsSection
+        isPublished={isPublished}
+        factRows={factRows}
+        factPublishDecisions={factPublishDecisions}
+        parkOnlyCategories={parkOnlyCategories}
+        description={factExtractionDescription}
+        onRefresh={() => router.refresh()}
+        onChange={setFactRows}
+      />
+
       <div className="sticky bottom-0 flex justify-end gap-2 border-t-[0.5px] border-[#dbe3e8] bg-[#F7F9FB]/95 px-1 py-3">
         <button
           type="button"
@@ -856,6 +893,9 @@ export default function FileNoteReviewClient({
               {taskRows === null
                 ? " Task extraction is not complete yet, so no tasks will be created from this publish."
                 : ` ${acceptedTaskCount} task${acceptedTaskCount === 1 ? "" : "s"} will be created.`}
+              {factRows === null
+                ? " Fact extraction is not complete yet, so no facts will be updated or parked."
+                : ` ${factRows.length} fact decision${factRows.length === 1 ? "" : "s"} will be captured.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

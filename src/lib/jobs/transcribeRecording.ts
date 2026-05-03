@@ -183,6 +183,15 @@ export async function transcribeRecordingJob(payloadJson: Prisma.JsonValue): Pro
       },
     })
 
+    await tx.processing_job.create({
+      data: {
+        job_type: "extract_facts",
+        payload: {
+          file_note_id: payload.file_note_id,
+        },
+      },
+    })
+
     return created
   })
 

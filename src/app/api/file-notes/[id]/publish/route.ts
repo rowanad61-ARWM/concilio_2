@@ -5,6 +5,12 @@ import { auth } from "@/auth"
 import { writeAuditEvent } from "@/lib/audit"
 import { db } from "@/lib/db"
 import {
+  applyFactPublishDecisions,
+  parsePublishFacts,
+  type FactFieldAuditEvent,
+  type PublishFactInput,
+} from "@/lib/file-note-fact-publish"
+import {
   canReviewFileNote,
   draftContentFromFileNote,
   isMeaningfulFileNoteText,
@@ -112,7 +118,7 @@ function normalizePublishTask(value: unknown, index: number): PublishTaskInput |
 async function parsePublishTasks(request: Request) {
   const bodyText = await request.text()
   if (!bodyText.trim()) {
-    return { tasks: null as PublishTaskInput[] | null }
+    return { tasks: null as PublishTaskInput[] | null, facts: null as PublishFactInput[] | null }
   }
 
   let payload: unknown
@@ -122,27 +128,35 @@ async function parsePublishTasks(request: Request) {
     return { error: "invalid json body" }
   }
 
-  if (!isRecord(payload) || !Object.prototype.hasOwnProperty.call(payload, "tasks")) {
-    return { tasks: null as PublishTaskInput[] | null }
+  if (!isRecord(payload)) {
+    return { error: "json body must be an object" }
   }
 
-  if (!Array.isArray(payload.tasks)) {
-    return { error: "tasks must be an array" }
-  }
-
-  const tasks: PublishTaskInput[] = []
-  for (let index = 0; index < payload.tasks.length; index += 1) {
-    const normalized = normalizePublishTask(payload.tasks[index], index)
-    if ("error" in normalized) {
-      return { error: normalized.error }
+  let tasks: PublishTaskInput[] | null = null
+  if (Object.prototype.hasOwnProperty.call(payload, "tasks")) {
+    if (!Array.isArray(payload.tasks)) {
+      return { error: "tasks must be an array" }
     }
-    if (normalized.ticked && !normalized.text.trim()) {
-      return { error: `task ${index + 1} text is required when ticked` }
+
+    tasks = []
+    for (let index = 0; index < payload.tasks.length; index += 1) {
+      const normalized = normalizePublishTask(payload.tasks[index], index)
+      if ("error" in normalized) {
+        return { error: normalized.error }
+      }
+      if (normalized.ticked && !normalized.text.trim()) {
+        return { error: `task ${index + 1} text is required when ticked` }
+      }
+      tasks.push(normalized)
     }
-    tasks.push(normalized)
   }
 
-  return { tasks }
+  const factParseResult = parsePublishFacts(payload)
+  if ("error" in factParseResult) {
+    return { error: factParseResult.error }
+  }
+
+  return { tasks, facts: factParseResult.facts }
 }
 
 export async function POST(request: Request, { params }: RouteContext) {
@@ -163,6 +177,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     return NextResponse.json({ error: taskParseResult.error }, { status: 400 })
   }
   const submittedTasks = taskParseResult.tasks
+  const submittedFacts = taskParseResult.facts
 
   const fileNote = await db.file_note.findUnique({
     where: { id },
@@ -177,6 +192,7 @@ export async function POST(request: Request, { params }: RouteContext) {
       published_at: true,
       published_by: true,
       task_publish_decisions: true,
+      fact_publish_decisions: true,
     },
   })
 
@@ -208,6 +224,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     published_at: fileNote.published_at?.toISOString() ?? null,
     published_by: fileNote.published_by,
     task_publish_decisions: fileNote.task_publish_decisions,
+    fact_publish_decisions: fileNote.fact_publish_decisions,
   }
 
   const updated = await db.$transaction(async (tx) => {
@@ -277,6 +294,16 @@ export async function POST(request: Request, { params }: RouteContext) {
           created_task_id: createdTaskBySourceId.get(task.id) ?? null,
         }))
       : null
+    const factPublishResult = await applyFactPublishDecisions({
+      tx,
+      fileNote: {
+        id: fileNote.id,
+        party_id: fileNote.party_id,
+        household_id: fileNote.household_id,
+      },
+      actorId: actor.id,
+      facts: submittedFacts,
+    })
 
     const nextFileNote = await tx.file_note.update({
       where: { id: fileNote.id },
@@ -286,6 +313,7 @@ export async function POST(request: Request, { params }: RouteContext) {
         published_at: publishedAt,
         published_by: actor.id,
         task_publish_decisions: taskPublishDecisions ? toJsonCompatible(taskPublishDecisions) : undefined,
+        fact_publish_decisions: submittedFacts ? toJsonCompatible(factPublishResult.decisions) : undefined,
         updated_at: publishedAt,
       },
       select: {
@@ -296,6 +324,7 @@ export async function POST(request: Request, { params }: RouteContext) {
         published_by: true,
         transcript_id: true,
         task_publish_decisions: true,
+        fact_publish_decisions: true,
       },
     })
 
@@ -332,6 +361,7 @@ export async function POST(request: Request, { params }: RouteContext) {
       fileNote: nextFileNote,
       createdTasks,
       taskPublishDecisions,
+      factPublishResult,
     }
   })
 
@@ -344,6 +374,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     published_at: updated.fileNote.published_at?.toISOString() ?? null,
     published_by: updated.fileNote.published_by,
     task_publish_decisions: updated.fileNote.task_publish_decisions,
+    fact_publish_decisions: updated.fileNote.fact_publish_decisions,
     created_tasks: updated.createdTasks,
   }
   const taskCounts = submittedTasks
@@ -359,6 +390,8 @@ export async function POST(request: Request, { params }: RouteContext) {
         tasks_us: 0,
         tasks_client: 0,
       }
+  const factCounts = updated.factPublishResult.counts
+  const fieldAuditEvents: FactFieldAuditEvent[] = updated.factPublishResult.auditEvents
 
   await writeAuditEvent({
     userId: actor.id,
@@ -380,8 +413,25 @@ export async function POST(request: Request, { params }: RouteContext) {
       ai_draft_content: fileNote.ai_draft_content,
       had_adviser_edits: isMeaningfulFileNoteText(fileNote.text),
       ...taskCounts,
+      ...factCounts,
     },
   })
+
+  for (const event of fieldAuditEvents) {
+    await writeAuditEvent({
+      userId: actor.id,
+      action: "UPDATE",
+      entityType: event.entityType,
+      entityId: event.entityId,
+      channel: "staff_ui",
+      actor_ip: clientIp(request.headers),
+      actor_user_agent: request.headers.get("user-agent"),
+      request_id: request.headers.get("x-request-id"),
+      beforeState: event.beforeState,
+      afterState: event.afterState,
+      metadata: event.metadata,
+    })
+  }
 
   return NextResponse.json({
     id: updated.fileNote.id,
@@ -389,5 +439,6 @@ export async function POST(request: Request, { params }: RouteContext) {
     published_at: updated.fileNote.published_at?.toISOString() ?? null,
     published_by: updated.fileNote.published_by,
     created_task_count: updated.createdTasks.length,
+    fact_counts: factCounts,
   })
 }
