@@ -3,9 +3,8 @@ import "server-only"
 import type { SpeakerSegment, TranscriptionResult } from "@/types/transcription"
 
 // Required environment variables:
-// AZURE_SPEECH_ENDPOINT, for example https://eastus.api.cognitive.microsoft.com
-// AZURE_SPEECH_KEY, the Speech resource key.
-// AZURE_SPEECH_REGION, retained for diagnostics and future SDK use.
+// Preferred: AZURE_SPEECH_AU_ENDPOINT, AZURE_SPEECH_AU_KEY, AZURE_SPEECH_AU_REGION.
+// Fallback for one deploy cycle: AZURE_SPEECH_ENDPOINT, AZURE_SPEECH_KEY, AZURE_SPEECH_REGION.
 const DEFAULT_API_VERSION = "v3.2-preview.2"
 const DEFAULT_POLL_INTERVAL_MS = 10_000
 const DEFAULT_POLL_TIMEOUT_MS = 8 * 60 * 1000
@@ -57,6 +56,13 @@ export type SubmitTranscriptionOptions = {
   maxSpeakerCount?: number
 }
 
+const useAuRegion = !!process.env.AZURE_SPEECH_AU_ENDPOINT?.trim()
+const activeAzureSpeechRegion = useAuRegion ? "australiaeast" : "eastus"
+const azureSpeechEndpointEnv = useAuRegion ? "AZURE_SPEECH_AU_ENDPOINT" : "AZURE_SPEECH_ENDPOINT"
+const azureSpeechKeyEnv = useAuRegion ? "AZURE_SPEECH_AU_KEY" : "AZURE_SPEECH_KEY"
+
+console.log("[azureSpeech] region: " + activeAzureSpeechRegion)
+
 function getRequiredEnv(name: string) {
   const value = process.env[name]?.trim()
   if (!value) {
@@ -66,11 +72,11 @@ function getRequiredEnv(name: string) {
 }
 
 function getSpeechEndpoint() {
-  return getRequiredEnv("AZURE_SPEECH_ENDPOINT").replace(/\/+$/, "")
+  return getRequiredEnv(azureSpeechEndpointEnv).replace(/\/+$/, "")
 }
 
 function getSpeechKey() {
-  return getRequiredEnv("AZURE_SPEECH_KEY")
+  return getRequiredEnv(azureSpeechKeyEnv)
 }
 
 function getApiVersion() {

@@ -93,6 +93,15 @@ type AzureChatCompletionResponse = {
   }>
 }
 
+const useAuRegion = !!process.env.AZURE_OPENAI_AU_ENDPOINT?.trim()
+const activeAzureOpenAIRegion = useAuRegion ? "australiaeast" : "eastus"
+const azureOpenAIEndpointEnv = useAuRegion ? "AZURE_OPENAI_AU_ENDPOINT" : "AZURE_OPENAI_ENDPOINT"
+const azureOpenAIApiKeyEnv = useAuRegion ? "AZURE_OPENAI_AU_KEY" : "AZURE_OPENAI_KEY"
+const azureOpenAIDeploymentEnv = useAuRegion ? "AZURE_OPENAI_AU_DEPLOYMENT" : "AZURE_OPENAI_DEPLOYMENT"
+const azureOpenAIApiVersionEnv = useAuRegion ? "AZURE_OPENAI_AU_API_VERSION" : "AZURE_OPENAI_API_VERSION"
+
+console.log("[azureOpenAI] region: " + activeAzureOpenAIRegion)
+
 function getRequiredEnv(name: string) {
   const value = process.env[name]?.trim()
   if (!value) {
@@ -102,7 +111,7 @@ function getRequiredEnv(name: string) {
 }
 
 function getEndpoint() {
-  return getRequiredEnv("AZURE_OPENAI_ENDPOINT").replace(/\/+$/, "")
+  return getRequiredEnv(azureOpenAIEndpointEnv).replace(/\/+$/, "")
 }
 
 function classifyAzureOpenAIError(status: number, payloadText: string) {
@@ -131,8 +140,8 @@ function classifyAzureOpenAIError(status: number, payloadText: string) {
 
 async function requestChatCompletion({ messages, temperature, maxTokens, responseFormat }: AzureChatRequestOptions) {
   const endpoint = getEndpoint()
-  const deployment = getRequiredEnv("AZURE_OPENAI_DEPLOYMENT")
-  const apiVersion = getRequiredEnv("AZURE_OPENAI_API_VERSION")
+  const deployment = getRequiredEnv(azureOpenAIDeploymentEnv)
+  const apiVersion = getRequiredEnv(azureOpenAIApiVersionEnv)
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 60_000)
 
@@ -143,7 +152,7 @@ async function requestChatCompletion({ messages, temperature, maxTokens, respons
         method: "POST",
         signal: controller.signal,
         headers: {
-          "api-key": getRequiredEnv("AZURE_OPENAI_KEY"),
+          "api-key": getRequiredEnv(azureOpenAIApiKeyEnv),
           "content-type": "application/json",
         },
         body: JSON.stringify({
