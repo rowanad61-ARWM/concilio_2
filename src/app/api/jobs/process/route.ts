@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client"
 import { NextResponse } from "next/server"
 
 import { db } from "@/lib/db"
+import { generateFileNoteJob } from "@/lib/jobs/generateFileNote"
 import { transcribeRecordingJob } from "@/lib/jobs/transcribeRecording"
 
 export const dynamic = "force-dynamic"
@@ -90,6 +91,10 @@ function retryDelayMs(attempts: number) {
 async function dispatchJob(job: ProcessingJobClaim) {
   if (job.job_type === "transcribe_recording") {
     return transcribeRecordingJob(job.payload)
+  }
+
+  if (job.job_type === "generate_file_note") {
+    return generateFileNoteJob(job.payload)
   }
 
   throw new Error(`unsupported processing job type: ${job.job_type}`)

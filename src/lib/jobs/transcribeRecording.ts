@@ -165,6 +165,15 @@ export async function transcribeRecordingJob(payloadJson: Prisma.JsonValue): Pro
       data: { transcript_id: created.id },
     })
 
+    await tx.processing_job.create({
+      data: {
+        job_type: "generate_file_note",
+        payload: {
+          file_note_id: payload.file_note_id,
+        },
+      },
+    })
+
     return created
   })
 
