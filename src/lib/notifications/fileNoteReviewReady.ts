@@ -15,6 +15,8 @@ type ReviewJobStatus = {
   completed_at: Date | null
 }
 
+type NotificationAlertType = "file_note_review_outstanding" | "file_note_generation_failed"
+
 function isReviewJobType(value: string): value is ReviewJobType {
   return (REVIEW_JOB_TYPES as readonly string[]).includes(value)
 }
@@ -56,13 +58,14 @@ export async function loadLatestReviewJobStatuses(fileNoteId: string) {
   return rows.filter((row): row is ReviewJobStatus => isReviewJobType(row.job_type))
 }
 
-export async function notifyFileNoteReviewReady(params: { fileNoteId: string }) {
+async function notifyFileNote(params: { fileNoteId: string; alertType: NotificationAlertType }) {
   const fileNote = await db.file_note.findUnique({
     where: { id: params.fileNoteId },
     select: {
       id: true,
       party_id: true,
       author_user_id: true,
+      transcript_id: true,
       party: {
         select: {
           id: true,
@@ -110,11 +113,18 @@ export async function notifyFileNoteReviewReady(params: { fileNoteId: string }) 
   const jobs = await loadLatestReviewJobStatuses(fileNote.id)
   const jobsSucceeded = jobs.filter((job) => job.status === "succeeded").map((job) => job.job_type)
   const jobsFailed = jobs.filter((job) => job.status === "failed").map((job) => job.job_type)
+  const generationJob = jobs.find((job) => job.job_type === "generate_file_note")
+  const failureReason =
+    params.alertType === "file_note_generation_failed"
+      ? generationJob?.error_message ?? "File note generation failed."
+      : null
   const payload = {
     client_id: clientId,
     client_name: clientName,
     review_url: reviewPath,
     absolute_review_url: reviewUrl,
+    transcript_id: fileNote.transcript_id,
+    failure_reason: failureReason,
     jobs_succeeded: jobsSucceeded,
     jobs_failed: jobsFailed,
     job_statuses: jobs.map((job) => ({
@@ -135,7 +145,7 @@ export async function notifyFileNoteReviewReady(params: { fileNoteId: string }) 
       recipient_user_id
     )
     VALUES (
-      'file_note_review_outstanding',
+      ${params.alertType},
       'file_note',
       ${fileNote.id}::uuid,
       ${JSON.stringify(payload)}::jsonb,
@@ -154,19 +164,31 @@ export async function notifyFileNoteReviewReady(params: { fileNoteId: string }) 
     jobsFailed.length > 0
       ? `\n\nNote: ${jobsFailed.join(", ")} failed. The review screen may need manual attention or a retry.`
       : ""
-  const emailBody = [
-    `Your file note for ${clientName} is ready to review.`,
-    warning.trim(),
-    `Review file note: ${reviewUrl}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n")
+  const isGenerationFailure = params.alertType === "file_note_generation_failed"
+  const emailBody = isGenerationFailure
+    ? [
+        `File note generation for ${clientName} failed.`,
+        failureReason ? `Failure reason: ${failureReason}` : null,
+        "Open the review screen to retry generation or write the note manually.",
+        `Review file note: ${reviewUrl}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    : [
+        `Your file note for ${clientName} is ready to review.`,
+        warning.trim(),
+        `Review file note: ${reviewUrl}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n")
 
   try {
     await sendMailAsAdviser({
       toEmail: adviser.email,
       toName: adviser.name,
-      subject: `File note ready for review: ${clientName}`,
+      subject: isGenerationFailure
+        ? `File note generation failed: ${clientName}`
+        : `File note ready for review: ${clientName}`,
       htmlBody: emailBody,
       bodyContentType: "Text",
     })
@@ -182,4 +204,12 @@ export async function notifyFileNoteReviewReady(params: { fileNoteId: string }) 
     jobs_failed: jobsFailed,
     payload: jsonObject(payload),
   }
+}
+
+export function notifyFileNoteReviewReady(params: { fileNoteId: string }) {
+  return notifyFileNote({ fileNoteId: params.fileNoteId, alertType: "file_note_review_outstanding" })
+}
+
+export function notifyFileNoteGenerationFailed(params: { fileNoteId: string }) {
+  return notifyFileNote({ fileNoteId: params.fileNoteId, alertType: "file_note_generation_failed" })
 }

@@ -1,4 +1,8 @@
-import { loadLatestReviewJobStatuses, notifyFileNoteReviewReady } from "@/lib/notifications/fileNoteReviewReady"
+import {
+  loadLatestReviewJobStatuses,
+  notifyFileNoteGenerationFailed,
+  notifyFileNoteReviewReady,
+} from "@/lib/notifications/fileNoteReviewReady"
 
 const REQUIRED_JOB_TYPES = ["generate_file_note", "extract_tasks", "extract_facts"] as const
 const TERMINAL_STATUSES = new Set(["succeeded", "failed"])
@@ -22,10 +26,10 @@ export async function maybeNotifyReviewReady(params: { fileNoteId: string }) {
   }
 
   if (jobByType.get("generate_file_note")?.status !== "succeeded") {
-    console.warn("[file note notification] generate_file_note failed; skipping adviser notification", {
+    console.warn("[file note notification] generate_file_note failed; sending generation-failed alert", {
       file_note_id: params.fileNoteId,
     })
-    return { checked: true, notified: false, reason: "file_note_generation_failed" as const }
+    return notifyFileNoteGenerationFailed({ fileNoteId: params.fileNoteId })
   }
 
   return notifyFileNoteReviewReady({ fileNoteId: params.fileNoteId })

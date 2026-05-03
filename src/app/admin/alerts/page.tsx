@@ -118,6 +118,14 @@ function isFileNoteReviewAlert(alert: { alert_type: string }) {
   return alert.alert_type === "file_note_review_outstanding"
 }
 
+function isFileNoteGenerationFailureAlert(alert: { alert_type: string }) {
+  return alert.alert_type === "file_note_generation_failed"
+}
+
+function isFileNoteAlert(alert: { alert_type: string }) {
+  return isFileNoteReviewAlert(alert) || isFileNoteGenerationFailureAlert(alert)
+}
+
 function pageHref(page: number, view: string) {
   return `/admin/alerts?page=${page}&view=${view}`
 }
@@ -271,7 +279,7 @@ export default async function AdminAlertsPage({
                   const fileNoteClientId = stringValue(payloadRecord.client_id)
                   const fileNoteReviewUrl = stringValue(payloadRecord.review_url)
                   const fileNoteClientName = stringValue(payloadRecord.client_name)
-                  const client = isFileNoteReviewAlert(alert)
+                  const client = isFileNoteAlert(alert)
                     ? fileNoteClientId && fileNoteClientName
                       ? {
                           href: `/clients/${fileNoteClientId}`,
@@ -315,12 +323,20 @@ export default async function AdminAlertsPage({
                         )}
                       </td>
                       <td className="px-4 py-3 text-[12px] font-medium text-[#113238]">
-                        {isFileNoteReviewAlert(alert) ? "File note awaiting review" : payload.field}
+                        {isFileNoteGenerationFailureAlert(alert)
+                          ? "File note generation failed"
+                          : isFileNoteReviewAlert(alert)
+                            ? "File note awaiting review"
+                            : payload.field}
                       </td>
                       <td className="px-4 py-3 text-[#4b5563]">
-                        {isFileNoteReviewAlert(alert) ? (
+                        {isFileNoteAlert(alert) ? (
                           <div className="flex flex-col gap-1">
-                            <span>Review work is ready.</span>
+                            <span>
+                              {isFileNoteGenerationFailureAlert(alert)
+                                ? stringValue(payloadRecord.failure_reason) ?? "Generation failed."
+                                : "Review work is ready."}
+                            </span>
                             {fileNoteReviewUrl ? (
                               <Link
                                 href={fileNoteReviewUrl}

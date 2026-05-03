@@ -113,11 +113,11 @@ export default function Dashboard({
 
       <div className="grid grid-cols-2 gap-[14px]">
         <div className="overflow-hidden rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white">
-          <CardHeader title="Today's agenda" action="Open Outlook →" />
-          <EmptyCardBody
-            text="Connect Outlook to see today's meetings"
-            className="px-[14px] py-3 text-center text-[13px] text-[#9ca3af]"
-          />
+          <CardHeader title="Today's agenda" action="Synced from Calendly" />
+          <div className="px-[14px] py-3 text-center">
+            <p className="text-[13px] text-[#9ca3af]">No meetings scheduled today</p>
+            <p className="mt-1 text-[11px] text-[#9ca3af]">Synced from Calendly</p>
+          </div>
         </div>
 
         <div className="overflow-hidden rounded-[12px] border-[0.5px] border-[#e5e7eb] bg-white">

@@ -1,6 +1,12 @@
 @import "tailwindcss";
 
-@theme inline {}
+@theme inline {
+  --color-midnight: #113238;
+  --color-pumpkin: #ff8c42;
+  --color-mint: #bfe3d3;
+  --color-seasalt: #fafafd;
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+}
 
 html,
 body {

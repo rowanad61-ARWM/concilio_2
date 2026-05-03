@@ -1391,7 +1391,7 @@ function ExpandableSection({
           className="flex min-h-[42px] flex-1 items-center justify-between gap-3 py-[12px] text-left"
           aria-expanded={isOpen}
         >
-          <span className="text-[11px] uppercase tracking-[0.6px] text-[#9ca3af]">{title}</span>
+          <span className="text-base font-medium uppercase tracking-[0.6px] text-midnight">{title}</span>
           <ChevronIcon isOpen={isOpen} />
         </button>
         {action ? <div className="shrink-0">{action}</div> : null}

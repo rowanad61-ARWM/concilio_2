@@ -18,11 +18,18 @@ function alertSummary(alertType: string, payload: unknown) {
     return `File note ready: ${stringValue(payload.client_name) ?? "Client"}`
   }
 
+  if (alertType === "file_note_generation_failed" && isRecord(payload)) {
+    return `File note generation failed: ${stringValue(payload.client_name) ?? "Client"}`
+  }
+
   return alertType.replace(/_/g, " ")
 }
 
 function alertHref(alertType: string, payload: unknown) {
-  if (alertType === "file_note_review_outstanding" && isRecord(payload)) {
+  if (
+    (alertType === "file_note_review_outstanding" || alertType === "file_note_generation_failed") &&
+    isRecord(payload)
+  ) {
     return stringValue(payload.review_url) ?? "/admin/alerts"
   }
 
