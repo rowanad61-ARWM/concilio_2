@@ -72,7 +72,7 @@ async function post(request: Request) {
   try {
     const payload = parseCalendlyPayload(rawBody)
 
-    if (payload.event === "invitee.created") {
+    if (payload.event === "invitee.created" || payload.event === "invitee.rescheduled") {
       await handleInviteeCreated(payload)
       return NextResponse.json({ ok: true })
     }

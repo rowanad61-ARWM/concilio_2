@@ -17,6 +17,13 @@ type CalendlyQuestionAndAnswer = {
 
 type CalendlyEventMembership = {
   user_email?: string | null
+  user_name?: string | null
+  name?: string | null
+}
+
+type CalendlyEventGuest = {
+  email?: string | null
+  name?: string | null
 }
 
 type CalendlyLocation = {
@@ -34,10 +41,11 @@ type CalendlyScheduledEvent = {
   event_memberships?: CalendlyEventMembership[] | null
 }
 
-type CalendlyInviteePayload = {
+export type CalendlyInviteePayload = {
   uri?: string | null
   email?: string | null
   name?: string | null
+  event_guests?: CalendlyEventGuest[] | null
   cancel_url?: string | null
   reschedule_url?: string | null
   text_reminder_number?: string | null
@@ -83,6 +91,12 @@ export type CalendlyInviteeCanceledWebhookPayload = {
   payload: CalendlyInviteePayload
 }
 
+export type CalendlyInviteeRescheduledWebhookPayload = {
+  event: "invitee.rescheduled"
+  created_at?: string
+  payload: CalendlyInviteePayload
+}
+
 export type CalendlyRoutingFormSubmissionWebhookPayload = {
   event: "routing_form_submission.created"
   created_at?: string
@@ -92,6 +106,7 @@ export type CalendlyRoutingFormSubmissionWebhookPayload = {
 export type CalendlyWebhookPayload =
   | CalendlyInviteeCreatedWebhookPayload
   | CalendlyInviteeCanceledWebhookPayload
+  | CalendlyInviteeRescheduledWebhookPayload
   | CalendlyRoutingFormSubmissionWebhookPayload
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -186,6 +201,14 @@ export function parseCalendlyPayload(rawBody: string): CalendlyWebhookPayload {
   }
 
   if (event === "invitee.canceled") {
+    return {
+      event,
+      created_at: createdAt,
+      payload: payload as CalendlyInviteePayload,
+    }
+  }
+
+  if (event === "invitee.rescheduled") {
     return {
       event,
       created_at: createdAt,

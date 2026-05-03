@@ -144,7 +144,10 @@ export function calendlyWebhookAction(
   auditContext: AuditLifecycleContext,
 ): AuditAction {
   const summary = calendlyWebhookSummaries.get(request)
-  if (summary?.event_type === "invitee.created" && !auditContext.beforeSnapshot) {
+  if (
+    (summary?.event_type === "invitee.created" || summary?.event_type === "invitee.rescheduled") &&
+    !auditContext.beforeSnapshot
+  ) {
     return "CREATE"
   }
 
@@ -177,7 +180,7 @@ export function shouldAuditCalendlyWebhook(
 ): boolean {
   const eventType = calendlyWebhookSummaries.get(request)?.event_type
   return (
-    (eventType === "invitee.created" || eventType === "invitee.canceled") &&
+    (eventType === "invitee.created" || eventType === "invitee.canceled" || eventType === "invitee.rescheduled") &&
     Boolean(auditContext.beforeSnapshot || auditContext.afterSnapshot)
   )
 }

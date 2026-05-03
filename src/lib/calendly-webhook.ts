@@ -20,6 +20,8 @@ import {
   formatCalendlyMeetingDateTime,
   type CalendlyInviteeCanceledWebhookPayload,
   type CalendlyInviteeCreatedWebhookPayload,
+  type CalendlyInviteePayload,
+  type CalendlyInviteeRescheduledWebhookPayload,
   type CalendlyRoutingFormSubmissionWebhookPayload,
 } from "@/lib/calendly"
 
@@ -42,6 +44,23 @@ type ResolvedClient = {
   display_name: string
   household_id: string | null
 } | null
+
+type MeetingModality = "in_person" | "phone" | "teams" | "other"
+
+type AttendeeDraft = {
+  displayName: string
+  email: string | null
+  role: string | null
+}
+
+type MeetingAttendeeRow = {
+  engagement_id: string
+  attendee_type: "adviser" | "client" | "prospect" | "other"
+  party_id: string | null
+  display_name: string
+  email: string | null
+  role: string | null
+}
 
 type PostBookingSideEffectContext = {
   id: string
@@ -147,7 +166,7 @@ function logByLevel(level: string, message: string) {
   console.warn(message)
 }
 
-function extractScheduledEvent(payload: CalendlyInviteeCreatedWebhookPayload["payload"]) {
+function extractScheduledEvent(payload: CalendlyInviteePayload) {
   const scheduledEvent = payload.scheduled_event ?? null
   const eventUri = normalizeString(scheduledEvent?.uri ?? payload.event)
   const eventTypeUri = normalizeString(scheduledEvent?.event_type ?? payload.event_type)
@@ -316,6 +335,45 @@ function parseLocationValue(value: unknown) {
   return normalizeString(locationObject.location) ?? normalizeString(locationObject.join_url)
 }
 
+function parseMeetingModality(value: unknown): MeetingModality | null {
+  if (!value) {
+    return null
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase()
+    if (normalized.includes("teams.microsoft.com") || normalized.includes("microsoft teams")) {
+      return "teams"
+    }
+    if (normalized.includes("phone")) {
+      return "phone"
+    }
+    return "other"
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  const locationObject = value as Record<string, unknown>
+  const type = normalizeString(locationObject.type)?.toLowerCase() ?? ""
+  const location = normalizeString(locationObject.location)?.toLowerCase() ?? ""
+  const joinUrl = normalizeString(locationObject.join_url)?.toLowerCase() ?? ""
+  const combined = `${type} ${location} ${joinUrl}`
+
+  if (type === "physical") {
+    return "in_person"
+  }
+  if (type === "microsoft_teams_conference" || combined.includes("teams.microsoft.com")) {
+    return "teams"
+  }
+  if (type === "phone" || combined.includes("phone")) {
+    return "phone"
+  }
+
+  return "other"
+}
+
 function toHtmlBodyFromPlainText(value: string) {
   const escaped = value
     .replace(/&/g, "&amp;")
@@ -447,7 +505,7 @@ async function createProspectPartyFromCalendly(params: {
   return createdParty
 }
 
-function getInviteeCreatedTimestamp(payload: CalendlyInviteeCreatedWebhookPayload) {
+function getInviteeCreatedTimestamp(payload: CalendlyInviteeCreatedWebhookPayload | CalendlyInviteeRescheduledWebhookPayload) {
   const payloadCreatedAt = normalizeString(payload.payload.created_at)
   return parseDate(payloadCreatedAt ?? payload.created_at ?? null) ?? new Date()
 }
@@ -482,7 +540,7 @@ export async function resolveMeetingType(eventTypeUri: string | null): Promise<M
 }
 
 export async function resolveAdvisorFromPayload(
-  payload: CalendlyInviteeCreatedWebhookPayload["payload"],
+  payload: CalendlyInviteePayload,
 ): Promise<ResolvedAdvisor> {
   const { eventMemberships } = extractScheduledEvent(payload)
   const advisorEmailRaw = normalizeString(eventMemberships?.[0]?.user_email)
@@ -511,6 +569,217 @@ export async function resolveAdvisorFromPayload(
   }
 
   return advisor
+}
+
+async function resolveUserByEmail(email: string) {
+  const matches = await db.user_account.findMany({
+    where: {
+      email: {
+        equals: email,
+        mode: "insensitive",
+      },
+    },
+    take: 2,
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  })
+
+  if (matches.length > 1) {
+    throw new Error(`multiple user_account rows match attendee email ${email}`)
+  }
+
+  return matches[0] ?? null
+}
+
+async function resolvePartyByEmail(email: string) {
+  const matches = await db.party.findMany({
+    where: {
+      OR: [
+        {
+          person: {
+            is: {
+              OR: [
+                {
+                  email_primary: {
+                    equals: email,
+                    mode: "insensitive",
+                  },
+                },
+                {
+                  email_alternate: {
+                    equals: email,
+                    mode: "insensitive",
+                  },
+                },
+              ],
+            },
+          },
+        },
+        {
+          contact_method: {
+            some: {
+              channel: {
+                equals: "email",
+                mode: "insensitive",
+              },
+              value: {
+                equals: email,
+                mode: "insensitive",
+              },
+              end_date: null,
+            },
+          },
+        },
+      ],
+    },
+    take: 2,
+    select: {
+      id: true,
+      display_name: true,
+      client_classification: {
+        select: {
+          lifecycle_stage: true,
+        },
+      },
+    },
+  })
+
+  if (matches.length > 1) {
+    throw new Error(`multiple party rows match attendee email ${email}`)
+  }
+
+  return matches[0] ?? null
+}
+
+function attendeeKey(attendee: AttendeeDraft) {
+  return attendee.email?.toLowerCase() ?? `${attendee.role ?? "invitee"}:${attendee.displayName.toLowerCase()}`
+}
+
+function extractHostAttendees(payload: CalendlyInviteePayload, advisor: ResolvedAdvisor): AttendeeDraft[] {
+  const { eventMemberships } = extractScheduledEvent(payload)
+  const hosts = eventMemberships
+    .map((membership): AttendeeDraft | null => {
+      const email = normalizeString(membership.user_email)?.toLowerCase() ?? null
+      const displayName =
+        normalizeString(membership.user_name) ??
+        normalizeString(membership.name) ??
+        normalizeString(advisor?.email) ??
+        email
+
+      if (!displayName && !email) {
+        return null
+      }
+
+      return {
+        displayName: displayName ?? email ?? "Calendly host",
+        email,
+        role: "Adviser",
+      }
+    })
+    .filter((attendee): attendee is AttendeeDraft => Boolean(attendee))
+
+  if (hosts.length === 0 && advisor) {
+    hosts.push({
+      displayName: advisor.email,
+      email: advisor.email.toLowerCase(),
+      role: "Adviser",
+    })
+  }
+
+  return hosts
+}
+
+function extractInviteeAttendees(payload: CalendlyInviteePayload): AttendeeDraft[] {
+  const attendees: AttendeeDraft[] = []
+  const inviteeEmail = normalizeString(payload.email)?.toLowerCase() ?? null
+  const inviteeName = normalizeString(payload.name)
+
+  if (inviteeName || inviteeEmail) {
+    attendees.push({
+      displayName: inviteeName ?? inviteeEmail ?? "Calendly invitee",
+      email: inviteeEmail,
+      role: null,
+    })
+  }
+
+  const guests = Array.isArray(payload.event_guests) ? payload.event_guests : []
+  for (const guest of guests) {
+    const email = normalizeString(guest.email)?.toLowerCase() ?? null
+    const displayName = normalizeString(guest.name) ?? email
+    if (!displayName && !email) {
+      continue
+    }
+
+    attendees.push({
+      displayName: displayName ?? email ?? "Calendly guest",
+      email,
+      role: null,
+    })
+  }
+
+  return attendees
+}
+
+async function buildMeetingAttendeeRows(params: {
+  engagementId: string
+  payload: CalendlyInviteePayload
+  advisor: ResolvedAdvisor
+}) {
+  const rawAttendees = [
+    ...extractHostAttendees(params.payload, params.advisor),
+    ...extractInviteeAttendees(params.payload),
+  ]
+  const deduped = Array.from(new Map(rawAttendees.map((attendee) => [attendeeKey(attendee), attendee])).values())
+  const rows: MeetingAttendeeRow[] = []
+
+  for (const attendee of deduped) {
+    const email = attendee.email?.toLowerCase() ?? null
+    const user = email ? await resolveUserByEmail(email) : null
+    const party = email ? await resolvePartyByEmail(email) : null
+    const attendeeType: MeetingAttendeeRow["attendee_type"] = user
+      ? "adviser"
+      : party
+        ? party.client_classification?.lifecycle_stage === "client"
+          ? "client"
+          : "prospect"
+        : "other"
+
+    rows.push({
+      engagement_id: params.engagementId,
+      attendee_type: attendeeType,
+      party_id: party?.id ?? null,
+      display_name: user?.name ?? party?.display_name ?? attendee.displayName,
+      email,
+      role: user ? "Adviser" : attendee.role,
+    })
+  }
+
+  return rows
+}
+
+async function refreshMeetingAttendees(params: {
+  engagementId: string
+  payload: CalendlyInviteePayload
+  advisor: ResolvedAdvisor
+}) {
+  const rows = await buildMeetingAttendeeRows(params)
+
+  await db.$transaction(async (tx) => {
+    await tx.meeting_attendee.deleteMany({
+      where: {
+        engagement_id: params.engagementId,
+      },
+    })
+
+    if (rows.length > 0) {
+      await tx.meeting_attendee.createMany({
+        data: rows,
+      })
+    }
+  })
 }
 
 export async function resolveOrCreateClient(
@@ -1170,7 +1439,9 @@ export async function triggerPostBookingSideEffects(
   }
 }
 
-export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhookPayload) {
+export async function handleInviteeCreated(
+  payload: CalendlyInviteeCreatedWebhookPayload | CalendlyInviteeRescheduledWebhookPayload,
+) {
   const scheduled = extractScheduledEvent(payload.payload)
   const eventUuid = tailFromUri(scheduled.eventUri)
   if (!eventUuid) {
@@ -1187,6 +1458,7 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
   const startAt = parseDate(scheduled.startTime)
   const meetingDuration = formatMeetingDuration(scheduled.startTime, scheduled.endTime)
   const meetingLocation = parseLocationValue(scheduled.location) ?? "To be confirmed"
+  const meetingModality = parseMeetingModality(scheduled.location)
   const incomingCreatedAt = getInviteeCreatedTimestamp(payload)
   const rescheduledFrom =
     tailFromUri(normalizeString(payload.payload.old_invitee)) ??
@@ -1234,6 +1506,7 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
     calendly_cancel_url: normalizeString(payload.payload.cancel_url),
     calendly_reschedule_url: normalizeString(payload.payload.reschedule_url),
     calendly_rescheduled_from: rescheduledFrom,
+    meeting_modality: meetingModality,
     party_id: client?.id ?? null,
     household_id: client?.household_id ?? null,
     primary_adviser_id: advisor?.id ?? null,
@@ -1267,6 +1540,12 @@ export async function handleInviteeCreated(payload: CalendlyInviteeCreatedWebhoo
           primary_adviser_id: true,
         },
       })
+
+  await refreshMeetingAttendees({
+    engagementId: engagement.id,
+    payload: payload.payload,
+    advisor,
+  })
 
   const postBookingContext = {
     id: engagement.id,
