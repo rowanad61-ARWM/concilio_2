@@ -357,6 +357,18 @@ export async function POST(request: Request, { params }: RouteContext) {
       })
     }
 
+    await tx.alert_instance.updateMany({
+      where: {
+        alert_type: "file_note_review_outstanding",
+        entity_type: "file_note",
+        entity_id: fileNote.id,
+        cleared_at: null,
+      },
+      data: {
+        cleared_at: publishedAt,
+      },
+    })
+
     return {
       fileNote: nextFileNote,
       createdTasks,

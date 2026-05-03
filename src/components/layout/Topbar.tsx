@@ -1,6 +1,7 @@
 ﻿"use client"
 import { useRouter } from "next/navigation"
 import { useState, useRef } from "react"
+import AlertBell from "@/components/layout/AlertBell"
 
 export default function Topbar() {
   const router = useRouter()
@@ -39,6 +40,7 @@ export default function Topbar() {
           className="h-9 w-full max-w-[280px] rounded-[7px] bg-[#F2F4F6] px-3 text-[13px] text-[#113238] outline-none placeholder:text-[#9ca3af]"
         />
       </div>
+      <AlertBell />
       <button type="button" className="h-8 rounded-[7px] border border-[#e5e7eb] px-3 text-[13px] text-[#6b7280]">Filter</button>
       <button type="button" onClick={() => router.push("/clients/new")} className="h-8 rounded-[7px] bg-[#FF8C42] px-3 text-[13px] font-medium text-white">New Client</button>
     </header>

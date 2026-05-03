@@ -1,6 +1,7 @@
 import Link from "next/link"
 
 import AlertAcknowledgeButton from "@/components/admin/AlertAcknowledgeButton"
+import { requireAdmin } from "@/lib/auth"
 import { db } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
@@ -10,6 +11,7 @@ const PAGE_SIZE = 50
 type AdminAlertsPageProps = {
   searchParams?: Promise<{
     page?: string | string[]
+    view?: string | string[]
   }>
 }
 
@@ -108,17 +110,31 @@ function readPayload(payload: unknown) {
   }
 }
 
-function pageHref(page: number) {
-  return `/admin/alerts?page=${page}`
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+function isFileNoteReviewAlert(alert: { alert_type: string }) {
+  return alert.alert_type === "file_note_review_outstanding"
+}
+
+function pageHref(page: number, view: string) {
+  return `/admin/alerts?page=${page}&view=${view}`
 }
 
 export default async function AdminAlertsPage({
   searchParams,
 }: AdminAlertsPageProps) {
+  const adminUser = await requireAdmin()
   const resolvedSearchParams = searchParams ? await searchParams : {}
   const currentPage = parsePage(resolvedSearchParams.page)
+  const view = firstQueryValue(resolvedSearchParams.view) === "mine" ? "mine" : "all"
   const skip = (currentPage - 1) * PAGE_SIZE
-  const where = { acknowledged_at: null }
+  const where = {
+    acknowledged_at: null,
+    cleared_at: null,
+    ...(view === "mine" ? { recipient_user_id: adminUser.id } : {}),
+  }
 
   const [alerts, totalUnacknowledged] = await Promise.all([
     db.alert_instance.findMany({
@@ -251,8 +267,18 @@ export default async function AdminAlertsPage({
               <tbody>
                 {alerts.map((alert) => {
                   const payload = readPayload(alert.payload)
-                  const client =
-                    alert.entity_type === "financial_account"
+                  const payloadRecord = isRecord(alert.payload) ? alert.payload : {}
+                  const fileNoteClientId = stringValue(payloadRecord.client_id)
+                  const fileNoteReviewUrl = stringValue(payloadRecord.review_url)
+                  const fileNoteClientName = stringValue(payloadRecord.client_name)
+                  const client = isFileNoteReviewAlert(alert)
+                    ? fileNoteClientId && fileNoteClientName
+                      ? {
+                          href: `/clients/${fileNoteClientId}`,
+                          label: fileNoteClientName,
+                        }
+                      : null
+                    : alert.entity_type === "financial_account"
                       ? financialClientByAccountId.get(alert.entity_id)
                       : personClientById.get(alert.entity_id)
                   const actorUser = alert.audit_event?.actor_id
@@ -288,17 +314,33 @@ export default async function AdminAlertsPage({
                           <span className="text-[#6b7280]">Unknown client</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-mono text-[12px] text-[#113238]">
-                        {payload.field}
+                      <td className="px-4 py-3 text-[12px] font-medium text-[#113238]">
+                        {isFileNoteReviewAlert(alert) ? "File note awaiting review" : payload.field}
                       </td>
                       <td className="px-4 py-3 text-[#4b5563]">
-                        <span className="font-medium text-[#113238]">
-                          {formatJsonValue(payload.oldValue)}
-                        </span>
-                        <span className="mx-2 text-[#9ca3af]">-&gt;</span>
-                        <span className="font-medium text-[#113238]">
-                          {formatJsonValue(payload.newValue)}
-                        </span>
+                        {isFileNoteReviewAlert(alert) ? (
+                          <div className="flex flex-col gap-1">
+                            <span>Review work is ready.</span>
+                            {fileNoteReviewUrl ? (
+                              <Link
+                                href={fileNoteReviewUrl}
+                                className="font-medium text-[#185F68] underline-offset-2 hover:underline"
+                              >
+                                Open review screen
+                              </Link>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <>
+                            <span className="font-medium text-[#113238]">
+                              {formatJsonValue(payload.oldValue)}
+                            </span>
+                            <span className="mx-2 text-[#9ca3af]">-&gt;</span>
+                            <span className="font-medium text-[#113238]">
+                              {formatJsonValue(payload.newValue)}
+                            </span>
+                          </>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-[#4b5563]">{changedBy}</td>
                       <td className="px-4 py-3">
@@ -318,9 +360,29 @@ export default async function AdminAlertsPage({
           Page {currentPage} of {totalPages}
         </span>
         <div className="flex gap-2">
+          <Link
+            href="/admin/alerts?page=1&view=mine"
+            className={`rounded-[7px] border px-3 py-2 font-medium ${
+              view === "mine"
+                ? "border-[#185F68] bg-[#EAF0F1] text-[#185F68]"
+                : "border-[#d9e2e7] bg-white text-[#113238] hover:bg-[#EAF0F1]"
+            }`}
+          >
+            My alerts
+          </Link>
+          <Link
+            href="/admin/alerts?page=1&view=all"
+            className={`rounded-[7px] border px-3 py-2 font-medium ${
+              view === "all"
+                ? "border-[#185F68] bg-[#EAF0F1] text-[#185F68]"
+                : "border-[#d9e2e7] bg-white text-[#113238] hover:bg-[#EAF0F1]"
+            }`}
+          >
+            All alerts
+          </Link>
           {currentPage > 1 ? (
             <Link
-              href={pageHref(currentPage - 1)}
+              href={pageHref(currentPage - 1, view)}
               className="rounded-[7px] border border-[#d9e2e7] bg-white px-3 py-2 font-medium text-[#113238] hover:bg-[#EAF0F1]"
             >
               Previous
@@ -328,7 +390,7 @@ export default async function AdminAlertsPage({
           ) : null}
           {currentPage < totalPages ? (
             <Link
-              href={pageHref(currentPage + 1)}
+              href={pageHref(currentPage + 1, view)}
               className="rounded-[7px] border border-[#d9e2e7] bg-white px-3 py-2 font-medium text-[#113238] hover:bg-[#EAF0F1]"
             >
               Next

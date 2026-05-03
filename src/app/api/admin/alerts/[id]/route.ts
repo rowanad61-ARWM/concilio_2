@@ -45,6 +45,7 @@ async function loadAlertSnapshot(id: string) {
       entity_id: true,
       payload: true,
       acknowledged_at: true,
+      cleared_at: true,
       acknowledged_by_user_id: true,
       audit_event_id: true,
     },
@@ -66,6 +67,7 @@ async function acknowledgeAlert(
     select: {
       id: true,
       acknowledged_at: true,
+      cleared_at: true,
       acknowledged_by_user_id: true,
     },
   })
@@ -89,6 +91,7 @@ async function acknowledgeAlert(
     where: { id },
     data: {
       acknowledged_at: new Date(),
+      cleared_at: new Date(),
       acknowledged_by_user_id: actor.id,
     },
     select: {

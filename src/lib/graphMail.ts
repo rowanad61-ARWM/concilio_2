@@ -73,6 +73,7 @@ export async function sendMailAsAdviser(opts: {
   toName?: string
   subject: string
   htmlBody: string
+  bodyContentType?: "HTML" | "Text"
 }): Promise<{ messageId: string }> {
   const adviserEmail = getAdviserEmail()
   const graphClient = getGraphClient()
@@ -85,7 +86,7 @@ export async function sendMailAsAdviser(opts: {
         message: {
           subject: opts.subject,
           body: {
-            contentType: "HTML",
+            contentType: opts.bodyContentType ?? "HTML",
             content: opts.htmlBody,
           },
           toRecipients: [
@@ -116,4 +117,3 @@ export async function sendMailAsAdviser(opts: {
     throw new Error(`Graph sendMail failed: ${graphError}`)
   }
 }
-

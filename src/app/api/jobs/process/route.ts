@@ -7,6 +7,7 @@ import { db } from "@/lib/db"
 import { extractFactsJob } from "@/lib/jobs/extractFacts"
 import { extractTasksJob } from "@/lib/jobs/extractTasks"
 import { generateFileNoteJob } from "@/lib/jobs/generateFileNote"
+import { maybeNotifyReviewReady } from "@/lib/jobs/maybeNotifyReviewReady"
 import { transcribeRecordingJob } from "@/lib/jobs/transcribeRecording"
 
 export const dynamic = "force-dynamic"
@@ -86,6 +87,42 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "unknown processing job error"
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function reviewReadyFileNoteId(job: ProcessingJobClaim) {
+  if (!["generate_file_note", "extract_tasks", "extract_facts"].includes(job.job_type)) {
+    return null
+  }
+
+  if (!isRecord(job.payload)) {
+    return null
+  }
+
+  const fileNoteId = job.payload.file_note_id
+  return typeof fileNoteId === "string" && fileNoteId.trim() ? fileNoteId.trim() : null
+}
+
+async function maybeNotifyAfterTerminalJob(job: ProcessingJobClaim) {
+  const fileNoteId = reviewReadyFileNoteId(job)
+  if (!fileNoteId) {
+    return null
+  }
+
+  try {
+    return await maybeNotifyReviewReady({ fileNoteId })
+  } catch (error) {
+    console.error("[jobs process] review-ready notification check failed", {
+      job_id: job.id,
+      job_type: job.job_type,
+      file_note_id: fileNoteId,
+      error,
+    })
+    return null
+  }
+}
+
 function retryDelayMs(attempts: number) {
   return 60_000 * 2 ** Math.max(attempts - 1, 0)
 }
@@ -127,6 +164,7 @@ async function processOneJob() {
         completed_at: new Date(),
       },
     })
+    const notification = await maybeNotifyAfterTerminalJob(job)
 
     return {
       processed: true,
@@ -134,6 +172,7 @@ async function processOneJob() {
       job_type: job.job_type,
       status: "succeeded",
       result,
+      notification,
     }
   } catch (error) {
     const message = errorMessage(error)
@@ -169,6 +208,7 @@ async function processOneJob() {
         completed_at: new Date(),
       },
     })
+    const notification = await maybeNotifyAfterTerminalJob(job)
 
     return {
       processed: true,
@@ -176,6 +216,7 @@ async function processOneJob() {
       job_type: job.job_type,
       status: "failed",
       error: message,
+      notification,
     }
   }
 }
