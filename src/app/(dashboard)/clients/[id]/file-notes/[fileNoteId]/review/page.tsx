@@ -39,6 +39,11 @@ export default async function FileNoteReviewPage({
       ai_draft_content: true,
       published_at: true,
       published_by: true,
+      extracted_tasks: true,
+      task_extraction_at: true,
+      task_extraction_model: true,
+      task_extraction_prompt_version: true,
+      task_publish_decisions: true,
       author_user_id: true,
       party: {
         select: {
@@ -103,6 +108,18 @@ export default async function FileNoteReviewPage({
           name: true,
         },
       },
+      source_tasks: {
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          subtype: true,
+          actor_side: true,
+          dueDateStart: true,
+          monday_sync_state: true,
+        },
+      },
     },
   })
 
@@ -123,6 +140,14 @@ export default async function FileNoteReviewPage({
     ? renderTranscriptForReview(transcript.transcript_text, speakerSegments, speakerNameMap)
     : ""
   const meetingDate = meeting?.opened_at ?? fileNote.generation_at ?? transcript?.transcription_at ?? null
+  const taskTypeRows = await db.taskTypeOption.findMany({
+    where: { isActive: true },
+    orderBy: [{ sortOrder: "asc" }, { type: "asc" }, { subtype: "asc" }],
+    select: {
+      type: true,
+      subtype: true,
+    },
+  })
 
   return (
     <FileNoteReviewClient
@@ -143,6 +168,24 @@ export default async function FileNoteReviewPage({
       initialTranscriptText={transcriptText}
       initialDraftContent={draftContentFromFileNote(fileNote.text, fileNote.ai_draft_content)}
       aiDraftContent={fileNote.ai_draft_content}
+      extractedTasks={fileNote.extracted_tasks}
+      taskExtractionAt={fileNote.task_extraction_at?.toISOString() ?? null}
+      taskExtractionModel={fileNote.task_extraction_model}
+      taskExtractionPromptVersion={fileNote.task_extraction_prompt_version}
+      taskPublishDecisions={fileNote.task_publish_decisions}
+      publishedTasks={fileNote.source_tasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        type: task.type,
+        subtype: task.subtype,
+        actorSide: task.actor_side,
+        dueDate: task.dueDateStart?.toISOString() ?? null,
+        mondaySyncState: task.monday_sync_state,
+      }))}
+      taskTypeOptions={taskTypeRows.map((row) => ({
+        type: row.type,
+        subtype: row.subtype,
+      }))}
       attendeeSuggestions={attendees.map((attendee) => ({
         displayName: attendee.display_name,
         attendeeType: attendee.attendee_type,
@@ -150,4 +193,3 @@ export default async function FileNoteReviewPage({
     />
   )
 }
-

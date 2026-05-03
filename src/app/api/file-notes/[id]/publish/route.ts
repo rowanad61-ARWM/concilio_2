@@ -12,6 +12,7 @@ import {
   resolveReviewActor,
   toJsonCompatible,
 } from "@/lib/file-note-review"
+import { writeTimelineEntry } from "@/lib/timeline"
 
 type RouteContext = {
   params: Promise<{ id: string }>
@@ -34,6 +35,116 @@ function clientIp(headers: Headers) {
   )
 }
 
+type PublishTaskInput = {
+  id: string
+  ticked: boolean
+  text: string
+  owner_side: "us" | "client"
+  task_type: string | null
+  task_subtype: string | null
+  due_date: string | null
+  source_quote: string | null
+}
+
+function nullableString(value: unknown) {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value !== "string") {
+    return undefined
+  }
+
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
+}
+
+function parseDueDate(value: unknown) {
+  const trimmed = nullableString(value)
+  if (trimmed === undefined) {
+    return undefined
+  }
+
+  if (!trimmed) {
+    return null
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return undefined
+  }
+
+  return trimmed
+}
+
+function dueDateToDate(value: string | null) {
+  return value ? new Date(`${value}T00:00:00.000Z`) : null
+}
+
+function normalizePublishTask(value: unknown, index: number): PublishTaskInput | { error: string } {
+  if (!isRecord(value)) {
+    return { error: `task ${index + 1} must be an object` }
+  }
+
+  const id = nullableString(value.id) ?? `task-${index + 1}`
+  const text = nullableString(value.text) ?? ""
+  const ownerSide = value.owner_side === "client" ? "client" : "us"
+  const taskType = nullableString(value.task_type)
+  const taskSubtype = nullableString(value.task_subtype)
+  const dueDate = parseDueDate(value.due_date)
+  const sourceQuote = nullableString(value.source_quote)
+
+  if (taskType === undefined || taskSubtype === undefined || sourceQuote === undefined || dueDate === undefined) {
+    return { error: `task ${index + 1} contains invalid field types` }
+  }
+
+  return {
+    id,
+    ticked: value.ticked !== false,
+    text,
+    owner_side: ownerSide,
+    task_type: taskType,
+    task_subtype: taskSubtype,
+    due_date: dueDate,
+    source_quote: sourceQuote,
+  }
+}
+
+async function parsePublishTasks(request: Request) {
+  const bodyText = await request.text()
+  if (!bodyText.trim()) {
+    return { tasks: null as PublishTaskInput[] | null }
+  }
+
+  let payload: unknown
+  try {
+    payload = JSON.parse(bodyText)
+  } catch {
+    return { error: "invalid json body" }
+  }
+
+  if (!isRecord(payload) || !Object.prototype.hasOwnProperty.call(payload, "tasks")) {
+    return { tasks: null as PublishTaskInput[] | null }
+  }
+
+  if (!Array.isArray(payload.tasks)) {
+    return { error: "tasks must be an array" }
+  }
+
+  const tasks: PublishTaskInput[] = []
+  for (let index = 0; index < payload.tasks.length; index += 1) {
+    const normalized = normalizePublishTask(payload.tasks[index], index)
+    if ("error" in normalized) {
+      return { error: normalized.error }
+    }
+    if (normalized.ticked && !normalized.text.trim()) {
+      return { error: `task ${index + 1} text is required when ticked` }
+    }
+    tasks.push(normalized)
+  }
+
+  return { tasks }
+}
+
 export async function POST(request: Request, { params }: RouteContext) {
   const session = await auth()
   const actor = await resolveReviewActor(session)
@@ -47,6 +158,12 @@ export async function POST(request: Request, { params }: RouteContext) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 })
   }
 
+  const taskParseResult = await parsePublishTasks(request)
+  if ("error" in taskParseResult) {
+    return NextResponse.json({ error: taskParseResult.error }, { status: 400 })
+  }
+  const submittedTasks = taskParseResult.tasks
+
   const fileNote = await db.file_note.findUnique({
     where: { id },
     select: {
@@ -59,6 +176,7 @@ export async function POST(request: Request, { params }: RouteContext) {
       transcript_id: true,
       published_at: true,
       published_by: true,
+      task_publish_decisions: true,
     },
   })
 
@@ -75,6 +193,11 @@ export async function POST(request: Request, { params }: RouteContext) {
     return NextResponse.json({ error: "file note content is required before publishing" }, { status: 400 })
   }
 
+  const acceptedTasks = submittedTasks?.filter((task) => task.ticked && task.text.trim()) ?? []
+  if (acceptedTasks.length > 0 && !fileNote.party_id) {
+    return NextResponse.json({ error: "file note must be linked to a client before tasks can be published" }, { status: 400 })
+  }
+
   const publishedAt = new Date()
   const beforeSnapshot = {
     file_note_id: fileNote.id,
@@ -84,9 +207,77 @@ export async function POST(request: Request, { params }: RouteContext) {
     transcript_id: fileNote.transcript_id,
     published_at: fileNote.published_at?.toISOString() ?? null,
     published_by: fileNote.published_by,
+    task_publish_decisions: fileNote.task_publish_decisions,
   }
 
   const updated = await db.$transaction(async (tx) => {
+    const createdTasks: Array<{
+      id: string
+      source_task_id: string
+      title: string
+      actor_side: "us" | "client"
+      monday_sync_state: string | null
+    }> = []
+
+    for (const task of acceptedTasks) {
+      const dueDate = dueDateToDate(task.due_date)
+      const created = await tx.task.create({
+        data: {
+          clientId: fileNote.party_id as string,
+          title: task.text.trim(),
+          description: task.source_quote ? `Source quote: ${task.source_quote}` : null,
+          type: task.task_type ?? "Adhoc",
+          subtype: task.task_subtype,
+          status: "NOT_STARTED",
+          actor_side: task.owner_side,
+          dueDateStart: dueDate,
+          dueDateEnd: null,
+          source_file_note_id: fileNote.id,
+          monday_sync_state: task.owner_side === "us" ? "pending" : null,
+        },
+      })
+
+      createdTasks.push({
+        id: created.id,
+        source_task_id: task.id,
+        title: created.title,
+        actor_side: task.owner_side,
+        monday_sync_state: created.monday_sync_state,
+      })
+
+      await writeTimelineEntry(
+        {
+          party_id: created.clientId,
+          kind: "task",
+          title: `Task created: ${created.title}`,
+          body: created.description,
+          actor_user_id: actor.id,
+          related_entity_type: "Task",
+          related_entity_id: created.id,
+          occurred_at: created.createdAt,
+          metadata: {
+            status: created.status,
+            type: created.type,
+            subtype: created.subtype,
+            actor_side: task.owner_side,
+            monday_sync_state: created.monday_sync_state,
+            due_date_start: created.dueDateStart?.toISOString() ?? null,
+            source_file_note_id: fileNote.id,
+            source_quote: task.source_quote,
+          },
+        },
+        { tx },
+      )
+    }
+
+    const createdTaskBySourceId = new Map(createdTasks.map((task) => [task.source_task_id, task.id]))
+    const taskPublishDecisions = submittedTasks
+      ? submittedTasks.map((task) => ({
+          ...task,
+          created_task_id: createdTaskBySourceId.get(task.id) ?? null,
+        }))
+      : null
+
     const nextFileNote = await tx.file_note.update({
       where: { id: fileNote.id },
       data: {
@@ -94,6 +285,7 @@ export async function POST(request: Request, { params }: RouteContext) {
         review_state: "published",
         published_at: publishedAt,
         published_by: actor.id,
+        task_publish_decisions: taskPublishDecisions ? toJsonCompatible(taskPublishDecisions) : undefined,
         updated_at: publishedAt,
       },
       select: {
@@ -103,6 +295,7 @@ export async function POST(request: Request, { params }: RouteContext) {
         published_at: true,
         published_by: true,
         transcript_id: true,
+        task_publish_decisions: true,
       },
     })
 
@@ -135,24 +328,43 @@ export async function POST(request: Request, { params }: RouteContext) {
       })
     }
 
-    return nextFileNote
+    return {
+      fileNote: nextFileNote,
+      createdTasks,
+      taskPublishDecisions,
+    }
   })
 
   const afterSnapshot = {
-    file_note_id: updated.id,
-    review_state: updated.review_state,
-    content_published: updated.text,
+    file_note_id: updated.fileNote.id,
+    review_state: updated.fileNote.review_state,
+    content_published: updated.fileNote.text,
     ai_draft_content: fileNote.ai_draft_content,
-    transcript_id: updated.transcript_id,
-    published_at: updated.published_at?.toISOString() ?? null,
-    published_by: updated.published_by,
+    transcript_id: updated.fileNote.transcript_id,
+    published_at: updated.fileNote.published_at?.toISOString() ?? null,
+    published_by: updated.fileNote.published_by,
+    task_publish_decisions: updated.fileNote.task_publish_decisions,
+    created_tasks: updated.createdTasks,
   }
+  const taskCounts = submittedTasks
+    ? {
+        tasks_extracted: submittedTasks.length,
+        tasks_accepted: acceptedTasks.length,
+        tasks_us: acceptedTasks.filter((task) => task.owner_side === "us").length,
+        tasks_client: acceptedTasks.filter((task) => task.owner_side === "client").length,
+      }
+    : {
+        tasks_extracted: 0,
+        tasks_accepted: 0,
+        tasks_us: 0,
+        tasks_client: 0,
+      }
 
   await writeAuditEvent({
     userId: actor.id,
     action: "UPDATE",
     entityType: "file_note",
-    entityId: updated.id,
+    entityId: updated.fileNote.id,
     channel: "staff_ui",
     actor_ip: clientIp(request.headers),
     actor_user_agent: request.headers.get("user-agent"),
@@ -161,20 +373,21 @@ export async function POST(request: Request, { params }: RouteContext) {
     afterState: afterSnapshot,
     metadata: {
       event: "file_note.published",
-      file_note_id: updated.id,
-      transcript_id: updated.transcript_id,
+      file_note_id: updated.fileNote.id,
+      transcript_id: updated.fileNote.transcript_id,
       published_by: actor.id,
-      content_published: updated.text,
+      content_published: updated.fileNote.text,
       ai_draft_content: fileNote.ai_draft_content,
       had_adviser_edits: isMeaningfulFileNoteText(fileNote.text),
+      ...taskCounts,
     },
   })
 
   return NextResponse.json({
-    id: updated.id,
-    review_state: updated.review_state,
-    published_at: updated.published_at?.toISOString() ?? null,
-    published_by: updated.published_by,
+    id: updated.fileNote.id,
+    review_state: updated.fileNote.review_state,
+    published_at: updated.fileNote.published_at?.toISOString() ?? null,
+    published_by: updated.fileNote.published_by,
+    created_task_count: updated.createdTasks.length,
   })
 }
-

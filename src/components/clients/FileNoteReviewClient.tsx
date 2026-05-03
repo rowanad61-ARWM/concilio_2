@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import {
@@ -44,10 +44,45 @@ type FileNoteReviewClientProps = {
   initialTranscriptText: string
   initialDraftContent: string
   aiDraftContent: string | null
+  extractedTasks: unknown
+  taskExtractionAt: string | null
+  taskExtractionModel: string | null
+  taskExtractionPromptVersion: string | null
+  taskPublishDecisions: unknown
+  publishedTasks: PublishedTaskSummary[]
+  taskTypeOptions: TaskTypeOptionRow[]
   attendeeSuggestions: AttendeeSuggestion[]
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error"
+
+type TaskOwnerSide = "us" | "client"
+
+type TaskTypeOptionRow = {
+  type: string
+  subtype: string | null
+}
+
+type ReviewTaskRow = {
+  id: string
+  ticked: boolean
+  text: string
+  owner_side: TaskOwnerSide
+  task_type: string | null
+  task_subtype: string | null
+  due_date: string | null
+  source_quote: string | null
+}
+
+type PublishedTaskSummary = {
+  id: string
+  title: string
+  type: string
+  subtype: string | null
+  actorSide: TaskOwnerSide
+  dueDate: string | null
+  mondaySyncState: string | null
+}
 
 const inputClassName =
   "w-full rounded-[8px] border-[0.5px] border-[#dbe3e8] bg-white px-3 py-2 text-[13px] text-[#113238] outline-none focus:border-[#113238] disabled:bg-[#f3f4f6] disabled:text-[#9ca3af]"
@@ -91,6 +126,81 @@ function uniqueSpeakerIds(segments: SpeakerSegment[], speakerNameMap: Record<str
   Object.keys(speakerNameMap).forEach((key) => ids.add(key))
 
   return Array.from(ids).sort((left, right) => Number(left) - Number(right))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function nullableString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+function browserId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID()
+  }
+
+  return `task-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function normalizeOwnerSide(value: unknown): TaskOwnerSide {
+  return value === "client" ? "client" : "us"
+}
+
+function parseExtractedTasks(value: unknown): ReviewTaskRow[] | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((task, index) => {
+      if (!isRecord(task)) {
+        return null
+      }
+
+      const text = nullableString(task.text)
+      if (!text) {
+        return null
+      }
+
+      return {
+        id: nullableString(task.id) ?? `extracted-${index}`,
+        ticked: true,
+        text,
+        owner_side: normalizeOwnerSide(task.owner_guess),
+        task_type: nullableString(task.task_type_guess),
+        task_subtype: nullableString(task.task_subtype_guess),
+        due_date: nullableString(task.due_date_guess),
+        source_quote: nullableString(task.source_quote),
+      }
+    })
+    .filter((task): task is ReviewTaskRow => Boolean(task))
+}
+
+function formatDateOnly(value: string | null) {
+  if (!value) {
+    return null
+  }
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.valueOf())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(parsed)
+}
+
+function truncateText(value: string, maxLength = 130) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}...` : value
 }
 
 function statusText(state: SaveState) {
@@ -143,6 +253,13 @@ export default function FileNoteReviewClient({
   initialTranscriptText,
   initialDraftContent,
   aiDraftContent,
+  extractedTasks,
+  taskExtractionAt,
+  taskExtractionModel,
+  taskExtractionPromptVersion,
+  taskPublishDecisions,
+  publishedTasks,
+  taskTypeOptions,
   attendeeSuggestions,
 }: FileNoteReviewClientProps) {
   const router = useRouter()
@@ -159,9 +276,51 @@ export default function FileNoteReviewClient({
   const [isRegenerating, setIsRegenerating] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
   const [jobMessage, setJobMessage] = useState<string | null>(null)
+  const extractedTasksKey = JSON.stringify(extractedTasks ?? null)
+  const initialTaskRows = useMemo(() => parseExtractedTasks(extractedTasks), [extractedTasksKey])
+  const [taskRows, setTaskRows] = useState<ReviewTaskRow[] | null>(initialTaskRows)
 
   const speakerIds = useMemo(() => uniqueSpeakerIds(speakerSegments, speakerNameMap), [speakerNameMap, speakerSegments])
   const attendeeListId = `attendee-suggestions-${fileNoteId}`
+  const taskTypes = useMemo(() => Array.from(new Set(taskTypeOptions.map((option) => option.type))).sort(), [taskTypeOptions])
+  const subtypesByType = useMemo(() => {
+    const map = new Map<string, string[]>()
+    taskTypeOptions.forEach((option) => {
+      if (!option.subtype) {
+        return
+      }
+
+      const current = map.get(option.type) ?? []
+      current.push(option.subtype)
+      map.set(option.type, current)
+    })
+
+    return map
+  }, [taskTypeOptions])
+  const acceptedTaskCount = taskRows?.filter((task) => task.ticked && task.text.trim()).length ?? 0
+  const taskDecisionCount = Array.isArray(taskPublishDecisions) ? taskPublishDecisions.length : null
+  const taskExtractionDescription = taskExtractionAt
+    ? `Extracted ${formatDateTime(taskExtractionAt)}${taskExtractionModel ? ` by ${taskExtractionModel}` : ""}${
+        taskExtractionPromptVersion ? ` (${taskExtractionPromptVersion})` : ""
+      }.`
+    : "Review AI-suggested follow-up tasks before publishing."
+
+  useEffect(() => {
+    if (isPublished) {
+      return
+    }
+
+    setTaskRows(initialTaskRows)
+  }, [fileNoteId, initialTaskRows, isPublished])
+
+  useEffect(() => {
+    if (isPublished || extractedTasks !== null) {
+      return
+    }
+
+    const timer = window.setInterval(() => router.refresh(), 10_000)
+    return () => window.clearInterval(timer)
+  }, [extractedTasks, isPublished, router])
 
   function updateSpeakerName(speakerId: string, value: string) {
     setSpeakerNameMap((current) => ({
@@ -181,6 +340,46 @@ export default function FileNoteReviewClient({
       throw new Error(payload.error ?? "Request failed")
     }
     return payload
+  }
+
+  function updateTaskRow(id: string, patch: Partial<ReviewTaskRow>) {
+    setTaskRows((current) => {
+      if (!current) {
+        return current
+      }
+
+      return current.map((task) => {
+        if (task.id !== id) {
+          return task
+        }
+
+        const next = { ...task, ...patch }
+        if (Object.prototype.hasOwnProperty.call(patch, "task_type")) {
+          const allowedSubtypes = next.task_type ? subtypesByType.get(next.task_type) ?? [] : []
+          if (next.task_subtype && !allowedSubtypes.includes(next.task_subtype)) {
+            next.task_subtype = null
+          }
+        }
+
+        return next
+      })
+    })
+  }
+
+  function addTaskRow() {
+    setTaskRows((current) => [
+      ...(current ?? []),
+      {
+        id: browserId(),
+        ticked: true,
+        text: "",
+        owner_side: "us",
+        task_type: null,
+        task_subtype: null,
+        due_date: null,
+        source_quote: null,
+      },
+    ])
   }
 
   async function saveSpeakers() {
@@ -268,6 +467,10 @@ export default function FileNoteReviewClient({
     try {
       const response = await fetch(`/api/file-notes/${encodeURIComponent(fileNoteId)}/publish`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(taskRows ? { tasks: taskRows } : {}),
+        }),
       })
       const payload = (await response.json().catch(() => ({}))) as { error?: string }
       if (!response.ok) {
@@ -437,6 +640,177 @@ export default function FileNoteReviewClient({
         />
       </Section>
 
+      <Section
+        title="Tasks"
+        description={taskExtractionDescription}
+        action={
+          !isPublished && taskRows !== null ? (
+            <button
+              type="button"
+              onClick={addTaskRow}
+              className="rounded-[7px] border-[0.5px] border-[#dbe3e8] bg-white px-3 py-2 text-[12px] font-medium text-[#113238] hover:bg-[#f7fafb]"
+            >
+              + Add task
+            </button>
+          ) : null
+        }
+      >
+        {isPublished ? (
+          <div className="space-y-3">
+            <p className="text-[13px] text-[#6b7280]">
+              {publishedTasks.length > 0
+                ? `${publishedTasks.length} task${publishedTasks.length === 1 ? "" : "s"} published from this note.`
+                : taskDecisionCount
+                  ? `${taskDecisionCount} task decision${taskDecisionCount === 1 ? "" : "s"} captured; no task rows were created.`
+                  : "No tasks were published from this note."}
+            </p>
+            {publishedTasks.length > 0 ? (
+              <div className="space-y-2">
+                {publishedTasks.map((task) => (
+                  <div key={task.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#fbfcfd] px-4 py-3">
+                    <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <p className="text-[13px] font-medium text-[#113238]">{task.title}</p>
+                        <p className="mt-1 text-[12px] text-[#6b7280]">
+                          {task.actorSide === "client" ? "Client" : "Us"} - {task.type}
+                          {task.subtype ? ` / ${task.subtype}` : ""}
+                          {task.dueDate ? ` - due ${formatDateOnly(task.dueDate)}` : ""}
+                        </p>
+                      </div>
+                      {task.mondaySyncState ? (
+                        <span className="rounded-full border-[0.5px] border-[#dbe3e8] bg-white px-2 py-1 text-[11px] text-[#6b7280]">
+                          Monday: {task.mondaySyncState}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : taskRows === null ? (
+          <div className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#fbfcfd] px-4 py-3">
+            <p className="text-[13px] text-[#6b7280]">Task extraction not yet complete.</p>
+            <button
+              type="button"
+              onClick={() => router.refresh()}
+              className="mt-3 rounded-[7px] border-[0.5px] border-[#dbe3e8] bg-white px-3 py-2 text-[12px] font-medium text-[#113238] hover:bg-[#f7fafb]"
+            >
+              Refresh
+            </button>
+          </div>
+        ) : taskRows.length === 0 ? (
+          <div className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#fbfcfd] px-4 py-3">
+            <p className="text-[13px] text-[#6b7280]">No follow-up tasks detected in this conversation.</p>
+            <button
+              type="button"
+              onClick={addTaskRow}
+              className="mt-3 rounded-[7px] border-[0.5px] border-[#dbe3e8] bg-white px-3 py-2 text-[12px] font-medium text-[#113238] hover:bg-[#f7fafb]"
+            >
+              + Add task
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-[12px] text-[#6b7280]">
+              {acceptedTaskCount} task{acceptedTaskCount === 1 ? "" : "s"} currently ticked for publish.
+            </p>
+            {taskRows.map((task) => {
+              const subtypeOptions = task.task_type ? subtypesByType.get(task.task_type) ?? [] : []
+              return (
+                <div key={task.id} className="rounded-[10px] border-[0.5px] border-[#e5e7eb] bg-[#fbfcfd] px-4 py-3">
+                  <div className="grid gap-3 lg:grid-cols-[auto_1fr]">
+                    <label className="flex items-center gap-2 text-[12px] font-medium text-[#113238]">
+                      <input
+                        type="checkbox"
+                        checked={task.ticked}
+                        onChange={(event) => updateTaskRow(task.id, { ticked: event.target.checked })}
+                        className="h-4 w-4 rounded border-[#dbe3e8]"
+                      />
+                      Include
+                    </label>
+                    <div className="space-y-3">
+                      <label className="space-y-1">
+                        <span className="text-[11px] uppercase tracking-[0.5px] text-[#9ca3af]">Task</span>
+                        <input
+                          value={task.text}
+                          onChange={(event) => updateTaskRow(task.id, { text: event.target.value })}
+                          className={inputClassName}
+                        />
+                      </label>
+                      <div className="grid gap-3 md:grid-cols-4">
+                        <div className="space-y-1">
+                          <span className="text-[11px] uppercase tracking-[0.5px] text-[#9ca3af]">Owner</span>
+                          <div className="grid grid-cols-2 overflow-hidden rounded-[8px] border-[0.5px] border-[#dbe3e8] bg-white">
+                            {(["us", "client"] as TaskOwnerSide[]).map((side) => (
+                              <button
+                                key={side}
+                                type="button"
+                                onClick={() => updateTaskRow(task.id, { owner_side: side })}
+                                className={`px-3 py-2 text-[12px] font-medium ${
+                                  task.owner_side === side ? "bg-[#113238] text-white" : "text-[#6b7280] hover:bg-[#f7fafb]"
+                                }`}
+                              >
+                                {side === "us" ? "Us" : "Client"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <label className="space-y-1">
+                          <span className="text-[11px] uppercase tracking-[0.5px] text-[#9ca3af]">Type</span>
+                          <select
+                            value={task.task_type ?? ""}
+                            onChange={(event) => updateTaskRow(task.id, { task_type: event.target.value || null })}
+                            className={inputClassName}
+                          >
+                            <option value="">No type</option>
+                            {taskTypes.map((type) => (
+                              <option key={type} value={type}>
+                                {type}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="space-y-1">
+                          <span className="text-[11px] uppercase tracking-[0.5px] text-[#9ca3af]">Subtype</span>
+                          <select
+                            value={task.task_subtype ?? ""}
+                            onChange={(event) => updateTaskRow(task.id, { task_subtype: event.target.value || null })}
+                            disabled={!task.task_type || subtypeOptions.length === 0}
+                            className={inputClassName}
+                          >
+                            <option value="">No subtype</option>
+                            {subtypeOptions.map((subtype) => (
+                              <option key={subtype} value={subtype}>
+                                {subtype}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="space-y-1">
+                          <span className="text-[11px] uppercase tracking-[0.5px] text-[#9ca3af]">Due date</span>
+                          <input
+                            type="date"
+                            value={task.due_date ?? ""}
+                            onChange={(event) => updateTaskRow(task.id, { due_date: event.target.value || null })}
+                            className={inputClassName}
+                          />
+                        </label>
+                      </div>
+                      {task.source_quote ? (
+                        <p className="text-[12px] italic leading-[1.5] text-[#6b7280]">
+                          Source: "{truncateText(task.source_quote, 220)}"
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Section>
+
       <div className="sticky bottom-0 flex justify-end gap-2 border-t-[0.5px] border-[#dbe3e8] bg-[#F7F9FB]/95 px-1 py-3">
         <button
           type="button"
@@ -479,6 +853,9 @@ export default function FileNoteReviewClient({
             <AlertDialogTitle>Publish file note?</AlertDialogTitle>
             <AlertDialogDescription>
               Publish this file note? It will appear on the timeline as the official record of this meeting. The original AI draft is preserved for audit.
+              {taskRows === null
+                ? " Task extraction is not complete yet, so no tasks will be created from this publish."
+                : ` ${acceptedTaskCount} task${acceptedTaskCount === 1 ? "" : "s"} will be created.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
