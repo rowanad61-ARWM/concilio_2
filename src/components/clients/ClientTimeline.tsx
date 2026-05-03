@@ -254,6 +254,27 @@ function metadataRows(metadata: Record<string, unknown> | null) {
     })
 }
 
+function fileNoteReviewState(entry: TimelineEntry) {
+  if (entry.kind !== "file_note") {
+    return null
+  }
+
+  const reviewState = entry.metadata?.review_state
+  return typeof reviewState === "string" ? reviewState : null
+}
+
+function fileNoteReviewHref(entry: TimelineEntry) {
+  if (entry.kind !== "file_note") {
+    return null
+  }
+
+  if (entry.related_entity_type !== "file_note" || !entry.related_entity_id) {
+    return null
+  }
+
+  return `/clients/${encodeURIComponent(entry.party_id)}/file-notes/${encodeURIComponent(entry.related_entity_id)}/review`
+}
+
 function groupEntriesByMonth(entries: TimelineEntry[]) {
   return entries.reduce<{ label: string; entries: TimelineEntry[] }[]>((groups, entry) => {
     const label = monthLabel(entry.occurred_at)
@@ -736,6 +757,8 @@ export default function ClientTimeline({ party_id, refreshKey = 0 }: { party_id:
                   {group.entries.map((entry) => {
                     const isExpanded = expandedEntryId === entry.id
                     const detail = detailsById[entry.id] ?? null
+                    const isDraftFileNote = fileNoteReviewState(entry) === "draft"
+                    const reviewHref = fileNoteReviewHref(entry)
 
                     return (
                       <div
@@ -744,7 +767,14 @@ export default function ClientTimeline({ party_id, refreshKey = 0 }: { party_id:
                       >
                         <button
                           type="button"
-                          onClick={() => handleToggleEntry(entry.id)}
+                          onClick={() => {
+                            if (isDraftFileNote && reviewHref) {
+                              window.location.assign(reviewHref)
+                              return
+                            }
+
+                            handleToggleEntry(entry.id)
+                          }}
                           className="w-full text-left"
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -758,6 +788,11 @@ export default function ClientTimeline({ party_id, refreshKey = 0 }: { party_id:
                               </div>
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
+                              {isDraftFileNote ? (
+                                <span className="inline-flex rounded-[999px] border-[0.5px] border-[#F59E0B] bg-[#FFFBEB] px-[8px] py-[2px] text-[10px] font-medium text-[#92400E]">
+                                  Draft - review needed
+                                </span>
+                              ) : null}
                               {entry.source !== "native" ? (
                                 <span className="inline-flex rounded-[999px] bg-[#F3F4F6] px-[8px] py-[2px] text-[10px] uppercase text-[#6B7280]">
                                   {entry.source}

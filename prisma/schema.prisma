@@ -131,18 +131,18 @@ model client_classification {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model centrelink_detail {
-  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  person_id                String   @unique(map: "centrelink_detail_person_unique") @db.Uuid
-  is_eligible              Boolean?
-  benefit_type             String?
-  crn                      String?
-  has_concession_card      Boolean  @default(false)
-  concession_card_type     String?
-  has_gifted_assets        Boolean  @default(false)
-  notes                    String?
-  created_at               DateTime @default(now()) @db.Timestamptz(6)
-  updated_at               DateTime @default(now()) @db.Timestamptz(6)
-  person                   person   @relation(fields: [person_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  person_id            String   @unique(map: "centrelink_detail_person_unique") @db.Uuid
+  is_eligible          Boolean?
+  benefit_type         String?
+  crn                  String?
+  has_concession_card  Boolean  @default(false)
+  concession_card_type String?
+  has_gifted_assets    Boolean  @default(false)
+  notes                String?
+  created_at           DateTime @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime @default(now()) @db.Timestamptz(6)
+  person               person   @relation(fields: [person_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([person_id], map: "idx_centrelink_detail_person_id")
 }
@@ -254,22 +254,22 @@ model contact_method {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model document {
-  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  owner_party_id    String?            @db.Uuid
-  household_id      String?            @db.Uuid
-  engagement_id     String?            @db.Uuid
-  document_type     String
-  category          String?
-  title             String
-  status            String?            @default("draft")
-  sharepoint_url    String?
-  latest_version_id String?            @db.Uuid
-  created_at        DateTime           @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime           @default(now()) @db.Timestamptz(6)
-  engagement        engagement?        @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  household_group   household_group?   @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  party             party?             @relation(fields: [owner_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  document_version  document_version[]
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_party_id      String?               @db.Uuid
+  household_id        String?               @db.Uuid
+  engagement_id       String?               @db.Uuid
+  document_type       String
+  category            String?
+  title               String
+  status              String?               @default("draft")
+  sharepoint_url      String?
+  latest_version_id   String?               @db.Uuid
+  created_at          DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime              @default(now()) @db.Timestamptz(6)
+  engagement          engagement?           @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  household_group     household_group?      @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party               party?                @relation(fields: [owner_party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  document_version    document_version[]
   timeline_attachment timeline_attachment[]
 
   @@index([engagement_id], map: "idx_doc_engagement")
@@ -525,10 +525,13 @@ model file_note {
   generation_at             DateTime?           @db.Timestamptz(6)
   review_state              String              @default("published")
   ai_draft_content          String?
+  published_at              DateTime?           @db.Timestamptz(6)
+  published_by              String?             @db.Uuid
   author_user_id            String              @db.Uuid
   created_at                DateTime            @default(now()) @db.Timestamptz(6)
   updated_at                DateTime            @default(now()) @db.Timestamptz(6)
   user_account              user_account        @relation(fields: [author_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  published_by_user         user_account?       @relation("file_note_published_by_user", fields: [published_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
   engagement                engagement?         @relation(fields: [engagement_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   household_group           household_group?    @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   party                     party?              @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -538,6 +541,7 @@ model file_note {
 
   @@index([household_id], map: "idx_fn_household")
   @@index([party_id], map: "idx_fn_party")
+  @@index([published_by], map: "idx_file_note_published_by")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -607,23 +611,23 @@ model household_group {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model household_member {
-  id                         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  household_id               String             @db.Uuid
-  party_id                   String             @db.Uuid
-  role_in_household          String             @default("member")
-  start_date                 DateTime           @default(dbgenerated("CURRENT_DATE")) @db.Date
-  end_date                   DateTime?          @db.Date
-  visibility_flags           Json?              @default("{}")
-  created_at                 DateTime           @default(now()) @db.Timestamptz(6)
-  is_financial_dependant     Boolean            @default(false)
-  dependant_until_age        Int?
-  relation                   String?
-  relation_to_member_id      String?            @db.Uuid
-  dependant_notes            String?
-  household_group            household_group    @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  party                      party              @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  relation_to_member         household_member?  @relation("household_member_relation_to_member", fields: [relation_to_member_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  related_dependants         household_member[] @relation("household_member_relation_to_member")
+  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  household_id           String             @db.Uuid
+  party_id               String             @db.Uuid
+  role_in_household      String             @default("member")
+  start_date             DateTime           @default(dbgenerated("CURRENT_DATE")) @db.Date
+  end_date               DateTime?          @db.Date
+  visibility_flags       Json?              @default("{}")
+  created_at             DateTime           @default(now()) @db.Timestamptz(6)
+  is_financial_dependant Boolean            @default(false)
+  dependant_until_age    Int?
+  relation               String?
+  relation_to_member_id  String?            @db.Uuid
+  dependant_notes        String?
+  household_group        household_group    @relation(fields: [household_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  party                  party              @relation(fields: [party_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  relation_to_member     household_member?  @relation("household_member_relation_to_member", fields: [relation_to_member_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  related_dependants     household_member[] @relation("household_member_relation_to_member")
 
   @@unique([household_id, party_id], map: "idx_hm_active", where: raw("(end_date IS NULL)"))
 }
@@ -859,62 +863,62 @@ model processing_job {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model person {
-  id                       String    @id @db.Uuid
-  title                    String?
-  legal_given_name         String
-  legal_middle_names       String?
-  legal_family_name        String
-  initials                 String?
-  preferred_name           String?
-  previous_names           String?
-  maiden_name              String?
-  mothers_maiden_name      String?
-  date_of_birth            DateTime  @db.Date
-  gender                   String?
-  gender_pronouns          String?
-  place_of_birth           String?
-  country_of_birth         String?
-  mobile_phone             String?
-  email_primary            String?
-  email_alternate          String?
-  emergency_contact_name   String?
+  id                             String                      @id @db.Uuid
+  title                          String?
+  legal_given_name               String
+  legal_middle_names             String?
+  legal_family_name              String
+  initials                       String?
+  preferred_name                 String?
+  previous_names                 String?
+  maiden_name                    String?
+  mothers_maiden_name            String?
+  date_of_birth                  DateTime                    @db.Date
+  gender                         String?
+  gender_pronouns                String?
+  place_of_birth                 String?
+  country_of_birth               String?
+  mobile_phone                   String?
+  email_primary                  String?
+  email_alternate                String?
+  emergency_contact_name         String?
   emergency_contact_relationship String?
-  emergency_contact_phone  String?
-  emergency_contact_email  String?
-  emergency_contact_notes  String?
-  address_residential      Json?
-  address_postal           Json?
-  preferred_contact_method String?
-  preferred_contact_time   String?
-  communication_exclusions String?
-  citizenships             String[]
-  country_of_residence     String?   @default("AU")
-  resident_status          String?
-  country_of_tax_residency String?
-  tax_resident_status      String?
-  is_pep_risk              Boolean   @default(false)
-  pep_notes                String?
-  relationship_status      String?
-  relationship_status_date DateTime? @db.Date
-  portal_access_preference String?
-  accessibility_needs      String?
-  tax_file_number_enc      Bytes?
-  person_status_notes      String?
-  will_exists              Boolean?
-  will_is_current          Boolean?
-  will_date                DateTime? @db.Date
-  will_location            String?
-  estate_planning_notes    String?
-  funeral_plan_status      String?
-  created_at               DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at               DateTime  @default(now()) @db.Timestamptz(6)
-  centrelink_detail        centrelink_detail?
-  estate_beneficiary       estate_beneficiary[]
-  estate_executor          estate_executor[]
-  party                    party     @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  power_of_attorney        power_of_attorney[]
-  professional_relationship professional_relationship[]
-  super_pension_account    super_pension_account[]
+  emergency_contact_phone        String?
+  emergency_contact_email        String?
+  emergency_contact_notes        String?
+  address_residential            Json?
+  address_postal                 Json?
+  preferred_contact_method       String?
+  preferred_contact_time         String?
+  communication_exclusions       String?
+  citizenships                   String[]
+  country_of_residence           String?                     @default("AU")
+  resident_status                String?
+  country_of_tax_residency       String?
+  tax_resident_status            String?
+  is_pep_risk                    Boolean                     @default(false)
+  pep_notes                      String?
+  relationship_status            String?
+  relationship_status_date       DateTime?                   @db.Date
+  portal_access_preference       String?
+  accessibility_needs            String?
+  tax_file_number_enc            Bytes?
+  person_status_notes            String?
+  will_exists                    Boolean?
+  will_is_current                Boolean?
+  will_date                      DateTime?                   @db.Date
+  will_location                  String?
+  estate_planning_notes          String?
+  funeral_plan_status            String?
+  created_at                     DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at                     DateTime                    @default(now()) @db.Timestamptz(6)
+  centrelink_detail              centrelink_detail?
+  estate_beneficiary             estate_beneficiary[]
+  estate_executor                estate_executor[]
+  party                          party                       @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  power_of_attorney              power_of_attorney[]
+  professional_relationship      professional_relationship[]
+  super_pension_account          super_pension_account[]
 
   @@index([date_of_birth], map: "idx_person_dob")
   @@index([legal_family_name, legal_given_name], map: "idx_person_name")
@@ -1142,6 +1146,7 @@ model user_account {
   document_version      document_version[]
   engagement            engagement[]
   file_note             file_note[]
+  published_file_notes  file_note[]             @relation("file_note_published_by_user")
   household_group       household_group[]
   parked_facts_migrated parked_fact[]           @relation("parked_fact_migrated_by")
   parked_facts_parked   parked_fact[]           @relation("parked_fact_parked_by")
