@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.env*
+README.md
+*.md
+!src/**/*.md
+tmp-*
+imports/
+.vscode
+coverage
+test-results
+test-results/
