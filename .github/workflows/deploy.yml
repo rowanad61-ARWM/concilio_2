@@ -1,0 +1,87 @@
+name: Deploy Container Apps
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      ACR_NAME: ${{ secrets.ACR_NAME }}
+      RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
+      WEB_APP_NAME: ${{ secrets.WEB_APP_NAME }}
+      JOBS_PROCESS_NAME: ${{ secrets.JOBS_PROCESS_NAME }}
+      NUDGES_NAME: ${{ secrets.NUDGES_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute short SHA
+        run: echo "GIT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to ACR
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Build image in ACR
+        run: |
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "concilio:${GIT_SHA}" \
+            --image "concilio:latest" \
+            --build-arg "GIT_SHA=${GIT_SHA}" \
+            .
+
+      - name: Update web Container App
+        run: |
+          az containerapp update \
+            --name "$WEB_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "${ACR_NAME}.azurecr.io/concilio:${GIT_SHA}"
+
+      - name: Update cron jobs
+        run: |
+          az containerapp job update \
+            --name "$JOBS_PROCESS_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "${ACR_NAME}.azurecr.io/concilio:${GIT_SHA}"
+          az containerapp job update \
+            --name "$NUDGES_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "${ACR_NAME}.azurecr.io/concilio:${GIT_SHA}"
+
+      - name: Smoke healthz
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          deadline=$((SECONDS + 60))
+
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            body="$(curl --silent --show-error --fail "https://concilio.arwm.com.au/api/healthz" || true)"
+            status="$(printf '%s' "$body" | node -e "let s=''; process.stdin.on('data', d => s += d); process.stdin.on('end', () => { try { process.stdout.write(JSON.parse(s).status || '') } catch {} })")"
+            commit="$(printf '%s' "$body" | node -e "let s=''; process.stdin.on('data', d => s += d); process.stdin.on('end', () => { try { process.stdout.write(JSON.parse(s).commit || '') } catch {} })")"
+
+            if [ "$status" = "ok" ] && [ "$commit" = "$GIT_SHA" ]; then
+              echo "healthz ok for $GIT_SHA"
+              exit 0
+            fi
+
+            echo "waiting for healthz revision rollover: status=$status commit=$commit expected=$GIT_SHA"
+            sleep 5
+          done
+
+          echo "healthz did not report expected commit $GIT_SHA within 60s"
+          exit 1

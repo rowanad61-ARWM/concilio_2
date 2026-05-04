@@ -39,6 +39,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/scripts/run-cron.mjs ./scripts/run-cron.mjs
 COPY --from=builder /app/.env.production ./.env.production
 
 USER nextjs

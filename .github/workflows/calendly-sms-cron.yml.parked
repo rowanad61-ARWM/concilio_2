@@ -1,12 +1,11 @@
-name: Calendly SMS Reminders
+name: Calendly SMS Reminders (parked)
 
 on:
-  schedule:
-    - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:
   send-reminders:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Calendly SMS reminder cron endpoint
